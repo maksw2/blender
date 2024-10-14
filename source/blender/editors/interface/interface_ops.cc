@@ -2350,9 +2350,11 @@ static int drop_color_invoke(bContext *C, wmOperator *op, const wmEvent *event)
     BLI_assert(color_len <= 4);
 
     /* keep alpha channel as-is */
+    /* WIP
     if (color_len == 4) {
       color[3] = RNA_property_float_get_index(&but->rnapoin, but->rnaprop, 3);
     }
+    */
 
     if (RNA_property_subtype(but->rnaprop) == PROP_COLOR_GAMMA) {
       if (!gamma) {
@@ -2398,7 +2400,7 @@ static void UI_OT_drop_color(wmOperatorType *ot)
   ot->flag = OPTYPE_INTERNAL;
 
   RNA_def_float_color(
-      ot->srna, "color", 3, nullptr, 0.0, FLT_MAX, "Color", "Source color", 0.0, 1.0);
+      ot->srna, "color", 4, nullptr, 0.0, FLT_MAX, "Color", "Source color", 0.0, 1.0);
   RNA_def_boolean(
       ot->srna, "gamma", false, "Gamma Corrected", "The source color is gamma corrected");
 }

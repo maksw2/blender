@@ -3202,7 +3202,7 @@ uiLayout *uiItemsAlertBox(uiBlock *block, const int size, const eAlertIcon icon)
 
 /* UI Operators */
 struct uiDragColorHandle {
-  float color[3];
+  float color[4];
   bool gamma_corrected;
 };
 
