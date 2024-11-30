@@ -79,7 +79,7 @@ struct MTLMaterial {
 
   int illum_mode{-1};
   MTLTexMap texture_maps[int(MTLTexMapType::Count)];
-  /* Only used for Normal Map node: `map_Bump`. */
+  /* Only used for Normal Map node: `norm`. */
   float normal_strength{-1.0f};
 };
 

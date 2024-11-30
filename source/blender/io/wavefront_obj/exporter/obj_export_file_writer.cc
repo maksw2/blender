@@ -536,7 +536,7 @@ static const char *tex_map_type_to_string[] = {
     "map_refl",
     "map_Ke",
     "map_d",
-    "map_Bump",
+    "norm",
 };
 BLI_STATIC_ASSERT(ARRAY_SIZE(tex_map_type_to_string) == int(MTLTexMapType::Count),
                   "array size mismatch");
@@ -642,12 +642,6 @@ void MTLWriter::write_bsdf_properties(const MTLMaterial &mtl, bool write_pbr)
     }
     if (mtl.cc_roughness >= 0.0f) {
       fmt_handler_.write_mtl_float("Pcr", mtl.cc_roughness);
-    }
-    if (mtl.aniso >= 0.0f) {
-      fmt_handler_.write_mtl_float("aniso", mtl.aniso);
-    }
-    if (mtl.aniso_rot >= 0.0f) {
-      fmt_handler_.write_mtl_float("anisor", mtl.aniso_rot);
     }
     if (mtl.transmit_color.x > 0.0f || mtl.transmit_color.y > 0.0f || mtl.transmit_color.z > 0.0f)
     {

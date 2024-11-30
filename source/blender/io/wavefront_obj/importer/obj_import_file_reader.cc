@@ -706,8 +706,7 @@ static MTLTexMapType mtl_line_start_to_texture_type(const char *&p, const char *
   if (parse_keyword(p, end, "map_Ke")) {
     return MTLTexMapType::Emission;
   }
-  if (parse_keyword(p, end, "bump") || parse_keyword(p, end, "map_Bump") ||
-      parse_keyword(p, end, "map_bump"))
+  if (parse_keyword(p, end, "bump") || parse_keyword(p, end, "map_Bump") || parse_keyword(p, end, "map_bump") || parse_keyword(p, end, "map_norm") || parse_keyword(p, end, "norm"))
   {
     return MTLTexMapType::Normal;
   }
