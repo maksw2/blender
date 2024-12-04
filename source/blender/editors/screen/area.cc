@@ -15,7 +15,7 @@
 
 #include "BLI_blenlib.h"
 #include "BLI_linklist_stack.h"
-#include "BLI_rand.h"
+#include "BLI_rand.hh"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
 
@@ -498,6 +498,7 @@ void ED_region_do_layout(bContext *C, ARegion *region)
 
 void ED_region_do_draw(bContext *C, ARegion *region)
 {
+  using namespace blender;
   wmWindow *win = CTX_wm_window(C);
   ScrArea *area = CTX_wm_area(C);
   ARegionType *at = region->runtime->type;
@@ -546,7 +547,8 @@ void ED_region_do_draw(bContext *C, ARegion *region)
     GPUVertFormat *format = immVertexFormat();
     uint pos = GPU_vertformat_attr_add(format, "pos", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
     immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
-    immUniformColor4f(BLI_thread_frand(0), BLI_thread_frand(0), BLI_thread_frand(0), 0.1f);
+    RandomNumberGenerator rng = RandomNumberGenerator::from_random_seed();
+    immUniformColor4f(rng.get_float(), rng.get_float(), rng.get_float(), 0.1f);
     immRectf(pos,
              region->drawrct.xmin - region->winrct.xmin,
              region->drawrct.ymin - region->winrct.ymin,
@@ -2027,6 +2029,23 @@ static void area_init_type_fallback(ScrArea *area, eSpace_Type space_type)
   }
 }
 
+void ED_area_and_region_types_init(ScrArea *area)
+{
+  area->type = BKE_spacetype_from_id(area->spacetype);
+
+  if (area->type == nullptr) {
+    area_init_type_fallback(area, SPACE_VIEW3D);
+    BLI_assert(area->type != nullptr);
+  }
+
+  LISTBASE_FOREACH (ARegion *, region, &area->regionbase) {
+    region->runtime->type = BKE_regiontype_from_id(area->type, region->regiontype);
+    /* Invalid region types may be stored in files (e.g. for new files), but they should be handled
+     * on file read already, see #BKE_screen_area_blend_read_lib(). */
+    BLI_assert_msg(region->runtime->type != nullptr, "Region type not valid for this space type");
+  }
+}
+
 void ED_area_init(wmWindowManager *wm, wmWindow *win, ScrArea *area)
 {
   WorkSpace *workspace = WM_window_get_active_workspace(win);
@@ -2041,20 +2060,7 @@ void ED_area_init(wmWindowManager *wm, wmWindow *win, ScrArea *area)
   rcti window_rect;
   WM_window_rect_calc(win, &window_rect);
 
-  /* Set type-definitions. */
-  area->type = BKE_spacetype_from_id(area->spacetype);
-
-  if (area->type == nullptr) {
-    area_init_type_fallback(area, SPACE_VIEW3D);
-    BLI_assert(area->type != nullptr);
-  }
-
-  LISTBASE_FOREACH (ARegion *, region, &area->regionbase) {
-    region->runtime->type = BKE_regiontype_from_id(area->type, region->regiontype);
-    /* Invalid region types may be stored in files (e.g. for new files), but they should be handled
-     * on file read already, see #BKE_screen_area_blend_read_lib(). */
-    BLI_assert_msg(region->runtime->type != nullptr, "Region type not valid for this space type");
-  }
+  ED_area_and_region_types_init(area);
 
   /* area sizes */
   area_calc_totrct(area, &window_rect);

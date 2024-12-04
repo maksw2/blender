@@ -1505,11 +1505,6 @@ void DepsgraphRelationBuilder::build_constraints(ID *id,
 
           /* Add dependency on normal layers if necessary. */
           if (ct->tar->type == OB_MESH && scon->shrinkType != MOD_SHRINKWRAP_NEAREST_VERTEX) {
-            bool track = (scon->flag & CON_SHRINKWRAP_TRACK_NORMAL) != 0;
-            if (track || BKE_shrinkwrap_needs_normals(scon->shrinkType, scon->shrinkMode)) {
-              add_customdata_mask(ct->tar,
-                                  DEGCustomDataMeshMasks::MaskLoop(CD_MASK_CUSTOMLOOPNORMAL));
-            }
             if (scon->shrinkType == MOD_SHRINKWRAP_TARGET_PROJECT) {
               add_special_eval_flag(&ct->tar->id, DAG_EVAL_NEED_SHRINKWRAP_BOUNDARY);
             }
@@ -1707,7 +1702,7 @@ void DepsgraphRelationBuilder::build_animdata_action_targets(ID *id,
       switch (strip->type()) {
         case animrig::Strip::Type::Keyframe: {
           animrig::StripKeyframeData &strip_data = strip->data<animrig::StripKeyframeData>(action);
-          animrig::ChannelBag *channels = strip_data.channelbag_for_slot(*slot);
+          animrig::Channelbag *channels = strip_data.channelbag_for_slot(*slot);
           if (channels == nullptr) {
             /* Go to next strip. */
             break;

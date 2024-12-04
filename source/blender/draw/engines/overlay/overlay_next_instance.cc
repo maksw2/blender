@@ -120,6 +120,7 @@ void Instance::begin_sync()
   resources.begin_sync();
 
   background.begin_sync(resources, state);
+  image_prepass.begin_sync(resources, state);
   motion_paths.begin_sync(resources, state);
   origins.begin_sync(resources, state);
   outline.begin_sync(resources, state);
@@ -432,13 +433,14 @@ void Instance::draw_node(Manager &manager, View &view)
 
 void Instance::draw_v2d(Manager &manager, View &view)
 {
+  image_prepass.draw_on_render(resources.render_fb, manager, view);
   regular.mesh_uvs.draw_on_render(resources.render_fb, manager, view);
 
   GPU_framebuffer_bind(resources.overlay_output_fb);
   GPU_framebuffer_clear_color(resources.overlay_output_fb, float4(0.0));
 
   background.draw_output(resources.overlay_output_fb, manager, view);
-  grid.draw_color_only(resources.overlay_output_fb, manager, view);
+  grid.draw_color_only(resources.overlay_color_only_fb, manager, view);
   regular.mesh_uvs.draw(resources.overlay_output_fb, manager, view);
 }
 
@@ -564,7 +566,8 @@ void Instance::draw_v3d(Manager &manager, View &view)
 
     origins.draw_color_only(resources.overlay_color_only_fb, manager, view);
   }
-  {
+
+  if (state.is_depth_only_drawing == false) {
     /* Output pass. */
     GPU_framebuffer_bind(resources.overlay_output_fb);
     GPU_framebuffer_clear_color(resources.overlay_output_fb, clear_color);
@@ -686,8 +689,8 @@ bool Instance::object_is_in_front(const Object *object, const State &state)
 
 bool Instance::object_needs_prepass(const ObjectRef &ob_ref, bool in_paint_mode)
 {
-  if (selection_type_ != SelectionType::DISABLED) {
-    /* Selection always need a prepass.
+  if (selection_type_ != SelectionType::DISABLED || state.is_depth_only_drawing) {
+    /* Selection and depth picking always need a prepass.
      * Note that depth writing and depth test might be disable for certain selection mode. */
     return true;
   }

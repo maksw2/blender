@@ -43,7 +43,7 @@ void GPENCIL_render_init(GPENCIL_Data *vedata,
 
   invert_m4_m4(viewmat, viewinv);
 
-  DRWView *view = DRW_view_create(viewmat, winmat, nullptr, nullptr, nullptr);
+  DRWView *view = DRW_view_create(viewmat, winmat, nullptr, nullptr);
   DRW_view_default_set(view);
   DRW_view_set_active(view);
 
@@ -242,6 +242,8 @@ void GPENCIL_render_to_image(void *ved,
   const DRWContextState *draw_ctx = DRW_context_state_get();
   Depsgraph *depsgraph = draw_ctx->depsgraph;
 
+  DRW_manager_get()->begin_sync();
+
   GPENCIL_render_init(vedata, engine, render_layer, depsgraph, rect);
   GPENCIL_engine_init(vedata);
 
@@ -253,6 +255,8 @@ void GPENCIL_render_to_image(void *ved,
   GPENCIL_cache_finish(vedata);
 
   DRW_render_instance_buffer_finish();
+
+  DRW_manager_get()->end_sync();
 
   /* Render the gpencil object and merge the result to the underlying render. */
   GPENCIL_draw_scene(vedata);

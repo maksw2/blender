@@ -20,7 +20,6 @@ set(INC
 
   # For `*_info.hh` includes.
   ../compositor/realtime_compositor/shaders/infos
-  ../draw/engines/basic/shaders/infos
   ../draw/engines/eevee_next
   ../draw/engines/eevee_next/shaders/infos
   ../draw/engines/gpencil
@@ -279,6 +278,7 @@ set(VULKAN_SRC
   vulkan/vk_drawlist.hh
   vulkan/vk_fence.hh
   vulkan/vk_framebuffer.hh
+  vulkan/vk_ghost_api.hh
   vulkan/vk_image_view.hh
   vulkan/vk_immediate.hh
   vulkan/vk_index_buffer.hh
