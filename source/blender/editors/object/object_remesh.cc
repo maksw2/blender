@@ -14,6 +14,7 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
@@ -27,6 +28,7 @@
 #include "BKE_context.hh"
 #include "BKE_global.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_mirror.hh"
@@ -104,7 +106,7 @@ static bool object_remesh_poll(bContext *C)
   return ED_operator_object_active_editable_mesh(C);
 }
 
-static int voxel_remesh_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus voxel_remesh_exec(bContext *C, wmOperator *op)
 {
   const Scene &scene = *CTX_data_scene(C);
   Object *ob = CTX_data_active_object(C);
@@ -319,21 +321,16 @@ static void voxel_size_edit_draw(const bContext *C, ARegion * /*region*/, void *
   char str[VOXEL_SIZE_EDIT_MAX_STR_LEN];
   short strdrawlen = 0;
   Scene *scene = CTX_data_scene(C);
-  const UnitSettings *unit = &scene->unit;
-  BKE_unit_value_as_string(str,
-                           VOXEL_SIZE_EDIT_MAX_STR_LEN,
-                           double(cd->voxel_size * unit->scale_length),
-                           -3,
-                           B_UNIT_LENGTH,
-                           unit,
-                           true);
+  const UnitSettings &unit = scene->unit;
+
+  BKE_unit_value_as_string_scaled(str, sizeof(str), cd->voxel_size, -3, B_UNIT_LENGTH, unit, true);
   strdrawlen = BLI_strlen_utf8(str);
 
   immUnbindProgram();
 
   GPU_matrix_push();
   GPU_matrix_mul(cd->text_mat);
-  /* Resolution scale is already accounted for in 'text_mat'. */
+  /* (Constant viewport) scale is already accounted for in 'text_mat'. */
   BLF_size(fontid, 10.0f * fstyle_points);
   BLF_color3f(fontid, 1.0f, 1.0f, 1.0f);
   BLF_width_and_height(fontid, str, strdrawlen, &strwidth, &strheight);
@@ -369,7 +366,7 @@ static void voxel_size_edit_update_header(wmOperator *op, bContext *C)
   status.item_bool(IFACE_("Precision Mode"), cd->slow_mode, ICON_EVENT_SHIFT);
 }
 
-static int voxel_size_edit_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus voxel_size_edit_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   ARegion *region = CTX_wm_region(C);
   VoxelSizeEditCustomData *cd = static_cast<VoxelSizeEditCustomData *>(op->customdata);
@@ -435,13 +432,13 @@ static int voxel_size_edit_modal(bContext *C, wmOperator *op, const wmEvent *eve
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int voxel_size_edit_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus voxel_size_edit_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   ARegion *region = CTX_wm_region(C);
   Object *active_object = CTX_data_active_object(C);
   Mesh *mesh = (Mesh *)active_object->data;
 
-  VoxelSizeEditCustomData *cd = MEM_cnew<VoxelSizeEditCustomData>(
+  VoxelSizeEditCustomData *cd = MEM_callocN<VoxelSizeEditCustomData>(
       "Voxel Size Edit OP Custom Data");
 
   /* Initial operator Custom Data setup. */
@@ -591,7 +588,7 @@ static int voxel_size_edit_invoke(bContext *C, wmOperator *op, const wmEvent *ev
   /* Scale the text to constant viewport size. */
   float text_pos_word_space[3];
   mul_v3_m4v3(text_pos_word_space, active_object->object_to_world().ptr(), text_pos);
-  const float pixelsize = ED_view3d_pixel_size(rv3d, text_pos_word_space);
+  const float pixelsize = ED_view3d_pixel_size_no_ui_scale(rv3d, text_pos_word_space);
   scale_m4_fl(scale_mat, pixelsize * 0.5f);
   mul_m4_m4_post(cd->text_mat, scale_mat);
 
@@ -639,6 +636,13 @@ enum {
   QUADRIFLOW_REMESH_FACES,
 };
 
+enum eQuadreFlowStatus {
+  QUADRIFLOW_STATUS_SUCCESS = 1,
+  QUADRIFLOW_STATUS_FAIL = 0,
+  QUADRIFLOW_STATUS_CANCELED = -1,
+  QUADRIFLOW_STATUS_NONMANIFOLD = -2,
+};
+
 enum eSymmetryAxes {
   SYMMETRY_AXES_X = (1 << 0),
   SYMMETRY_AXES_Y = (1 << 1),
@@ -648,8 +652,7 @@ enum eSymmetryAxes {
 struct QuadriFlowJob {
   /* from wmJob */
   Object *owner;
-  bool *stop, *do_update;
-  float *progress;
+  wmJobWorkerStatus *worker_status;
 
   const wmOperator *op;
   Scene *scene;
@@ -665,7 +668,7 @@ struct QuadriFlowJob {
   bool preserve_attributes;
   bool smooth_normals;
 
-  int success;
+  eQuadreFlowStatus status;
   bool is_nonblocking_job;
 };
 
@@ -742,12 +745,15 @@ static int quadriflow_break_job(void *customdata)
   // return *(qj->stop);
 
   /* this is not nice yet, need to make the jobs list template better
-   * for identifying/acting upon various different jobs */
+   * for identifying/acting upon various different jobs canceled */
   /* but for now we'll reuse the render break... */
-  bool should_break = (G.is_break);
+  bool should_break = false;
 
-  if (should_break) {
-    qj->success = -1;
+  if (qj->is_nonblocking_job) {
+    bool should_break = (G.is_break);
+    if (should_break) {
+      qj->status = QUADRIFLOW_STATUS_CANCELED;
+    }
   }
 
   return should_break;
@@ -765,8 +771,8 @@ static void quadriflow_update_job(void *customdata, float progress, int *cancel)
     *cancel = 0;
   }
 
-  *(qj->do_update) = true;
-  *(qj->progress) = progress;
+  qj->worker_status->do_update = true;
+  qj->worker_status->progress = progress;
 }
 
 static Mesh *remesh_symmetry_bisect(Mesh *mesh, eSymmetryAxes symmetry_axes)
@@ -835,10 +841,8 @@ static void quadriflow_start_job(void *customdata, wmJobWorkerStatus *worker_sta
 {
   QuadriFlowJob *qj = static_cast<QuadriFlowJob *>(customdata);
 
-  qj->stop = &worker_status->stop;
-  qj->do_update = &worker_status->do_update;
-  qj->progress = &worker_status->progress;
-  qj->success = 1;
+  qj->worker_status = worker_status;
+  qj->status = QUADRIFLOW_STATUS_SUCCESS;
 
   if (qj->is_nonblocking_job) {
     G.is_break = false; /* XXX shared with render - replace with job 'stop' switch */
@@ -852,7 +856,7 @@ static void quadriflow_start_job(void *customdata, wmJobWorkerStatus *worker_sta
 
   /* Check if the mesh is manifold. Quadriflow requires manifold meshes */
   if (!mesh_is_manifold_consistent(mesh)) {
-    qj->success = -2;
+    qj->status = QUADRIFLOW_STATUS_NONMANIFOLD;
     return;
   }
 
@@ -881,9 +885,9 @@ static void quadriflow_start_job(void *customdata, wmJobWorkerStatus *worker_sta
   if (new_mesh == nullptr) {
     worker_status->do_update = true;
     worker_status->stop = false;
-    if (qj->success == 1) {
+    if (qj->status == QUADRIFLOW_STATUS_SUCCESS) {
       /* This is not a user cancellation event. */
-      qj->success = 0;
+      qj->status = QUADRIFLOW_STATUS_FAIL;
     }
     return;
   }
@@ -924,26 +928,28 @@ static void quadriflow_end_job(void *customdata)
     WM_set_locked_interface(static_cast<wmWindowManager *>(G_MAIN->wm.first), false);
   }
 
-  switch (qj->success) {
-    case 1:
+  ReportList *reports = qj->worker_status->reports;
+  switch (qj->status) {
+    case QUADRIFLOW_STATUS_SUCCESS:
       DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
-      WM_reportf(RPT_INFO, "QuadriFlow: Remeshing completed");
+      BKE_reportf(reports, RPT_INFO, "QuadriFlow: Remeshing completed");
       break;
-    case 0:
-      WM_reportf(RPT_ERROR, "QuadriFlow: Remeshing failed");
+    case QUADRIFLOW_STATUS_FAIL:
+      BKE_reportf(reports, RPT_ERROR, "QuadriFlow: Remeshing failed");
       break;
-    case -1:
-      WM_report(RPT_WARNING, "QuadriFlow: Remeshing canceled");
+    case QUADRIFLOW_STATUS_CANCELED:
+      BKE_report(reports, RPT_WARNING, "QuadriFlow: Remeshing canceled");
       break;
-    case -2:
-      WM_report(RPT_WARNING,
-                "QuadriFlow: The mesh needs to be manifold and have face normals that point in a "
-                "consistent direction");
+    case QUADRIFLOW_STATUS_NONMANIFOLD:
+      BKE_report(reports,
+                 RPT_WARNING,
+                 "QuadriFlow: The mesh needs to be manifold and have face normals that point in a "
+                 "consistent direction");
       break;
   }
 }
 
-static int quadriflow_remesh_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus quadriflow_remesh_exec(bContext *C, wmOperator *op)
 {
   QuadriFlowJob *job = (QuadriFlowJob *)MEM_mallocN(sizeof(QuadriFlowJob), "QuadriFlowJob");
 
@@ -983,11 +989,15 @@ static int quadriflow_remesh_exec(bContext *C, wmOperator *op)
     job->symmetry_axes = (eSymmetryAxes)0;
   }
 
-  if (op->flag == 0) {
+  eQuadreFlowStatus status = QUADRIFLOW_STATUS_SUCCESS;
+  if ((op->flag & OP_IS_INVOKE) == 0) {
     /* This is called directly from the exec operator, this operation is now blocking */
     job->is_nonblocking_job = false;
     wmJobWorkerStatus worker_status = {};
+    worker_status.reports = op->reports;
     quadriflow_start_job(job, &worker_status);
+
+    status = job->status;
     quadriflow_end_job(job);
     quadriflow_free_job(job);
   }
@@ -1010,7 +1020,12 @@ static int quadriflow_remesh_exec(bContext *C, wmOperator *op)
 
     WM_jobs_start(CTX_wm_manager(C), wm_job);
   }
-  return OPERATOR_FINISHED;
+
+  if (status == QUADRIFLOW_STATUS_SUCCESS) {
+    return OPERATOR_FINISHED;
+  }
+  /* Only ever runs with immediate execution. */
+  return OPERATOR_CANCELLED;
 }
 
 static bool quadriflow_check(bContext *C, wmOperator *op)
@@ -1097,7 +1112,7 @@ static const EnumPropertyItem mode_type_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int quadriflow_remesh_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus quadriflow_remesh_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   return WM_operator_props_popup_confirm_ex(
       C, op, event, IFACE_("QuadriFlow Remesh the Selected Mesh"), IFACE_("Remesh"));
@@ -1207,7 +1222,7 @@ void OBJECT_OT_quadriflow_remesh(wmOperatorType *ot)
       "This property is only used to cache the object area for later calculations",
       0.0f,
       FLT_MAX);
-  RNA_def_property_flag(prop, static_cast<PropertyFlag>(PROP_HIDDEN | PROP_SKIP_SAVE));
+  RNA_def_property_flag(prop, (PROP_HIDDEN | PROP_SKIP_SAVE));
 
   RNA_def_int(ot->srna,
               "seed",

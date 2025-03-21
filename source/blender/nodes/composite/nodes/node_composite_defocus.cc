@@ -6,8 +6,6 @@
  * \ingroup cmpnodes
  */
 
-#include <climits>
-
 #include "BLI_math_base.hh"
 #include "BLI_math_vector_types.hh"
 
@@ -22,6 +20,7 @@
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
+#include "COM_algorithm_gamma_correct.hh"
 #include "COM_algorithm_morphological_blur.hh"
 #include "COM_bokeh_kernel.hh"
 #include "COM_node_operation.hh"
@@ -48,7 +47,7 @@ static void cmp_node_defocus_declare(NodeDeclarationBuilder &b)
 static void node_composit_init_defocus(bNodeTree * /*ntree*/, bNode *node)
 {
   /* defocus node */
-  NodeDefocus *nbd = MEM_cnew<NodeDefocus>(__func__);
+  NodeDefocus *nbd = MEM_callocN<NodeDefocus>(__func__);
   nbd->bktype = 0;
   nbd->rotation = 0.0f;
   nbd->preview = 1;
@@ -69,30 +68,31 @@ static void node_composit_buts_defocus(uiLayout *layout, bContext *C, PointerRNA
   col = uiLayoutColumn(layout, false);
   uiItemL(col, IFACE_("Bokeh Type:"), ICON_NONE);
   uiItemR(col, ptr, "bokeh", UI_ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
-  uiItemR(col, ptr, "angle", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "angle", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
-  uiItemR(layout, ptr, "use_gamma_correction", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(
+      layout, ptr, "use_gamma_correction", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumn(layout, false);
   uiLayoutSetActive(col, RNA_boolean_get(ptr, "use_zbuffer") == true);
-  uiItemR(col, ptr, "f_stop", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "f_stop", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
-  uiItemR(layout, ptr, "blur_max", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "threshold", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "blur_max", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(layout, ptr, "threshold", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "use_preview", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "use_preview", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   uiTemplateID(layout, C, ptr, "scene", nullptr, nullptr, nullptr);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "use_zbuffer", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "use_zbuffer", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   sub = uiLayoutColumn(col, false);
   uiLayoutSetActive(sub, RNA_boolean_get(ptr, "use_zbuffer") == false);
-  uiItemR(sub, ptr, "z_scale", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(sub, ptr, "z_scale", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class DefocusOperation : public NodeOperation {
  public:
@@ -100,10 +100,10 @@ class DefocusOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &input = get_input("Image");
-    Result &output = get_result("Image");
+    const Result &input = this->get_input("Image");
+    Result &output = this->get_result("Image");
     if (input.is_single_value() || node_storage(bnode()).maxblur < 1.0f) {
-      input.pass_through(output);
+      output.share_data(input);
       return;
     }
 
@@ -121,25 +121,48 @@ class DefocusOperation : public NodeOperation {
     const Result &bokeh_kernel = context().cache_manager().bokeh_kernels.get(
         context(), kernel_size, sides, rotation, roundness, 0.0f, 0.0f);
 
+    const Result *defocus_input = &input;
+    Result *defocus_output = &output;
+
+    /* Apply gamma correction if needed. */
+    Result gamma_defocus_output = this->context().create_result(ResultType::Color);
+    Result gamma_corrected_input = this->context().create_result(ResultType::Color);
+    if (this->should_apply_gamma_correction()) {
+      gamma_correct(this->context(), input, gamma_corrected_input);
+      defocus_input = &gamma_corrected_input;
+      defocus_output = &gamma_defocus_output;
+    }
+
     if (this->context().use_gpu()) {
-      this->execute_gpu(radius, bokeh_kernel, maximum_defocus_radius);
+      this->execute_gpu(
+          *defocus_input, radius, bokeh_kernel, *defocus_output, maximum_defocus_radius);
     }
     else {
-      this->execute_cpu(radius, bokeh_kernel, maximum_defocus_radius);
+      this->execute_cpu(
+          *defocus_input, radius, bokeh_kernel, *defocus_output, maximum_defocus_radius);
     }
 
     radius.release();
+
+    /* Undo gamma correction. */
+    if (this->should_apply_gamma_correction()) {
+      gamma_corrected_input.release();
+      gamma_uncorrect(this->context(), gamma_defocus_output, output);
+      gamma_defocus_output.release();
+    }
   }
 
-  void execute_gpu(const Result &radius, const Result &bokeh_kernel, const int search_radius)
+  void execute_gpu(const Result &input,
+                   const Result &radius,
+                   const Result &bokeh_kernel,
+                   Result &output,
+                   const int search_radius)
   {
     GPUShader *shader = context().get_shader("compositor_defocus_blur");
     GPU_shader_bind(shader);
 
-    GPU_shader_uniform_1b(shader, "gamma_correct", node_storage(bnode()).gamco);
     GPU_shader_uniform_1i(shader, "search_radius", search_radius);
 
-    Result &input = get_input("Image");
     input.bind_as_texture(shader, "input_tx");
 
     radius.bind_as_texture(shader, "radius_tx");
@@ -148,7 +171,6 @@ class DefocusOperation : public NodeOperation {
     bokeh_kernel.bind_as_texture(shader, "weights_tx");
 
     const Domain domain = compute_domain();
-    Result &output = get_result("Image");
     output.allocate_texture(domain);
     output.bind_as_image(shader, "output_img");
 
@@ -161,14 +183,13 @@ class DefocusOperation : public NodeOperation {
     output.unbind_as_image();
   }
 
-  void execute_cpu(const Result &radius, const Result &bokeh_kernel, const int search_radius)
+  void execute_cpu(const Result &input,
+                   const Result &radius,
+                   const Result &bokeh_kernel,
+                   Result &output,
+                   const int search_radius)
   {
-    const bool gamma_correct = node_storage(bnode()).gamco;
-
-    Result &input = get_input("Image");
-
     const Domain domain = compute_domain();
-    Result &output = get_result("Image");
     output.allocate_texture(domain);
 
     /* Given the texel in the range [-radius, radius] in both axis, load the appropriate weight
@@ -194,7 +215,7 @@ class DefocusOperation : public NodeOperation {
     };
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float center_radius = math::max(0.0f, radius.load_pixel(texel).x);
+      float center_radius = math::max(0.0f, radius.load_pixel<float, true>(texel));
 
       /* Go over the window of the given search radius and accumulate the colors multiplied by
        * their respective weights as well as the weights themselves, but only if both the radius of
@@ -204,8 +225,8 @@ class DefocusOperation : public NodeOperation {
       float4 accumulated_weight = float4(0.0);
       for (int y = -search_radius; y <= search_radius; y++) {
         for (int x = -search_radius; x <= search_radius; x++) {
-          float candidate_radius = math::max(0.0f,
-                                             radius.load_pixel_extended(texel + int2(x, y)).x);
+          float candidate_radius = math::max(
+              0.0f, radius.load_pixel_extended<float, true>(texel + int2(x, y)));
 
           /* Skip accumulation if either the x or y distances of the candidate pixel are larger
            * than either the center or candidate pixel radius. Note that the max and min functions
@@ -216,11 +237,7 @@ class DefocusOperation : public NodeOperation {
           }
 
           float4 weight = load_weight(int2(x, y), radius);
-          float4 input_color = input.load_pixel_extended(texel + int2(x, y));
-
-          if (gamma_correct) {
-            input_color = gamma_correct_blur_input(input_color);
-          }
+          float4 input_color = input.load_pixel_extended<float4>(texel + int2(x, y));
 
           accumulated_color += input_color * weight;
           accumulated_weight += weight;
@@ -229,31 +246,8 @@ class DefocusOperation : public NodeOperation {
 
       accumulated_color = math::safe_divide(accumulated_color, accumulated_weight);
 
-      if (gamma_correct) {
-        accumulated_color = gamma_uncorrect_blur_output(accumulated_color);
-      }
-
       output.store_pixel(texel, accumulated_color);
     });
-  }
-
-  /* Preprocess the input of the blur filter by squaring it in its alpha straight form, assuming
-   * the given color is alpha pre-multiplied. */
-  float4 gamma_correct_blur_input(const float4 &color)
-  {
-    float alpha = color.w > 0.0f ? color.w : 1.0f;
-    float3 corrected_color = math::square(math::max(color.xyz() / alpha, float3(0.0f))) * alpha;
-    return float4(corrected_color, color.w);
-  }
-
-  /* Postprocess the output of the blur filter by taking its square root it in its alpha straight
-   * form, assuming the given color is alpha pre-multiplied. This essential undoes the processing
-   * done by the gamma_correct_blur_input function. */
-  float4 gamma_uncorrect_blur_output(const float4 &color)
-  {
-    float alpha = color.w > 0.0f ? color.w : 1.0f;
-    float3 uncorrected_color = math::sqrt(math::max(color.xyz() / alpha, float3(0.0f))) * alpha;
-    return float4(uncorrected_color, color.w);
   }
 
   Result compute_defocus_radius()
@@ -261,9 +255,7 @@ class DefocusOperation : public NodeOperation {
     if (node_storage(bnode()).no_zbuf) {
       return compute_defocus_radius_from_scale();
     }
-    else {
-      return compute_defocus_radius_from_depth();
-    }
+    return compute_defocus_radius_from_depth();
   }
 
   Result compute_defocus_radius_from_scale()
@@ -315,7 +307,7 @@ class DefocusOperation : public NodeOperation {
 
     if (input_depth.is_single_value()) {
       output_radius.allocate_single_value();
-      output_radius.set_float_value(compute_radius(input_depth.get_float_value()));
+      output_radius.set_single_value(compute_radius(input_depth.get_single_value<float>()));
       return output_radius;
     }
 
@@ -323,8 +315,8 @@ class DefocusOperation : public NodeOperation {
     output_radius.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float depth = input_depth.load_pixel(texel).x;
-      output_radius.store_pixel(texel, float4(compute_radius(depth)));
+      float depth = input_depth.load_pixel<float>(texel);
+      output_radius.store_pixel(texel, compute_radius(depth));
     });
 
     return output_radius;
@@ -416,7 +408,7 @@ class DefocusOperation : public NodeOperation {
 
     if (input_depth.is_single_value()) {
       output_radius.allocate_single_value();
-      output_radius.set_float_value(compute_radius(input_depth.get_float_value()));
+      output_radius.set_single_value(compute_radius(input_depth.get_single_value<float>()));
       return;
     }
 
@@ -424,8 +416,8 @@ class DefocusOperation : public NodeOperation {
     output_radius.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float depth = input_depth.load_pixel(texel).x;
-      output_radius.store_pixel(texel, float4(compute_radius(depth)));
+      float depth = input_depth.load_pixel<float>(texel);
+      output_radius.store_pixel(texel, compute_radius(depth));
     });
   }
 
@@ -520,9 +512,14 @@ class DefocusOperation : public NodeOperation {
   }
 
   /* Returns the f-stop number. Fallback to 1e-3 for zero f-stop. */
-  const float get_f_stop()
+  float get_f_stop()
   {
     return math::max(1e-3f, node_storage(bnode()).fstop);
+  }
+
+  bool should_apply_gamma_correction()
+  {
+    return node_storage(this->bnode()).gamco;
   }
 
   const Camera *get_camera()
@@ -559,13 +556,17 @@ void register_node_type_cmp_defocus()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_DEFOCUS, "Defocus", NODE_CLASS_OP_FILTER);
+  cmp_node_type_base(&ntype, "CompositorNodeDefocus", CMP_NODE_DEFOCUS);
+  ntype.ui_name = "Defocus";
+  ntype.ui_description = "Apply depth of field in 2D, using a Z depth map or mask";
+  ntype.enum_name_legacy = "DEFOCUS";
+  ntype.nclass = NODE_CLASS_OP_FILTER;
   ntype.declare = file_ns::cmp_node_defocus_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_defocus;
   ntype.initfunc = file_ns::node_composit_init_defocus;
   blender::bke::node_type_storage(
-      &ntype, "NodeDefocus", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeDefocus", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

@@ -2,8 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <iostream>
-
 #include "atomic_ops.h"
 
 #include "BLI_array_utils.hh"
@@ -518,7 +516,7 @@ static GroupedSpan<int> build_vert_to_tri_map(const int verts_num,
   const OffsetIndices offsets(r_offsets.as_span());
 
   r_indices.reinitialize(offsets.total_size());
-  int *counts = MEM_cnew_array<int>(size_t(offsets.size()), __func__);
+  int *counts = MEM_calloc_arrayN<int>(size_t(offsets.size()), __func__);
   BLI_SCOPED_DEFER([&]() { MEM_freeN(counts); })
   threading::parallel_for(vert_tris.index_range(), 1024, [&](const IndexRange range) {
     for (const int tri : range) {
@@ -554,12 +552,13 @@ static IndexMask calc_unselected_faces(const Mesh &mesh,
       memory,
       [&](const IndexMaskSegment universe_segment, IndexRangesBuilder<int16_t> &builder) {
         if (unique_sorted_indices::non_empty_is_range(universe_segment.base_span())) {
-          const IndexRange segment_range(universe_segment[0], universe_segment.size());
+          const IndexRange universe_as_range = unique_sorted_indices::non_empty_as_range(
+              universe_segment.base_span());
+          const IndexRange segment_range = universe_as_range.shift(universe_segment.offset());
           const OffsetIndices segment_faces = src_faces.slice(segment_range);
           if (segment_faces.total_size() == segment_faces.size() * 3) {
             /* All faces in segment are triangles. */
-            builder.add_range(universe_segment.base_span().first(),
-                              universe_segment.base_span().last());
+            builder.add_range(universe_as_range.start(), universe_as_range.one_after_last());
             return universe_segment.offset();
           }
         }

@@ -6,14 +6,11 @@
  * \ingroup edmask
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_lasso_2d.hh"
 #include "BLI_listbase.h"
 #include "BLI_math_base.h"
 #include "BLI_math_vector_types.hh"
 #include "BLI_rect.h"
-#include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
 #include "BKE_mask.h"
@@ -198,7 +195,7 @@ void ED_mask_deselect_all(const bContext *C)
 /** \name (De)select All Operator
  * \{ */
 
-static int select_all_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus select_all_exec(bContext *C, wmOperator *op)
 {
   Mask *mask = CTX_data_edit_mask(C);
   int action = RNA_enum_get(op->ptr, "action");
@@ -241,7 +238,7 @@ void MASK_OT_select_all(wmOperatorType *ot)
 /** \name Select (Cursor Pick) Operator
  * \{ */
 
-static int select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus select_exec(bContext *C, wmOperator *op)
 {
   Mask *mask = CTX_data_edit_mask(C);
   MaskLayer *mask_layer;
@@ -377,7 +374,7 @@ static int select_exec(bContext *C, wmOperator *op)
   return OPERATOR_PASS_THROUGH;
 }
 
-static int select_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus select_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   ScrArea *area = CTX_wm_area(C);
   ARegion *region = CTX_wm_region(C);
@@ -388,7 +385,7 @@ static int select_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 
   RNA_float_set_array(op->ptr, "location", co);
 
-  const int retval = select_exec(C, op);
+  const wmOperatorStatus retval = select_exec(C, op);
 
   return WM_operator_flag_only_pass_through_on_press(retval, event);
 }
@@ -430,7 +427,7 @@ void MASK_OT_select(wmOperatorType *ot)
 /** \name Box Select Operator
  * \{ */
 
-static int box_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus box_select_exec(bContext *C, wmOperator *op)
 {
   ScrArea *area = CTX_wm_area(C);
   ARegion *region = CTX_wm_region(C);
@@ -607,7 +604,7 @@ static bool do_lasso_select_mask(bContext *C, const Span<int2> mcoords, const eS
   return changed;
 }
 
-static int clip_lasso_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus clip_lasso_select_exec(bContext *C, wmOperator *op)
 {
   const Array<int2> mcoords = WM_gesture_lasso_path_to_array(C, op);
   if (mcoords.is_empty()) {
@@ -661,7 +658,7 @@ static int mask_spline_point_inside_ellipse(BezTriple *bezt,
   return x * x + y * y < 1.0f;
 }
 
-static int circle_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus circle_select_exec(bContext *C, wmOperator *op)
 {
   ScrArea *area = CTX_wm_area(C);
   ARegion *region = CTX_wm_region(C);
@@ -769,7 +766,9 @@ void MASK_OT_select_circle(wmOperatorType *ot)
 /** \name Select Linked (Cursor Pick) Operator
  * \{ */
 
-static int mask_select_linked_pick_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus mask_select_linked_pick_invoke(bContext *C,
+                                                       wmOperator *op,
+                                                       const wmEvent *event)
 {
   ScrArea *area = CTX_wm_area(C);
   ARegion *region = CTX_wm_region(C);
@@ -831,7 +830,7 @@ void MASK_OT_select_linked_pick(wmOperatorType *ot)
 /** \name Select Linked Operator
  * \{ */
 
-static int mask_select_linked_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mask_select_linked_exec(bContext *C, wmOperator * /*op*/)
 {
   Mask *mask = CTX_data_edit_mask(C);
 
@@ -884,7 +883,7 @@ void MASK_OT_select_linked(wmOperatorType *ot)
 /** \name Select More/Less Operators
  * \{ */
 
-static int mask_select_more_less(bContext *C, bool more)
+static wmOperatorStatus mask_select_more_less(bContext *C, bool more)
 {
   Mask *mask = CTX_data_edit_mask(C);
 
@@ -957,7 +956,7 @@ static int mask_select_more_less(bContext *C, bool more)
   return OPERATOR_FINISHED;
 }
 
-static int mask_select_more_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mask_select_more_exec(bContext *C, wmOperator * /*op*/)
 {
   return mask_select_more_less(C, true);
 }
@@ -977,7 +976,7 @@ void MASK_OT_select_more(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-static int mask_select_less_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mask_select_less_exec(bContext *C, wmOperator * /*op*/)
 {
   return mask_select_more_less(C, false);
 }

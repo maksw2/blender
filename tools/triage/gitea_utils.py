@@ -5,6 +5,15 @@
 
 # Simple module for inspecting GITEA users, pulls and issues.
 
+__all__ = (
+    "git_username_detect",
+    "gitea_json_activities_get",
+    "gitea_json_issue_events_filter",
+    "gitea_json_issue_get",
+    "gitea_json_issues_search",
+    "gitea_user_get",
+)
+
 import datetime
 import json
 import urllib.error
@@ -47,7 +56,8 @@ def url_json_get_all_pages(
             # XXX: In some cases, a bug prevents using the `page` and `limit` parameters if the page is 1
             result_page = url_json_get(url)
         else:
-            result_page = url_json_get(f"{url}&page={page}")
+            separator = '&' if urllib.parse.urlparse(url).query else '?'
+            result_page = url_json_get(f"{url}{separator}page={page}")
 
         if not result_page:
             break
@@ -153,14 +163,16 @@ def gitea_json_issue_events_filter(
         date_end: datetime.datetime | None = None,
         username: str | None = None,
         labels: set[str] | None = None,
-        event_type: set[str] = set(),
+        event_type: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Filter all comments and events on the issue list.
+    Filter all comments and events on the issue list. If both labels and event_type are provided,
+    an event is included if either the label or event type matches.
     :param issue_fullname: string in the format "{owner}/{repo}/issues/{number}"
     :param date_start: if provided, only comments updated since the specified time are returned.
     :param date_end: if provided, only comments updated before the provided time are returned.
-    :param labels: list of labels. Fetch only events that have any of this labels.
+    :param labels: list of labels. Fetch only events that have any of these labels (plus, events
+       passing the event_type check if set)
     :param event_type: set of types of events in {"close", "commit_ref"...}.
     :return: List of comments or events.
     """
@@ -180,14 +192,14 @@ def gitea_json_issue_events_filter(
         if not event:
             continue
 
-        if not event["user"] or event["user"]["username"] != username:
+        if username and (not event["user"] or event["user"]["username"] != username):
             continue
 
         if labels and event["type"] == "label" and event["label"]["name"] in labels:
             pass
-        elif event["type"] in event_type:
+        elif event_type and event["type"] in event_type:
             pass
-        else:
+        elif labels or event_type:
             continue
 
         result.append(event)

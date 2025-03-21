@@ -2,7 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_bounds.hh"
 #include "BLI_color.hh"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
@@ -14,7 +16,7 @@
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_layer.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_scene.hh"
 
 #include "DNA_grease_pencil_types.h"
@@ -34,6 +36,8 @@
 #include "UI_view2d.hh"
 
 #include "grease_pencil_io_intern.hh"
+
+#include <numeric>
 #include <optional>
 
 /** \file
@@ -173,10 +177,15 @@ static IndexMask get_visible_strokes(const Object &object,
       return false;
     }
 
-    /* Check if the material is visible. */
     const Material *material = BKE_object_material_get(const_cast<Object *>(&object),
                                                        materials[curve_i] + 1);
-    const MaterialGPencilStyle *gp_style = material ? material->gp_style : nullptr;
+    if (material == nullptr) {
+      /* We can still export without a material. */
+      return true;
+    }
+
+    /* Check if the material is visible. */
+    const MaterialGPencilStyle *gp_style = material->gp_style;
     const bool is_hidden_material = (gp_style->flag & GP_MATERIAL_HIDE);
     const bool is_stroke_material = (gp_style->flag & GP_MATERIAL_STROKE_SHOW);
     if (gp_style == nullptr || is_hidden_material || !is_stroke_material) {
@@ -190,13 +199,11 @@ static IndexMask get_visible_strokes(const Object &object,
       strokes.curves_range(), GrainSize(512), memory, is_visible_curve);
 }
 
-static std::optional<Bounds<float2>> compute_drawing_bounds(
+static std::optional<Bounds<float2>> compute_screen_space_drawing_bounds(
     const ARegion &region,
     const RegionView3D &rv3d,
     const Object &object,
-    const Object &object_eval,
     const int layer_index,
-    const int frame_number,
     const bke::greasepencil::Drawing &drawing)
 {
   using bke::greasepencil::Drawing;
@@ -212,11 +219,9 @@ static std::optional<Bounds<float2>> compute_drawing_bounds(
 
   const Layer &layer = *grease_pencil.layers()[layer_index];
   const float4x4 layer_to_world = layer.to_world_space(object);
-  const bke::crazyspace::GeometryDeformation deformation =
-      bke::crazyspace::get_evaluated_grease_pencil_drawing_deformation(
-          &object_eval, object, layer_index, frame_number);
   const VArray<float> radii = drawing.radii();
   const bke::CurvesGeometry &strokes = drawing.strokes();
+  const Span<float3> positions = strokes.positions();
 
   IndexMaskMemory curve_mask_memory;
   const IndexMask curve_mask = get_visible_strokes(object, drawing, curve_mask_memory);
@@ -229,8 +234,7 @@ static std::optional<Bounds<float2>> compute_drawing_bounds(
     }
 
     for (const int point_i : points) {
-      const float3 pos_world = math::transform_point(layer_to_world,
-                                                     deformation.positions[point_i]);
+      const float3 pos_world = math::transform_point(layer_to_world, positions[point_i]);
       float2 screen_co;
       eV3DProjStatus result = ED_view3d_project_float_global(
           &region, pos_world, screen_co, V3D_PROJ_TEST_NOP);
@@ -273,8 +277,8 @@ static std::optional<Bounds<float2>> compute_objects_bounds(
         continue;
       }
 
-      std::optional<Bounds<float2>> layer_bounds = compute_drawing_bounds(
-          region, rv3d, *info.object, *object_eval, layer_index, frame_number, *drawing);
+      std::optional<Bounds<float2>> layer_bounds = compute_screen_space_drawing_bounds(
+          region, rv3d, *info.object, layer_index, *drawing);
 
       full_bounds = bounds::merge(full_bounds, layer_bounds);
     }
@@ -461,14 +465,22 @@ void GreasePencilExporter::foreach_stroke_in_layer(const Object &object,
 
     const bool is_cyclic = cyclic[i_curve];
     const int material_index = material_indices[i_curve];
-    const Material *material = BKE_object_material_get(const_cast<Object *>(&object),
-                                                       material_index + 1);
+    const Material *material = [&]() {
+      const Material *material = BKE_object_material_get(const_cast<Object *>(&object),
+                                                         material_index + 1);
+      if (!material) {
+        const Material *material_default = BKE_material_default_gpencil();
+        return material_default;
+      }
+      return material;
+    }();
+
     BLI_assert(material->gp_style != nullptr);
     if (material->gp_style->flag & GP_MATERIAL_HIDE) {
       continue;
     }
-    const bool is_stroke_material = material->gp_style->flag & GP_MATERIAL_STROKE_SHOW;
-    const bool is_fill_material = material->gp_style->flag & GP_MATERIAL_FILL_SHOW;
+    const bool is_stroke_material = (material->gp_style->flag & GP_MATERIAL_STROKE_SHOW);
+    const bool is_fill_material = (material->gp_style->flag & GP_MATERIAL_FILL_SHOW);
 
     /* Fill. */
     if (is_fill_material && params_.export_fill_materials) {

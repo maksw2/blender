@@ -420,6 +420,13 @@ def dump_rna_messages(msgs, reports, settings, verbose=False):
             # Do not process blacklisted classes, but do handle their children.
             if cls in blacklist_rna_class:
                 reports["rna_structs_skipped"].append(cls)
+            elif bpy.types.Operator in cls.__bases__ and not getattr(cls, "is_registered", True):
+                # unregistering a python-defined operator does not remove it from the list of subclasses of
+                # `bpy.types.Operator`, this works around this issue.
+                # While not a huge problem for main UI messages extraction, it does break fairly badly
+                # extraction of specific add-ons UI messages, see #116579.
+                print("SKIPPING because unregistered:", cls)
+                continue
             elif cls in ret_cls_set:
                 continue
             else:
@@ -477,7 +484,7 @@ def dump_rna_messages(msgs, reports, settings, verbose=False):
 def dump_py_messages_from_files(msgs, reports, files, settings):
     """
     Dump text inlined in the python files given, e.g. "My Name" in:
-        layout.prop("someprop", text="My Name")
+        ``layout.prop("someprop", text="My Name")``
     """
     import ast
 
@@ -689,7 +696,7 @@ def dump_py_messages_from_files(msgs, reports, files, settings):
         for node in ast.walk(root_node):
             if type(node) == ast.Call:
                 # ~ print("found function at")
-                # ~ print("%s:%d" % (fp, node.lineno))
+                # ~ print("{:s}:{:d}".format(fp, node.lineno))
 
                 # We can't skip such situations! from blah import foo\nfoo("bar") would also be an ast.Name func!
                 if type(node.func) == ast.Name:
@@ -1223,13 +1230,6 @@ def dump_addon_messages(addon_module_name, do_checks, settings):
 
 
 def main():
-    try:
-        import bpy
-    except ImportError:
-        print("This script must run from inside blender")
-        return
-
-    import sys
     import argparse
 
     # Get rid of Blender args!

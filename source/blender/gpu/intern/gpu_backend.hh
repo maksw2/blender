@@ -19,7 +19,6 @@ namespace blender::gpu {
 class Context;
 
 class Batch;
-class DrawList;
 class Fence;
 class FrameBuffer;
 class IndexBuf;
@@ -45,7 +44,6 @@ class GPUBackend {
   virtual Context *context_alloc(void *ghost_window, void *ghost_context) = 0;
 
   virtual Batch *batch_alloc() = 0;
-  virtual DrawList *drawlist_alloc(int list_length) = 0;
   virtual Fence *fence_alloc() = 0;
   virtual FrameBuffer *framebuffer_alloc(const char *name) = 0;
   virtual IndexBuf *indexbuf_alloc() = 0;
@@ -62,7 +60,7 @@ class GPUBackend {
    * Used for performing per-frame actions globally */
   virtual void render_begin() = 0;
   virtual void render_end() = 0;
-  virtual void render_step() = 0;
+  virtual void render_step(bool force_resource_release = false) = 0;
 };
 
 namespace debug {
@@ -73,27 +71,31 @@ static inline ColorTheme4f get_debug_group_color(StringRefNull name)
   if (name == "EEVEE") {
     return ColorTheme4f(1.0, 0.5, 0.0, 1.0);
   }
-  else if (name == "External") {
+  if (name == "External") {
     return ColorTheme4f(0.0, 0.0, 1.0, 1.0);
   }
-  else if (name == "GpencilMode") {
+  if (name == "GpencilMode") {
     return ColorTheme4f(1.0, 1.0, 0.0, 1.0);
   }
-  else if (name == "UV/Image") {
+  if (name == "UV/Image") {
     return ColorTheme4f(0.0, 1.0, 1.0, 1.0);
   }
-  else if (name == "Overlay") {
+  if (name == "Overlay") {
     return ColorTheme4f(0.0, 1.0, 0.5, 1.0);
   }
-  else if (name == "Workbench") {
+  if (name == "Workbench") {
     return ColorTheme4f(0.0, 0.7, 1.0, 1.0);
   }
-  else if (name == "Cycles") {
+  if (name == "Cycles") {
     return ColorTheme4f(0.0, 0.5, 1.0, 1.0);
   }
-  else {
-    return GPU_DEBUG_GROUP_COLOR_DEFAULT;
+  if (name == "BackBuffer.Blit") {
+    return ColorTheme4f(0.5, 0.7, 1.0, 1.0);
   }
+  if (name == "Compositor") {
+    return ColorTheme4f(1.0, 0.5, 0.7, 1.0);
+  }
+  return GPU_DEBUG_GROUP_COLOR_DEFAULT;
 }
 }  // namespace debug
 

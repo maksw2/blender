@@ -20,8 +20,9 @@
 #include "DNA_object_types.h"
 #include "DNA_texture_types.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_math_rotation.h"
+#include "BLI_string.h"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
 
@@ -36,6 +37,7 @@
 #include "BKE_lib_query.hh"
 #include "BKE_linestyle.h"
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_tree_update.hh"
 #include "BKE_texture.h"
 
@@ -68,7 +70,7 @@ static void linestyle_copy_data(Main *bmain,
 
   for (int a = 0; a < MAX_MTEX; a++) {
     if (linestyle_src->mtex[a]) {
-      linestyle_dst->mtex[a] = static_cast<MTex *>(MEM_callocN(sizeof(MTex), __func__));
+      linestyle_dst->mtex[a] = MEM_callocN<MTex>(__func__);
       *linestyle_dst->mtex[a] = blender::dna::shallow_copy(*linestyle_src->mtex[a]);
     }
   }
@@ -1839,7 +1841,7 @@ void BKE_linestyle_modifier_list_color_ramps(FreestyleLineStyle *linestyle, List
       default:
         continue;
     }
-    link = (LinkData *)MEM_callocN(sizeof(LinkData), "link to color ramp");
+    link = MEM_callocN<LinkData>("link to color ramp");
     link->data = color_ramp;
     BLI_addtail(listbase, link);
   }
@@ -1934,30 +1936,30 @@ void BKE_linestyle_default_shader(const bContext *C, FreestyleLineStyle *linesty
   ntree = blender::bke::node_tree_add_tree_embedded(
       nullptr, &linestyle->id, "stroke_shader", "ShaderNodeTree");
 
-  uv_along_stroke = blender::bke::node_add_static_node(C, ntree, SH_NODE_UVALONGSTROKE);
-  uv_along_stroke->locx = 0.0f;
-  uv_along_stroke->locy = 300.0f;
+  uv_along_stroke = blender::bke::node_add_static_node(C, *ntree, SH_NODE_UVALONGSTROKE);
+  uv_along_stroke->location[0] = 0.0f;
+  uv_along_stroke->location[1] = 300.0f;
   uv_along_stroke->custom1 = 0; /* use_tips */
 
-  input_texture = blender::bke::node_add_static_node(C, ntree, SH_NODE_TEX_IMAGE);
-  input_texture->locx = 200.0f;
-  input_texture->locy = 300.0f;
+  input_texture = blender::bke::node_add_static_node(C, *ntree, SH_NODE_TEX_IMAGE);
+  input_texture->location[0] = 200.0f;
+  input_texture->location[1] = 300.0f;
 
-  output_linestyle = blender::bke::node_add_static_node(C, ntree, SH_NODE_OUTPUT_LINESTYLE);
-  output_linestyle->locx = 400.0f;
-  output_linestyle->locy = 300.0f;
+  output_linestyle = blender::bke::node_add_static_node(C, *ntree, SH_NODE_OUTPUT_LINESTYLE);
+  output_linestyle->location[0] = 400.0f;
+  output_linestyle->location[1] = 300.0f;
   output_linestyle->custom1 = MA_RAMP_BLEND;
   output_linestyle->custom2 = 0; /* use_clamp */
 
-  blender::bke::node_set_active(ntree, input_texture);
+  blender::bke::node_set_active(*ntree, *input_texture);
 
   fromsock = static_cast<bNodeSocket *>(BLI_findlink(&uv_along_stroke->outputs, 0)); /* UV */
   tosock = static_cast<bNodeSocket *>(BLI_findlink(&input_texture->inputs, 0));      /* UV */
-  blender::bke::node_add_link(ntree, uv_along_stroke, fromsock, input_texture, tosock);
+  blender::bke::node_add_link(*ntree, *uv_along_stroke, *fromsock, *input_texture, *tosock);
 
   fromsock = static_cast<bNodeSocket *>(BLI_findlink(&input_texture->outputs, 0)); /* Color */
   tosock = static_cast<bNodeSocket *>(BLI_findlink(&output_linestyle->inputs, 0)); /* Color */
-  blender::bke::node_add_link(ntree, input_texture, fromsock, output_linestyle, tosock);
+  blender::bke::node_add_link(*ntree, *input_texture, *fromsock, *output_linestyle, *tosock);
 
-  BKE_ntree_update_main_tree(CTX_data_main(C), ntree, nullptr);
+  BKE_ntree_update_after_single_tree_change(*CTX_data_main(C), *ntree);
 }

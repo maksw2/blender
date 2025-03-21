@@ -22,12 +22,14 @@ static void gizmo_blank_draw(const bContext * /*C*/, wmGizmo * /*gz*/)
   /* pass */
 }
 
-static int gizmo_blank_invoke(bContext * /*C*/, wmGizmo * /*gz*/, const wmEvent * /*event*/)
+static wmOperatorStatus gizmo_blank_invoke(bContext * /*C*/,
+                                           wmGizmo * /*gz*/,
+                                           const wmEvent * /*event*/)
 {
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int gizmo_blank_test_select(bContext * /*C*/, wmGizmo * /*gz*/, const int[2] /*mval*/)
+static int gizmo_blank_test_select(bContext * /*C*/, wmGizmo * /*gz*/, const int /*mval*/[2])
 {
   return 0;
 }

@@ -2,12 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_lib.glsl"
+#include "infos/overlay_background_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_clipbound)
+
+#include "draw_view_lib.glsl"
 
 void main()
 {
   vec3 world_pos = boundbox[gl_VertexID];
-  gl_Position = point_world_to_ndc(world_pos);
+  gl_Position = drw_point_world_to_homogenous(world_pos);
 
   /* Result in a position at 1.0 (far plane). Small epsilon to avoid precision issue.
    * This mimics the effect of infinite projection matrix

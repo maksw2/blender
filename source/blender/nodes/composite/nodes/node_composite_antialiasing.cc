@@ -30,7 +30,7 @@ static void cmp_node_antialiasing_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_antialiasing(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeAntiAliasingData *data = MEM_cnew<NodeAntiAliasingData>(__func__);
+  NodeAntiAliasingData *data = MEM_callocN<NodeAntiAliasingData>(__func__);
 
   data->threshold = CMP_DEFAULT_SMAA_THRESHOLD;
   data->contrast_limit = CMP_DEFAULT_SMAA_CONTRAST_LIMIT;
@@ -45,12 +45,12 @@ static void node_composit_buts_antialiasing(uiLayout *layout, bContext * /*C*/, 
 
   col = uiLayoutColumn(layout, false);
 
-  uiItemR(col, ptr, "threshold", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "contrast_limit", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "corner_rounding", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "threshold", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "contrast_limit", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "corner_rounding", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class AntiAliasingOperation : public NodeOperation {
  public:
@@ -101,15 +101,19 @@ void register_node_type_cmp_antialiasing()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_ANTIALIASING, "Anti-Aliasing", NODE_CLASS_OP_FILTER);
+  cmp_node_type_base(&ntype, "CompositorNodeAntiAliasing", CMP_NODE_ANTIALIASING);
+  ntype.ui_name = "Anti-Aliasing";
+  ntype.ui_description = "Smooth away jagged edges";
+  ntype.enum_name_legacy = "ANTIALIASING";
+  ntype.nclass = NODE_CLASS_OP_FILTER;
   ntype.declare = file_ns::cmp_node_antialiasing_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_antialiasing;
   ntype.flag |= NODE_PREVIEW;
-  blender::bke::node_type_size(&ntype, 170, 140, 200);
+  blender::bke::node_type_size(ntype, 170, 140, 200);
   ntype.initfunc = file_ns::node_composit_init_antialiasing;
   blender::bke::node_type_storage(
-      &ntype, "NodeAntiAliasingData", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeAntiAliasingData", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

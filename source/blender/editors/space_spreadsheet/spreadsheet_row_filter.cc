@@ -5,23 +5,13 @@
 #include <cstring>
 
 #include "BLI_listbase.h"
-#include "BLI_math_color.hh"
-#include "BLI_math_matrix.hh"
+#include "BLI_math_vector.hh"
 
-#include "DNA_screen_types.h"
 #include "DNA_space_types.h"
-
-#include "DEG_depsgraph_query.hh"
-
-#include "UI_interface.hh"
-#include "UI_resources.hh"
-
-#include "RNA_access.hh"
 
 #include "BKE_instances.hh"
 
 #include "spreadsheet_data_source_geometry.hh"
-#include "spreadsheet_intern.hh"
 #include "spreadsheet_layout.hh"
 #include "spreadsheet_row_filter.hh"
 
@@ -438,7 +428,7 @@ IndexMask spreadsheet_filter_rows(const SpaceSpreadsheet &sspreadsheet,
 
 SpreadsheetRowFilter *spreadsheet_row_filter_new()
 {
-  SpreadsheetRowFilter *row_filter = MEM_cnew<SpreadsheetRowFilter>(__func__);
+  SpreadsheetRowFilter *row_filter = MEM_callocN<SpreadsheetRowFilter>(__func__);
   row_filter->flag = (SPREADSHEET_ROW_FILTER_UI_EXPAND | SPREADSHEET_ROW_FILTER_ENABLED);
   row_filter->operation = SPREADSHEET_ROW_FILTER_LESS;
   row_filter->threshold = 0.01f;

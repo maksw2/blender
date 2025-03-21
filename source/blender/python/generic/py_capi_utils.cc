@@ -7,10 +7,6 @@
  *
  * Extend upon CPython's API, filling in some gaps, these functions use PyC_
  * prefix to distinguish them apart from CPython.
- *
- * \note
- * This module should only depend on CPython, however it currently uses
- * BLI_string_utf8() for unicode conversion.
  */
 
 /* Future-proof, See https://docs.python.org/3/c-api/arg.html#strings-and-buffers */
@@ -29,10 +25,6 @@
 #  include "MEM_guardedalloc.h"
 
 #  include "BLI_string.h"
-
-/* Only for #BLI_strncpy_wchar_from_utf8,
- * should replace with Python functions but too late in release now. */
-#  include "BLI_string_utf8.h"
 #endif
 
 #ifdef _WIN32
@@ -1622,8 +1614,8 @@ bool PyC_RunString_AsStringAndSize(const char *imports[],
       ok = false;
     }
     else {
-      char *val_alloc = static_cast<char *>(MEM_mallocN(val_len + 1, __func__));
-      memcpy(val_alloc, val, val_len + 1);
+      char *val_alloc = MEM_malloc_arrayN<char>(size_t(val_len) + 1, __func__);
+      memcpy(val_alloc, val, (size_t(val_len) + 1) * sizeof(*val_alloc));
       *r_value = val_alloc;
       *r_value_size = val_len;
       ok = true;
@@ -1666,8 +1658,8 @@ bool PyC_RunString_AsStringAndSizeOrNone(const char *imports[],
         ok = false;
       }
       else {
-        char *val_alloc = static_cast<char *>(MEM_mallocN(val_len + 1, __func__));
-        memcpy(val_alloc, val, val_len + 1);
+        char *val_alloc = MEM_malloc_arrayN<char>(size_t(val_len) + 1, __func__);
+        memcpy(val_alloc, val, (size_t(val_len) + 1) * sizeof(val_alloc));
         *r_value = val_alloc;
         *r_value_size = val_len;
         ok = true;

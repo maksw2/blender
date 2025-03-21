@@ -58,7 +58,7 @@ static void cmp_node_lensdist_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_lensdist(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeLensDist *nld = MEM_cnew<NodeLensDist>(__func__);
+  NodeLensDist *nld = MEM_callocN<NodeLensDist>(__func__);
   nld->jit = nld->proj = nld->fit = 0;
   node->storage = nld;
 }
@@ -68,15 +68,15 @@ static void node_composit_buts_lensdist(uiLayout *layout, bContext * /*C*/, Poin
   uiLayout *col;
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "use_projector", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "use_projector", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumn(col, false);
   uiLayoutSetActive(col, RNA_boolean_get(ptr, "use_projector") == false);
-  uiItemR(col, ptr, "use_jitter", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "use_fit", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "use_jitter", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "use_fit", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 /* --------------------------------------------------------------------
  * Screen Lens Distortion
@@ -277,8 +277,10 @@ class LensDistortionOperation : public NodeOperation {
 
   void execute() override
   {
-    if (is_identity()) {
-      get_input("Image").pass_through(get_result("Image"));
+    if (this->is_identity()) {
+      const Result &input = this->get_input("Image");
+      Result &output = this->get_result("Image");
+      output.share_data(input);
       return;
     }
 
@@ -343,7 +345,7 @@ class LensDistortionOperation : public NodeOperation {
 
       /* Sample the red and blue channels shifted by the dispersion amount. */
       const float red = input.sample_bilinear_zero(normalized_texel + float2(dispersion, 0.0f)).x;
-      const float green = input.load_pixel(texel).y;
+      const float green = input.load_pixel<float4>(texel).y;
       const float blue = input.sample_bilinear_zero(normalized_texel - float2(dispersion, 0.0f)).z;
 
       output.store_pixel(texel, float4(red, green, blue, 1.0f));
@@ -417,13 +419,13 @@ class LensDistortionOperation : public NodeOperation {
   float get_distortion()
   {
     const Result &input = get_input("Distortion");
-    return clamp_f(input.get_float_value_default(0.0f), MINIMUM_DISTORTION, 1.0f);
+    return clamp_f(input.get_single_value_default(0.0f), MINIMUM_DISTORTION, 1.0f);
   }
 
   float get_dispersion()
   {
     const Result &input = get_input("Dispersion");
-    return clamp_f(input.get_float_value_default(0.0f), 0.0f, 1.0f);
+    return clamp_f(input.get_single_value_default(0.0f), 0.0f, 1.0f);
   }
 
   /* Get the distortion amount for each channel. The green channel has a distortion amount that
@@ -505,13 +507,17 @@ void register_node_type_cmp_lensdist()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_LENSDIST, "Lens Distortion", NODE_CLASS_DISTORT);
+  cmp_node_type_base(&ntype, "CompositorNodeLensdist", CMP_NODE_LENSDIST);
+  ntype.ui_name = "Lens Distortion";
+  ntype.ui_description = "Simulate distortion and dispersion from camera lenses";
+  ntype.enum_name_legacy = "LENSDIST";
+  ntype.nclass = NODE_CLASS_DISTORT;
   ntype.declare = file_ns::cmp_node_lensdist_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_lensdist;
   ntype.initfunc = file_ns::node_composit_init_lensdist;
   blender::bke::node_type_storage(
-      &ntype, "NodeLensDist", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeLensDist", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

@@ -2,35 +2,44 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_armature_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_armature_stick)
+
+#include "draw_model_lib.glsl"
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
 #include "select_lib.glsl"
 
 /* project to screen space */
 vec2 proj(vec4 hs_P)
 {
-  return (0.5 * (hs_P.xy / hs_P.w) + 0.5) * sizeViewport.xy;
+  return (0.5 * (hs_P.xy / hs_P.w) + 0.5) * sizeViewport;
 }
 
 void main()
 {
   select_id_set(in_select_buf[gl_InstanceID]);
 
-  StickBoneFlag bone_flag = StickBoneFlag(flag);
-  finalInnerColor = flag_test(bone_flag, COL_HEAD) ? headColor : tailColor;
-  finalInnerColor = flag_test(bone_flag, COL_BONE) ? boneColor : finalInnerColor;
-  finalWireColor = (do_wire) ? wireColor : finalInnerColor;
+  StickBoneFlag bone_flag = StickBoneFlag(vclass);
+  finalInnerColor = flag_test(bone_flag, COL_HEAD) ? data_buf[gl_InstanceID].head_color :
+                                                     data_buf[gl_InstanceID].tail_color;
+  finalInnerColor = flag_test(bone_flag, COL_BONE) ? data_buf[gl_InstanceID].bone_color :
+                                                     finalInnerColor;
+  finalWireColor = (data_buf[gl_InstanceID].wire_color.a > 0.0) ?
+                       data_buf[gl_InstanceID].wire_color :
+                       finalInnerColor;
   colorFac = flag_test(bone_flag, COL_WIRE) ? 0.0 : (flag_test(bone_flag, COL_BONE) ? 1.0 : 2.0);
 
-  vec4 boneStart_4d = vec4(boneStart, 1.0);
-  vec4 boneEnd_4d = vec4(boneEnd, 1.0);
-  vec4 v0 = drw_view.viewmat * boneStart_4d;
-  vec4 v1 = drw_view.viewmat * boneEnd_4d;
+  vec4 boneStart_4d = vec4(data_buf[gl_InstanceID].bone_start.xyz, 1.0);
+  vec4 boneEnd_4d = vec4(data_buf[gl_InstanceID].bone_end.xyz, 1.0);
+  vec4 v0 = drw_view().viewmat * boneStart_4d;
+  vec4 v1 = drw_view().viewmat * boneEnd_4d;
 
   /* Clip the bone to the camera origin plane (not the clip plane)
    * to avoid glitches if one end is behind the camera origin (in perspective mode). */
-  float clip_dist = (drw_view.winmat[3][3] == 0.0) ?
+  float clip_dist = (drw_view().winmat[3][3] == 0.0) ?
                         -1e-7 :
                         1e20; /* hard-coded, -1e-8 is giving glitches. */
   vec3 bvec = v1.xyz - v0.xyz;
@@ -42,8 +51,8 @@ void main()
     v1.xyz = clip_pt;
   }
 
-  vec4 p0 = drw_view.winmat * v0;
-  vec4 p1 = drw_view.winmat * v1;
+  vec4 p0 = drw_view().winmat * v0;
+  vec4 p1 = drw_view().winmat * v1;
 
   bool is_head = flag_test(bone_flag, POS_HEAD);
   bool is_bone = flag_test(bone_flag, POS_BONE);
@@ -55,8 +64,8 @@ void main()
 
   /* 2D screen aligned pos at the point */
   vec2 vpos = pos.x * x_screen_vec + pos.y * y_screen_vec;
-  vpos *= (drw_view.winmat[3][3] == 0.0) ? h : 1.0;
-  vpos *= (do_wire) ? 1.0 : 0.5;
+  vpos *= (drw_view().winmat[3][3] == 0.0) ? h : 1.0;
+  vpos *= (data_buf[gl_InstanceID].wire_color.a > 0.0) ? 1.0 : 0.5;
 
   if (finalInnerColor.a > 0.0) {
     float stick_size = sizePixel * 5.0;

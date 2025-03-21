@@ -21,8 +21,6 @@
 
 #include "GPU_material.hh"
 
-#include "COM_shader_node.hh"
-
 #include "node_composite_util.hh"
 
 /* ******************* Color Correction ********************************* */
@@ -46,7 +44,7 @@ static void cmp_node_colorcorrection_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_colorcorrection(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeColorCorrection *n = MEM_cnew<NodeColorCorrection>(__func__);
+  NodeColorCorrection *n = MEM_callocN<NodeColorCorrection>(__func__);
   n->startmidtones = 0.2f;
   n->endmidtones = 0.7f;
   n->master.contrast = 1.0f;
@@ -78,9 +76,9 @@ static void node_composit_buts_colorcorrection(uiLayout *layout, bContext * /*C*
   uiLayout *row;
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, ptr, "red", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(row, ptr, "green", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(row, ptr, "blue", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(row, ptr, "red", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(row, ptr, "green", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(row, ptr, "blue", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   row = uiLayoutRow(layout, false);
   uiItemL(row, "", ICON_NONE);
@@ -155,10 +153,14 @@ static void node_composit_buts_colorcorrection(uiLayout *layout, bContext * /*C*
           ptr,
           "midtones_start",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
-  uiItemR(
-      row, ptr, "midtones_end", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(row,
+          ptr,
+          "midtones_end",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
 }
 
 static void node_composit_buts_colorcorrection_ex(uiLayout *layout,
@@ -168,34 +170,34 @@ static void node_composit_buts_colorcorrection_ex(uiLayout *layout,
   uiLayout *row;
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, ptr, "red", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(row, ptr, "green", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(row, ptr, "blue", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(row, ptr, "red", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(row, ptr, "green", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(row, ptr, "blue", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   row = layout;
   uiItemL(row, IFACE_("Saturation"), ICON_NONE);
   uiItemR(row,
           ptr,
           "master_saturation",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "highlights_saturation",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "midtones_saturation",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "shadows_saturation",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
 
   uiItemL(row, IFACE_("Contrast"), ICON_NONE);
@@ -203,150 +205,161 @@ static void node_composit_buts_colorcorrection_ex(uiLayout *layout,
           ptr,
           "master_contrast",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "highlights_contrast",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "midtones_contrast",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "shadows_contrast",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
 
   uiItemL(row, IFACE_("Gamma"), ICON_NONE);
-  uiItemR(
-      row, ptr, "master_gamma", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(row,
+          ptr,
+          "master_gamma",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
   uiItemR(row,
           ptr,
           "highlights_gamma",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "midtones_gamma",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "shadows_gamma",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
 
   uiItemL(row, IFACE_("Gain"), ICON_NONE);
-  uiItemR(
-      row, ptr, "master_gain", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(row,
+          ptr,
+          "master_gain",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
   uiItemR(row,
           ptr,
           "highlights_gain",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "midtones_gain",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
-  uiItemR(
-      row, ptr, "shadows_gain", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(row,
+          ptr,
+          "shadows_gain",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
 
   uiItemL(row, IFACE_("Lift"), ICON_NONE);
-  uiItemR(
-      row, ptr, "master_lift", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(row,
+          ptr,
+          "master_lift",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
   uiItemR(row,
           ptr,
           "highlights_lift",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
   uiItemR(row,
           ptr,
           "midtones_lift",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
-  uiItemR(
-      row, ptr, "shadows_lift", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(row,
+          ptr,
+          "shadows_lift",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, ptr, "midtones_start", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(row, ptr, "midtones_end", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(row, ptr, "midtones_start", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(row, ptr, "midtones_end", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
-class ColorCorrectionShaderNode : public ShaderNode {
- public:
-  using ShaderNode::ShaderNode;
-
-  void compile(GPUMaterial *material) override
-  {
-    GPUNodeStack *inputs = get_inputs_array();
-    GPUNodeStack *outputs = get_outputs_array();
-
-    float enabled_channels[3];
-    get_enabled_channels(enabled_channels);
-    float luminance_coefficients[3];
-    IMB_colormanagement_get_luminance_coefficients(luminance_coefficients);
-
-    const NodeColorCorrection &node_color_correction = node_storage(bnode());
-
-    GPU_stack_link(material,
-                   &bnode(),
-                   "node_composite_color_correction",
-                   inputs,
-                   outputs,
-                   GPU_constant(enabled_channels),
-                   GPU_uniform(&node_color_correction.startmidtones),
-                   GPU_uniform(&node_color_correction.endmidtones),
-                   GPU_uniform(&node_color_correction.master.saturation),
-                   GPU_uniform(&node_color_correction.master.contrast),
-                   GPU_uniform(&node_color_correction.master.gamma),
-                   GPU_uniform(&node_color_correction.master.gain),
-                   GPU_uniform(&node_color_correction.master.lift),
-                   GPU_uniform(&node_color_correction.shadows.saturation),
-                   GPU_uniform(&node_color_correction.shadows.contrast),
-                   GPU_uniform(&node_color_correction.shadows.gamma),
-                   GPU_uniform(&node_color_correction.shadows.gain),
-                   GPU_uniform(&node_color_correction.shadows.lift),
-                   GPU_uniform(&node_color_correction.midtones.saturation),
-                   GPU_uniform(&node_color_correction.midtones.contrast),
-                   GPU_uniform(&node_color_correction.midtones.gamma),
-                   GPU_uniform(&node_color_correction.midtones.gain),
-                   GPU_uniform(&node_color_correction.midtones.lift),
-                   GPU_uniform(&node_color_correction.highlights.saturation),
-                   GPU_uniform(&node_color_correction.highlights.contrast),
-                   GPU_uniform(&node_color_correction.highlights.gamma),
-                   GPU_uniform(&node_color_correction.highlights.gain),
-                   GPU_uniform(&node_color_correction.highlights.lift),
-                   GPU_constant(luminance_coefficients));
-  }
-
-  void get_enabled_channels(float enabled_channels[3])
-  {
-    for (int i = 0; i < 3; i++) {
-      enabled_channels[i] = (bnode().custom1 & (1 << i)) ? 1.0f : 0.0f;
-    }
-  }
-};
-
-static ShaderNode *get_compositor_shader_node(DNode node)
+static void get_enabled_channels(const bNode &node, float enabled_channels[3])
 {
-  return new ColorCorrectionShaderNode(node);
+  for (int i = 0; i < 3; i++) {
+    enabled_channels[i] = (node.custom1 & (1 << i)) ? 1.0f : 0.0f;
+  }
+}
+
+static int node_gpu_material(GPUMaterial *material,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *inputs,
+                             GPUNodeStack *outputs)
+{
+  float enabled_channels[3];
+  get_enabled_channels(*node, enabled_channels);
+  float luminance_coefficients[3];
+  IMB_colormanagement_get_luminance_coefficients(luminance_coefficients);
+
+  const NodeColorCorrection &node_color_correction = node_storage(*node);
+
+  return GPU_stack_link(material,
+                        node,
+                        "node_composite_color_correction",
+                        inputs,
+                        outputs,
+                        GPU_constant(enabled_channels),
+                        GPU_uniform(&node_color_correction.startmidtones),
+                        GPU_uniform(&node_color_correction.endmidtones),
+                        GPU_uniform(&node_color_correction.master.saturation),
+                        GPU_uniform(&node_color_correction.master.contrast),
+                        GPU_uniform(&node_color_correction.master.gamma),
+                        GPU_uniform(&node_color_correction.master.gain),
+                        GPU_uniform(&node_color_correction.master.lift),
+                        GPU_uniform(&node_color_correction.shadows.saturation),
+                        GPU_uniform(&node_color_correction.shadows.contrast),
+                        GPU_uniform(&node_color_correction.shadows.gamma),
+                        GPU_uniform(&node_color_correction.shadows.gain),
+                        GPU_uniform(&node_color_correction.shadows.lift),
+                        GPU_uniform(&node_color_correction.midtones.saturation),
+                        GPU_uniform(&node_color_correction.midtones.contrast),
+                        GPU_uniform(&node_color_correction.midtones.gamma),
+                        GPU_uniform(&node_color_correction.midtones.gain),
+                        GPU_uniform(&node_color_correction.midtones.lift),
+                        GPU_uniform(&node_color_correction.highlights.saturation),
+                        GPU_uniform(&node_color_correction.highlights.contrast),
+                        GPU_uniform(&node_color_correction.highlights.gamma),
+                        GPU_uniform(&node_color_correction.highlights.gain),
+                        GPU_uniform(&node_color_correction.highlights.lift),
+                        GPU_constant(luminance_coefficients));
 }
 
 static float4 color_correction(const float4 &color,
@@ -486,16 +499,22 @@ void register_node_type_cmp_colorcorrection()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_COLORCORRECTION, "Color Correction", NODE_CLASS_OP_COLOR);
+  cmp_node_type_base(&ntype, "CompositorNodeColorCorrection", CMP_NODE_COLORCORRECTION);
+  ntype.ui_name = "Color Correction";
+  ntype.ui_description =
+      "Adjust the color of an image, separately in several tonal ranges (highlights, midtones and "
+      "shadows)";
+  ntype.enum_name_legacy = "COLORCORRECTION";
+  ntype.nclass = NODE_CLASS_OP_COLOR;
   ntype.declare = file_ns::cmp_node_colorcorrection_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_colorcorrection;
   ntype.draw_buttons_ex = file_ns::node_composit_buts_colorcorrection_ex;
-  blender::bke::node_type_size(&ntype, 400, 200, 600);
+  blender::bke::node_type_size(ntype, 400, 200, 600);
   ntype.initfunc = file_ns::node_composit_init_colorcorrection;
   blender::bke::node_type_storage(
-      &ntype, "NodeColorCorrection", node_free_standard_storage, node_copy_standard_storage);
-  ntype.get_compositor_shader_node = file_ns::get_compositor_shader_node;
+      ntype, "NodeColorCorrection", node_free_standard_storage, node_copy_standard_storage);
+  ntype.gpu_fn = file_ns::node_gpu_material;
   ntype.build_multi_function = file_ns::node_build_multi_function;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

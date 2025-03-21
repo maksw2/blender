@@ -9,8 +9,6 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_array_utils.hh"
-#include "BLI_bitmap.h"
-#include "BLI_linklist.h"
 #include "BLI_math_vector.h"
 
 #include "BLT_translation.hh"
@@ -18,8 +16,6 @@
 #include "DNA_defaults.h"
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
-#include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
 #include "BKE_attribute.hh"
@@ -27,7 +23,6 @@
 #include "BKE_deform.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_mesh.hh"
-#include "BKE_mesh_mapping.hh"
 #include "BKE_screen.hh"
 
 #include "UI_interface.hh"
@@ -225,7 +220,6 @@ static void apply_weights_vertex_normal(WeightedNormalModifierData *wnmd,
                                     corner_verts,
                                     corner_edges,
                                     loop_to_face,
-                                    wn_data->vert_normals,
                                     wn_data->face_normals,
                                     wn_data->sharp_edges,
                                     wn_data->sharp_faces,
@@ -353,7 +347,6 @@ static void apply_weights_vertex_normal(WeightedNormalModifierData *wnmd,
                                                corner_verts,
                                                corner_edges,
                                                loop_to_face,
-                                               wn_data->vert_normals,
                                                face_normals,
                                                wn_data->sharp_edges,
                                                wn_data->sharp_faces,
@@ -388,8 +381,7 @@ static void wn_face_area(WeightedNormalModifierData *wnmd, WeightedNormalData *w
   const blender::OffsetIndices faces = wn_data->faces;
   const blender::Span<int> corner_verts = wn_data->corner_verts;
 
-  ModePair *face_area = static_cast<ModePair *>(
-      MEM_malloc_arrayN(faces.size(), sizeof(*face_area), __func__));
+  ModePair *face_area = MEM_malloc_arrayN<ModePair>(size_t(faces.size()), __func__);
 
   ModePair *f_area = face_area;
   for (const int i : faces.index_range()) {
@@ -409,13 +401,11 @@ static void wn_corner_angle(WeightedNormalModifierData *wnmd, WeightedNormalData
   const blender::OffsetIndices faces = wn_data->faces;
   const blender::Span<int> corner_verts = wn_data->corner_verts;
 
-  ModePair *corner_angle = static_cast<ModePair *>(
-      MEM_malloc_arrayN(corner_verts.size(), sizeof(*corner_angle), __func__));
+  ModePair *corner_angle = MEM_malloc_arrayN<ModePair>(size_t(corner_verts.size()), __func__);
 
   for (const int i : faces.index_range()) {
     const blender::IndexRange face = faces[i];
-    float *index_angle = static_cast<float *>(
-        MEM_malloc_arrayN(face.size(), sizeof(*index_angle), __func__));
+    float *index_angle = MEM_malloc_arrayN<float>(size_t(face.size()), __func__);
     blender::bke::mesh::face_angles_calc(
         positions, corner_verts.slice(face), {index_angle, face.size()});
 
@@ -442,15 +432,13 @@ static void wn_face_with_angle(WeightedNormalModifierData *wnmd, WeightedNormalD
   const blender::OffsetIndices faces = wn_data->faces;
   const blender::Span<int> corner_verts = wn_data->corner_verts;
 
-  ModePair *combined = static_cast<ModePair *>(
-      MEM_malloc_arrayN(corner_verts.size(), sizeof(*combined), __func__));
+  ModePair *combined = MEM_malloc_arrayN<ModePair>(size_t(corner_verts.size()), __func__);
 
   for (const int i : faces.index_range()) {
     const blender::IndexRange face = faces[i];
     const blender::Span<int> face_verts = corner_verts.slice(face);
     const float face_area = blender::bke::mesh::face_area_calc(positions, face_verts);
-    float *index_angle = static_cast<float *>(
-        MEM_malloc_arrayN(size_t(face.size()), sizeof(*index_angle), __func__));
+    float *index_angle = MEM_malloc_arrayN<float>(size_t(face.size()), __func__);
     blender::bke::mesh::face_angles_calc(positions, face_verts, {index_angle, face.size()});
 
     ModePair *cmbnd = &combined[face.start()];
@@ -597,16 +585,16 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   uiLayoutSetPropSep(layout, true);
 
-  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   uiItemR(layout, ptr, "weight", UI_ITEM_NONE, IFACE_("Weight"), ICON_NONE);
   uiItemR(layout, ptr, "thresh", UI_ITEM_NONE, IFACE_("Threshold"), ICON_NONE);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "keep_sharp", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "use_face_influence", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "keep_sharp", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "use_face_influence", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", nullptr);
+  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", std::nullopt);
 
   modifier_panel_end(layout, ptr);
 }

@@ -87,7 +87,6 @@
 #include "BLI_span.hh"
 #include "BLI_string_ref.hh"
 #include "BLI_task.hh"
-#include "BLI_timeit.hh"
 #include "BLI_vector.hh"
 
 #include "BKE_attribute.hh"
@@ -102,7 +101,6 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "bmesh.hh"
-#include "intern/bmesh_private.hh" /* For element checking. */
 
 #include "CLG_log.h"
 
@@ -127,7 +125,7 @@ bool BM_attribute_stored_in_bmesh_builtin(const StringRef name)
               ".hide_vert",
               ".hide_edge",
               ".hide_poly",
-              ".uv_seam",
+              "uv_seam",
               ".select_vert",
               ".select_edge",
               ".select_poly",
@@ -239,33 +237,39 @@ void BM_mesh_bm_from_me(BMesh *bm, const Mesh *mesh, const BMeshFromMeshParams *
   for (const int layer_index :
        IndexRange(CustomData_number_of_layers(&mesh_ldata, CD_PROP_FLOAT2)))
   {
-    char name[MAX_CUSTOMDATA_LAYER_NAME];
-    BKE_uv_map_vert_select_name_get(
-        CustomData_get_layer_name(&mesh_ldata, CD_PROP_FLOAT2, layer_index), name);
-    if (CustomData_get_named_layer_index(&mesh_ldata, CD_PROP_BOOL, name) < 0) {
-      CustomData_add_layer_named(
-          &mesh_ldata, CD_PROP_BOOL, CD_SET_DEFAULT, mesh->corners_num, name);
-      temporary_layers_to_delete.append(std::string(name));
+    char buffer[MAX_CUSTOMDATA_LAYER_NAME];
+    {
+      const StringRef name = BKE_uv_map_vert_select_name_get(
+          CustomData_get_layer_name(&mesh_ldata, CD_PROP_FLOAT2, layer_index), buffer);
+      if (CustomData_get_named_layer_index(&mesh_ldata, CD_PROP_BOOL, name) < 0) {
+        CustomData_add_layer_named(
+            &mesh_ldata, CD_PROP_BOOL, CD_SET_DEFAULT, mesh->corners_num, name);
+        temporary_layers_to_delete.append(std::string(name));
+      }
     }
-    BKE_uv_map_edge_select_name_get(
-        CustomData_get_layer_name(&mesh_ldata, CD_PROP_FLOAT2, layer_index), name);
-    if (CustomData_get_named_layer_index(&mesh_ldata, CD_PROP_BOOL, name) < 0) {
-      CustomData_add_layer_named(
-          &mesh_ldata, CD_PROP_BOOL, CD_SET_DEFAULT, mesh->corners_num, name);
-      temporary_layers_to_delete.append(std::string(name));
+    {
+      const StringRef name = BKE_uv_map_edge_select_name_get(
+          CustomData_get_layer_name(&mesh_ldata, CD_PROP_FLOAT2, layer_index), buffer);
+      if (CustomData_get_named_layer_index(&mesh_ldata, CD_PROP_BOOL, name) < 0) {
+        CustomData_add_layer_named(
+            &mesh_ldata, CD_PROP_BOOL, CD_SET_DEFAULT, mesh->corners_num, name);
+        temporary_layers_to_delete.append(std::string(name));
+      }
     }
-    BKE_uv_map_pin_name_get(CustomData_get_layer_name(&mesh_ldata, CD_PROP_FLOAT2, layer_index),
-                            name);
-    if (CustomData_get_named_layer_index(&mesh_ldata, CD_PROP_BOOL, name) < 0) {
-      CustomData_add_layer_named(
-          &mesh_ldata, CD_PROP_BOOL, CD_SET_DEFAULT, mesh->corners_num, name);
-      temporary_layers_to_delete.append(std::string(name));
+    {
+      const StringRef name = BKE_uv_map_pin_name_get(
+          CustomData_get_layer_name(&mesh_ldata, CD_PROP_FLOAT2, layer_index), buffer);
+      if (CustomData_get_named_layer_index(&mesh_ldata, CD_PROP_BOOL, name) < 0) {
+        CustomData_add_layer_named(
+            &mesh_ldata, CD_PROP_BOOL, CD_SET_DEFAULT, mesh->corners_num, name);
+        temporary_layers_to_delete.append(std::string(name));
+      }
     }
   }
 
   BLI_SCOPED_DEFER([&]() {
     for (const std::string &name : temporary_layers_to_delete) {
-      CustomData_free_layer_named(&mesh_ldata, name, mesh->corners_num);
+      CustomData_free_layer_named(&mesh_ldata, name);
     }
 
     MEM_SAFE_FREE(mesh_vdata.layers);
@@ -426,7 +430,7 @@ void BM_mesh_bm_from_me(BMesh *bm, const Mesh *mesh, const BMeshFromMeshParams *
   const VArraySpan material_indices = *attributes.lookup<int>("material_index", AttrDomain::Face);
   const VArraySpan sharp_faces = *attributes.lookup<bool>("sharp_face", AttrDomain::Face);
   const VArraySpan sharp_edges = *attributes.lookup<bool>("sharp_edge", AttrDomain::Edge);
-  const VArraySpan uv_seams = *attributes.lookup<bool>(".uv_seam", AttrDomain::Edge);
+  const VArraySpan uv_seams = *attributes.lookup<bool>("uv_seam", AttrDomain::Edge);
 
   const Span<float3> positions = mesh->vert_positions();
   Array<BMVert *> vtable(mesh->verts_num);
@@ -1157,7 +1161,7 @@ static void bm_face_loop_table_build(BMesh &bm,
   for (const int i : IndexRange(CustomData_number_of_layers(&ldata, CD_PROP_FLOAT2))) {
     char const *layer_name = CustomData_get_layer_name(&ldata, CD_PROP_FLOAT2, i);
     char sub_layer_name[MAX_CUSTOMDATA_LAYER_NAME];
-    auto add_bool_layer = [&](Vector<int> &layers, const char *name) {
+    auto add_bool_layer = [&](Vector<int> &layers, const StringRef name) {
       const int layer_index = CustomData_get_named_layer_index(&ldata, CD_PROP_BOOL, name);
       if (layer_index != -1) {
         layers.append(layer_index);
@@ -1255,7 +1259,7 @@ static void bm_to_mesh_verts(const BMesh &bm,
                              MutableSpan<bool> select_vert,
                              MutableSpan<bool> hide_vert)
 {
-  CustomData_free_layer_named(&mesh.vert_data, "position", mesh.verts_num);
+  CustomData_free_layer_named(&mesh.vert_data, "position");
   CustomData_add_layer_named(
       &mesh.vert_data, CD_PROP_FLOAT3, CD_CONSTRUCT, mesh.verts_num, "position");
   const Vector<BMeshToMeshLayerInfo> info = bm_to_mesh_copy_info_calc(bm.vdata, mesh.vert_data);
@@ -1298,7 +1302,7 @@ static void bm_to_mesh_edges(const BMesh &bm,
                              MutableSpan<bool> sharp_edge,
                              MutableSpan<bool> uv_seams)
 {
-  CustomData_free_layer_named(&mesh.edge_data, ".edge_verts", mesh.edges_num);
+  CustomData_free_layer_named(&mesh.edge_data, ".edge_verts");
   CustomData_add_layer_named(
       &mesh.edge_data, CD_PROP_INT32_2D, CD_CONSTRUCT, mesh.edges_num, ".edge_verts");
   const Vector<BMeshToMeshLayerInfo> info = bm_to_mesh_copy_info_calc(bm.edata, mesh.edge_data);
@@ -1385,8 +1389,8 @@ static void bm_to_mesh_faces(const BMesh &bm,
 
 static void bm_to_mesh_loops(const BMesh &bm, const Span<const BMLoop *> bm_loops, Mesh &mesh)
 {
-  CustomData_free_layer_named(&mesh.corner_data, ".corner_vert", mesh.corners_num);
-  CustomData_free_layer_named(&mesh.corner_data, ".corner_edge", mesh.corners_num);
+  CustomData_free_layer_named(&mesh.corner_data, ".corner_vert");
+  CustomData_free_layer_named(&mesh.corner_data, ".corner_edge");
   CustomData_add_layer_named(
       &mesh.corner_data, CD_PROP_INT32, CD_CONSTRUCT, mesh.corners_num, ".corner_vert");
   CustomData_add_layer_named(
@@ -1502,7 +1506,7 @@ void BM_mesh_bm_to_me(Main *bmain, BMesh *bm, Mesh *mesh, const BMeshToMeshParam
     sharp_edge = attrs.lookup_or_add_for_write_only_span<bool>("sharp_edge", AttrDomain::Edge);
   }
   if (need_uv_seams) {
-    uv_seams = attrs.lookup_or_add_for_write_only_span<bool>(".uv_seam", AttrDomain::Edge);
+    uv_seams = attrs.lookup_or_add_for_write_only_span<bool>("uv_seam", AttrDomain::Edge);
   }
   if (need_hide_edge) {
     hide_edge = attrs.lookup_or_add_for_write_only_span<bool>(".hide_edge", AttrDomain::Edge);
@@ -1729,7 +1733,7 @@ void BM_mesh_bm_to_me_compact(BMesh &bm,
       sharp_edge = attrs.lookup_or_add_for_write_only_span<bool>("sharp_edge", AttrDomain::Edge);
     }
     if (need_uv_seams) {
-      uv_seams = attrs.lookup_or_add_for_write_only_span<bool>(".uv_seam", AttrDomain::Edge);
+      uv_seams = attrs.lookup_or_add_for_write_only_span<bool>("uv_seam", AttrDomain::Edge);
     }
     if (need_hide_edge) {
       hide_edge = attrs.lookup_or_add_for_write_only_span<bool>(".hide_edge", AttrDomain::Edge);

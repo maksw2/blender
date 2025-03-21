@@ -6,19 +6,18 @@
  * \ingroup bke
  */
 
-#include "BKE_subdiv_foreach.hh"
-
-#include "atomic_ops.h"
-
 #include "BLI_bitmap.h"
 #include "BLI_task.h"
 
 #include "BKE_customdata.hh"
-#include "BKE_mesh.hh"
 #include "BKE_subdiv.hh"
+#include "BKE_subdiv_foreach.hh"
 #include "BKE_subdiv_mesh.hh"
 
+#include "DNA_mesh_types.h"
 #include "MEM_guardedalloc.h"
+
+#include "atomic_ops.h"
 
 namespace blender::bke::subdiv {
 
@@ -248,12 +247,12 @@ static void subdiv_foreach_ctx_init(Subdiv *subdiv, ForeachTaskContext *ctx)
   /* Allocate maps and offsets. */
   ctx->coarse_vertices_used_map = BLI_BITMAP_NEW(coarse_mesh->verts_num, "vertices used map");
   ctx->coarse_edges_used_map = BLI_BITMAP_NEW(coarse_mesh->edges_num, "edges used map");
-  ctx->subdiv_vertex_offset = static_cast<int *>(MEM_malloc_arrayN(
-      coarse_mesh->faces_num, sizeof(*ctx->subdiv_vertex_offset), "vertex_offset"));
-  ctx->subdiv_edge_offset = static_cast<int *>(MEM_malloc_arrayN(
-      coarse_mesh->faces_num, sizeof(*ctx->subdiv_edge_offset), "subdiv_edge_offset"));
-  ctx->subdiv_face_offset = static_cast<int *>(MEM_malloc_arrayN(
-      coarse_mesh->faces_num, sizeof(*ctx->subdiv_face_offset), "subdiv_edge_offset"));
+  ctx->subdiv_vertex_offset = MEM_malloc_arrayN<int>(size_t(coarse_mesh->faces_num),
+                                                     "vertex_offset");
+  ctx->subdiv_edge_offset = MEM_malloc_arrayN<int>(size_t(coarse_mesh->faces_num),
+                                                   "subdiv_edge_offset");
+  ctx->subdiv_face_offset = MEM_malloc_arrayN<int>(size_t(coarse_mesh->faces_num),
+                                                   "subdiv_edge_offset");
   /* Initialize all offsets. */
   subdiv_foreach_ctx_init_offsets(ctx);
   /* Calculate number of geometry in the result subdivision mesh. */

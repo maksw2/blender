@@ -26,7 +26,7 @@ static void cmp_node_normalize_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Float>("Value");
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class NormalizeOperation : public NodeOperation {
  private:
@@ -42,10 +42,10 @@ class NormalizeOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &input_image = this->get_input("Value");
-    Result &output_image = this->get_result("Value");
+    const Result &input_image = this->get_input("Value");
     if (input_image.is_single_value()) {
-      input_image.pass_through(output_image);
+      Result &output_image = this->get_result("Value");
+      output_image.share_data(input_image);
       return;
     }
 
@@ -93,10 +93,10 @@ class NormalizeOperation : public NodeOperation {
     output.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      const float value = image.load_pixel(texel).x;
+      const float value = image.load_pixel<float>(texel);
       const float normalized_value = (value - minimum) * scale;
       const float clamped_value = math::clamp(normalized_value, 0.0f, 1.0f);
-      output.store_pixel(texel, float4(clamped_value));
+      output.store_pixel(texel, clamped_value);
     });
   }
 };
@@ -114,9 +114,14 @@ void register_node_type_cmp_normalize()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_NORMALIZE, "Normalize", NODE_CLASS_OP_VECTOR);
+  cmp_node_type_base(&ntype, "CompositorNodeNormalize", CMP_NODE_NORMALIZE);
+  ntype.ui_name = "Normalize";
+  ntype.ui_description =
+      "Map values to 0 to 1 range, based on the minimum and maximum pixel values";
+  ntype.enum_name_legacy = "NORMALIZE";
+  ntype.nclass = NODE_CLASS_OP_VECTOR;
   ntype.declare = file_ns::cmp_node_normalize_declare;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

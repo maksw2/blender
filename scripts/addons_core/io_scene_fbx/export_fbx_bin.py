@@ -870,8 +870,9 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
         fbx_data_element_custom_properties(props, me)
 
     # Subdivision levels. Take them from the first found subsurf modifier from the
-    # first object that has the mesh. Write crease information if the object has
-    # and subsurf modifier.
+    # first object that has the mesh. Always write crease information if present,
+    # if the modifier explicitly uses creases ("use_creases" setting) and mesh lacks them,
+    # still provide zeros (see TODO comment below)
     write_crease = False
     if scene_data.settings.use_subsurf:
         last_subsurf = None
@@ -895,6 +896,7 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
             elem_data_single_int32(geom, b"PropagateEdgeHardness", 0)
 
             write_crease = last_subsurf.use_creases
+    write_crease = (write_crease or me.edge_creases)
 
     elem_data_single_int32(geom, b"GeometryVersion", FBX_GEOMETRY_VERSION)
 
@@ -1030,7 +1032,7 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
     # And now, layers!
 
     # Smoothing.
-    if smooth_type in {'FACE', 'EDGE'}:
+    if smooth_type in {'FACE', 'EDGE', 'SMOOTH_GROUP'}:
         ps_fbx_dtype = np.int32
         _map = b""
         if smooth_type == 'FACE':
@@ -1044,6 +1046,10 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
             else:
                 # The mesh has no "sharp_face" attribute, so every face is smooth.
                 t_ps = np.ones(len(me.polygons), dtype=ps_fbx_dtype)
+            _map = b"ByPolygon"
+        elif smooth_type == 'SMOOTH_GROUP':
+            smoothing_groups = me.calc_smooth_groups(use_bitflags=True, use_boundary_vertices_for_bitflags=True)[0]
+            t_ps = np.asarray(smoothing_groups, dtype=ps_fbx_dtype)
             _map = b"ByPolygon"
         else:  # EDGE
             _map = b"ByEdge"
@@ -1501,14 +1507,14 @@ def fbx_data_mesh_elements(root, me_obj, scene_data, done_meshes):
         lay_tan = elem_empty(layer, b"LayerElement")
         elem_data_single_string(lay_tan, b"Type", b"LayerElementTangent")
         elem_data_single_int32(lay_tan, b"TypedIndex", 0)
-    if smooth_type in {'FACE', 'EDGE'}:
+    if smooth_type in {'FACE', 'EDGE', 'SMOOTH_GROUP'}:
         lay_smooth = elem_empty(layer, b"LayerElement")
         elem_data_single_string(lay_smooth, b"Type", b"LayerElementSmoothing")
         elem_data_single_int32(lay_smooth, b"TypedIndex", 0)
     if write_crease:
-        lay_smooth = elem_empty(layer, b"LayerElement")
-        elem_data_single_string(lay_smooth, b"Type", b"LayerElementEdgeCrease")
-        elem_data_single_int32(lay_smooth, b"TypedIndex", 0)
+        lay_crease = elem_empty(layer, b"LayerElement")
+        elem_data_single_string(lay_crease, b"Type", b"LayerElementEdgeCrease")
+        elem_data_single_int32(lay_crease, b"TypedIndex", 0)
     if vcolnumber:
         lay_vcol = elem_empty(layer, b"LayerElement")
         elem_data_single_string(lay_vcol, b"Type", b"LayerElementColor")

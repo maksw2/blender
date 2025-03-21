@@ -196,6 +196,7 @@ class String : public SocketDeclaration {
 
   std::string default_value;
   PropertySubType subtype = PROP_NONE;
+  std::optional<std::string> path_filter;
 
   friend StringBuilder;
 
@@ -211,6 +212,7 @@ class StringBuilder : public SocketDeclarationBuilder<String> {
  public:
   StringBuilder &default_value(const std::string value);
   StringBuilder &subtype(PropertySubType subtype);
+  StringBuilder &path_filter(std::optional<std::string> filter);
 };
 
 class MenuBuilder;
@@ -246,7 +248,6 @@ class IDSocketDeclaration : public SocketDeclaration {
    */
   std::function<ID *(const bNode &node)> default_value_fn;
 
- public:
   IDSocketDeclaration(const char *idname);
 
   bNodeSocket &build(bNodeTree &ntree, bNode &node) const override;

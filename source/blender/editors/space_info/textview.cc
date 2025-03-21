@@ -13,6 +13,7 @@
 #include "BLF_api.hh"
 
 #include "BLI_math_color.h"
+#include "BLI_math_vector.h"
 #include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
 
@@ -347,9 +348,7 @@ int textview_draw(TextViewContext *tvc,
   /* NOTE: scroll bar must be already subtracted. */
   tds.columns = (tvc->draw_rect.xmax - tvc->draw_rect.xmin) / tds.cwidth;
   /* Avoid divide by zero on small windows. */
-  if (tds.columns < 1) {
-    tds.columns = 1;
-  }
+  tds.columns = std::max(tds.columns, 1);
   tds.draw_rect = &tvc->draw_rect;
   tds.draw_rect_outer = &tvc->draw_rect_outer;
   tds.scroll_ymin = tvc->scroll_ymin;

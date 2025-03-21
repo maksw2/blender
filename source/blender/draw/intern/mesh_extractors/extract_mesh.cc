@@ -8,10 +8,7 @@
  * \brief Extraction of Mesh data into VBO to feed to GPU.
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "DNA_meshdata_types.h"
-#include "DNA_object_types.h"
 
 #include "ED_uvedit.hh"
 
@@ -27,7 +24,7 @@ namespace blender::draw {
 
 void mesh_render_data_face_flag(const MeshRenderData &mr,
                                 const BMFace *efa,
-                                const BMUVOffsets offsets,
+                                const BMUVOffsets &offsets,
                                 EditLoopData &eattr)
 {
   if (efa == mr.efa_act) {
@@ -57,7 +54,7 @@ void mesh_render_data_face_flag(const MeshRenderData &mr,
 
 void mesh_render_data_loop_flag(const MeshRenderData &mr,
                                 const BMLoop *l,
-                                const BMUVOffsets offsets,
+                                const BMUVOffsets &offsets,
                                 EditLoopData &eattr)
 {
   if (offsets.uv == -1) {
@@ -73,7 +70,7 @@ void mesh_render_data_loop_flag(const MeshRenderData &mr,
 
 void mesh_render_data_loop_edge_flag(const MeshRenderData &mr,
                                      const BMLoop *l,
-                                     const BMUVOffsets offsets,
+                                     const BMUVOffsets &offsets,
                                      EditLoopData &eattr)
 {
   if (offsets.uv == -1) {

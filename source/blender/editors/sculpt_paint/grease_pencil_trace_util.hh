@@ -4,12 +4,11 @@
 
 #pragma once
 
-#include "BKE_attribute.hh"
-#include "BKE_curves.hh"
 #include "BLI_color.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
+#include "BLI_string_ref.hh"
 #include "BLI_task.hh"
 
 #include "IMB_imbuf_types.hh"
@@ -98,6 +97,10 @@ bke::CurvesGeometry trace_to_curves(const Trace &trace,
 
 /* Inline functions. */
 
+/**
+ * Convert an image to a potrace bitmap representing foreground and background regions.
+ * \param fn: Function that returns true if the given color is a foreground color.
+ */
 template<typename ThresholdFn> Bitmap *image_to_bitmap(const ImBuf &ibuf, ThresholdFn fn)
 {
 #ifdef WITH_POTRACE

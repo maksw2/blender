@@ -7,7 +7,6 @@
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
-#include "BKE_fcurve.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
@@ -18,9 +17,6 @@
 #include "DNA_object_types.h"
 
 #include "BLI_listbase.h"
-#include "BLI_string_utf8.h"
-
-#include <limits>
 
 #include "CLG_log.h"
 #include "testing/testing.h"
@@ -97,8 +93,10 @@ TEST_F(NLASlottedActionTest, assign_slot_to_nla_strip)
   EXPECT_EQ(strip->act, nullptr);
   EXPECT_EQ(action->id.us, 0);
 
-  /* Create a slot for this ID. Assigning the Action should auto-pick it. */
+  /* Create a slot for this ID, and make the NLA strip forget what slot it was assigned to before.
+   * Assigning the Action should now auto-pick the slot with the ID name. */
   Slot &slot = action->slot_add_for_id(cube->id);
+  strip->last_slot_identifier[0] = '\0';
   EXPECT_TRUE(nla::assign_action(*strip, *action, cube->id));
   EXPECT_EQ(strip->action_slot_handle, slot.handle);
   EXPECT_STREQ(strip->last_slot_identifier, slot.identifier);
@@ -149,7 +147,7 @@ TEST_F(NLASlottedActionTest, assign_slot_to_multiple_strips)
   EXPECT_STREQ(strip1->last_slot_identifier, slot.identifier);
   EXPECT_EQ(slot.idtype, ID_OB);
 
-  /* Assign another slot slot 'manually'. */
+  /* Assign another slot 'manually'. */
   Slot &other_slot = action->slot_add();
   EXPECT_EQ(nla::assign_action_slot(*strip1, &other_slot, cube->id),
             ActionSlotAssignmentResult::OK);

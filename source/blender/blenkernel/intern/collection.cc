@@ -14,12 +14,13 @@
 #include <cstring>
 #include <optional>
 
-#include "BLI_blenlib.h"
 #include "BLI_iterator.h"
 #include "BLI_listbase.h"
 #include "BLI_math_base.h"
+#include "BLI_string.h"
 #include "BLI_string_utils.hh"
 #include "BLI_threads.h"
+
 #include "BLT_translation.hh"
 
 #include "BKE_anim_data.hh"
@@ -30,10 +31,10 @@
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_lib_remap.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_object.hh"
 #include "BKE_preview_image.hh"
-#include "BKE_report.hh"
 #include "BKE_rigidbody.h"
 #include "BKE_scene.hh"
 
@@ -239,11 +240,11 @@ static void collection_foreach_id(ID *id, LibraryForeachIDData *data)
   LISTBASE_FOREACH (CollectionParent *, parent, &collection->runtime.parents) {
     /* XXX This is very weak. The whole idea of keeping pointers to private IDs is very bad
      * anyway... */
-    const int cb_flag = ((parent->collection != nullptr &&
-                          (data_flags & IDWALK_NO_ORIG_POINTERS_ACCESS) == 0 &&
-                          (parent->collection->id.flag & ID_FLAG_EMBEDDED_DATA) != 0) ?
-                             IDWALK_CB_EMBEDDED_NOT_OWNING :
-                             IDWALK_CB_NOP);
+    const LibraryForeachIDCallbackFlag cb_flag =
+        ((parent->collection != nullptr && (data_flags & IDWALK_NO_ORIG_POINTERS_ACCESS) == 0 &&
+          (parent->collection->id.flag & ID_FLAG_EMBEDDED_DATA) != 0) ?
+             IDWALK_CB_EMBEDDED_NOT_OWNING :
+             IDWALK_CB_NOP);
     BKE_LIB_FOREACHID_PROCESS_IDSUPER(
         data, parent->collection, IDWALK_CB_NEVER_SELF | IDWALK_CB_LOOPBACK | cb_flag);
   }
@@ -839,7 +840,7 @@ static void collection_object_cache_fill(ListBase *lb,
     Base *base = static_cast<Base *>(BLI_findptr(lb, cob->ob, offsetof(Base, object)));
 
     if (base == nullptr) {
-      base = static_cast<Base *>(MEM_callocN(sizeof(Base), "Object Base"));
+      base = MEM_callocN<Base>("Object Base");
       base->object = cob->ob;
       BLI_addtail(lb, base);
       if (with_instances && cob->ob->instance_collection) {
@@ -1310,13 +1311,51 @@ static void collection_gobject_assert_internal_consistency(Collection *collectio
   }
 }
 
+/**
+ * Check if a collection is editable, i.e. if its lists of objects and sub-collections can be
+ * modified.
+ *
+ * \note LibOverride collections are currently not editable in that sense.
+ * \note If a view layer is given, then the collection must also belong to it and not be excluded
+ * from it to be considered as editable.
+ */
+static bool collection_is_editable_in_viewlayer(const ViewLayer *view_layer,
+                                                Collection *collection,
+                                                bool &r_is_in_viewlayer)
+{
+  LayerCollection *layer_collection = view_layer ?
+                                          BKE_layer_collection_first_from_scene_collection(
+                                              view_layer, collection) :
+                                          nullptr;
+  r_is_in_viewlayer = layer_collection != nullptr;
+
+  if (!ID_IS_EDITABLE(collection) || ID_IS_OVERRIDE_LIBRARY(collection)) {
+    return false;
+  }
+  if (!view_layer) {
+    return true;
+  }
+
+  if (!layer_collection) {
+    return false;
+  }
+  if (layer_collection->flag & LAYER_COLLECTION_EXCLUDE) {
+    return false;
+  }
+  return true;
+}
+
 Collection *BKE_collection_parent_editable_find_recursive(const ViewLayer *view_layer,
                                                           Collection *collection)
 {
-  if (ID_IS_EDITABLE(collection) && !ID_IS_OVERRIDE_LIBRARY(collection) &&
-      (view_layer == nullptr || BKE_view_layer_has_collection(view_layer, collection)))
-  {
+  bool is_in_viewlayer = false;
+  if (collection_is_editable_in_viewlayer(view_layer, collection, is_in_viewlayer)) {
     return collection;
+  }
+  if (view_layer && !is_in_viewlayer) {
+    /* In case the collection is not in given view_layer, there is no point in searching in its
+     * ancestors either. */
+    return nullptr;
   }
 
   if (collection->flag & COLLECTION_IS_MASTER) {
@@ -1324,21 +1363,9 @@ Collection *BKE_collection_parent_editable_find_recursive(const ViewLayer *view_
   }
 
   LISTBASE_FOREACH (CollectionParent *, collection_parent, &collection->runtime.parents) {
-    if (!ID_IS_LINKED(collection_parent->collection) &&
-        !ID_IS_OVERRIDE_LIBRARY(collection_parent->collection))
-    {
-      if (view_layer != nullptr &&
-          !BKE_view_layer_has_collection(view_layer, collection_parent->collection))
-      {
-        /* In case this parent collection is not in given view_layer, there is no point in
-         * searching in its ancestors either, we can skip that whole parenting branch. */
-        continue;
-      }
-      return collection_parent->collection;
-    }
     Collection *editable_collection = BKE_collection_parent_editable_find_recursive(
         view_layer, collection_parent->collection);
-    if (editable_collection != nullptr) {
+    if (editable_collection) {
       return editable_collection;
     }
   }
@@ -1368,8 +1395,7 @@ static bool collection_object_add(Main *bmain,
     return false;
   }
 
-  CollectionObject *cob = static_cast<CollectionObject *>(
-      MEM_callocN(sizeof(CollectionObject), __func__));
+  CollectionObject *cob = MEM_callocN<CollectionObject>(__func__);
   cob->ob = ob;
   if (light_linking) {
     cob->light_linking = *light_linking;
@@ -1426,7 +1452,7 @@ static bool collection_object_remove(
 
 static void collection_exporter_copy(Collection *collection, CollectionExport *data)
 {
-  CollectionExport *new_data = MEM_cnew<CollectionExport>("CollectionExport");
+  CollectionExport *new_data = MEM_callocN<CollectionExport>("CollectionExport");
   STRNCPY(new_data->fh_idname, data->fh_idname);
   new_data->export_properties = IDP_CopyProperty(data->export_properties);
   new_data->flag = data->flag;
@@ -1864,7 +1890,7 @@ static bool collection_child_add(Main *bmain,
     return false;
   }
 
-  child = static_cast<CollectionChild *>(MEM_callocN(sizeof(CollectionChild), "CollectionChild"));
+  child = MEM_callocN<CollectionChild>("CollectionChild");
   child->collection = collection;
   if (light_linking) {
     child->light_linking = *light_linking;
@@ -1873,8 +1899,7 @@ static bool collection_child_add(Main *bmain,
 
   /* Don't add parent links for depsgraph datablocks, these are not kept in sync. */
   if ((id_create_flag & LIB_ID_CREATE_NO_MAIN) == 0) {
-    CollectionParent *cparent = static_cast<CollectionParent *>(
-        MEM_callocN(sizeof(CollectionParent), "CollectionParent"));
+    CollectionParent *cparent = MEM_callocN<CollectionParent>("CollectionParent");
     cparent->collection = parent;
     BLI_addtail(&collection->runtime.parents, cparent);
   }
@@ -1957,8 +1982,7 @@ void BKE_collection_parent_relations_rebuild(Collection *collection)
     }
 
     BLI_assert(collection_find_parent(child->collection, collection) == nullptr);
-    CollectionParent *cparent = static_cast<CollectionParent *>(
-        MEM_callocN(sizeof(CollectionParent), __func__));
+    CollectionParent *cparent = MEM_callocN<CollectionParent>(__func__);
     cparent->collection = collection;
     BLI_addtail(&child->collection->runtime.parents, cparent);
   }
@@ -2253,8 +2277,8 @@ static void scene_collections_array(Scene *scene,
 
   BLI_assert(*r_collections_array_len > 0);
 
-  Collection **array = static_cast<Collection **>(
-      MEM_malloc_arrayN(*r_collections_array_len, sizeof(Collection *), "CollectionArray"));
+  Collection **array = MEM_malloc_arrayN<Collection *>(size_t(*r_collections_array_len),
+                                                       "CollectionArray");
   *r_collections_array = array;
   scene_collection_callback(collection, scene_collections_build_array, &array);
 }
@@ -2262,8 +2286,7 @@ static void scene_collections_array(Scene *scene,
 void BKE_scene_collections_iterator_begin(BLI_Iterator *iter, void *data_in)
 {
   Scene *scene = static_cast<Scene *>(data_in);
-  CollectionsIteratorData *data = static_cast<CollectionsIteratorData *>(
-      MEM_callocN(sizeof(CollectionsIteratorData), __func__));
+  CollectionsIteratorData *data = MEM_callocN<CollectionsIteratorData>(__func__);
 
   data->scene = scene;
 
@@ -2312,8 +2335,7 @@ struct SceneObjectsIteratorData {
 
 static void scene_objects_iterator_begin(BLI_Iterator *iter, Scene *scene, GSet *visited_objects)
 {
-  SceneObjectsIteratorData *data = static_cast<SceneObjectsIteratorData *>(
-      MEM_callocN(sizeof(SceneObjectsIteratorData), __func__));
+  SceneObjectsIteratorData *data = MEM_callocN<SceneObjectsIteratorData>(__func__);
 
   BLI_ITERATOR_INIT(iter);
   iter->data = data;

@@ -2,16 +2,22 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "NOD_geometry_nodes_lazy_function.hh"
 #include "NOD_geometry_nodes_log.hh"
 
+#include "BLI_listbase.h"
+#include "BLI_string_ref.hh"
+#include "BLI_string_utf8.h"
+
+#include "BKE_anonymous_attribute_id.hh"
 #include "BKE_compute_contexts.hh"
 #include "BKE_curves.hh"
 #include "BKE_geometry_nodes_gizmos_transforms.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_socket_value.hh"
 #include "BKE_type_conversions.hh"
 #include "BKE_volume.hh"
+#include "BKE_volume_grid.hh"
 #include "BKE_volume_openvdb.hh"
 
 #include "DNA_grease_pencil_types.h"
@@ -36,6 +42,19 @@ using fn::FieldInputs;
 GenericValueLog::~GenericValueLog()
 {
   this->value.destruct();
+}
+
+StringLog::StringLog(StringRef string, LinearAllocator<> &allocator)
+{
+  /* Avoid logging the entirety of long strings, to avoid unnecessary memory usage. */
+  if (string.size() <= 100) {
+    this->truncated = false;
+    this->value = allocator.copy_string(string);
+    return;
+  }
+  this->truncated = true;
+  const char *end = BLI_str_find_prev_char_utf8(string.data() + 100, string.data());
+  this->value = allocator.copy_string(StringRef(string.data(), end));
 }
 
 FieldInfoLog::FieldInfoLog(const GField &field) : type(field.cpp_type())
@@ -252,7 +271,13 @@ void GeoTreeLogger::log_value(const bNode &node, const bNodeSocket &socket, cons
     else {
       value_variant.convert_to_single();
       const GPointer value = value_variant.get_single_ptr();
-      log_generic_value(*value.type(), value.get());
+      if (value.type()->is<std::string>()) {
+        const std::string &string = *value.get<std::string>();
+        store_logged_value(this->allocator->construct<StringLog>(string, *this->allocator));
+      }
+      else {
+        log_generic_value(*value.type(), value.get());
+      }
     }
   }
   else {
@@ -319,7 +344,7 @@ void GeoTreeLog::ensure_node_warnings(const bNodeTree *tree)
         if (node->is_group() && node->id) {
           child_tree = reinterpret_cast<const bNodeTree *>(node->id);
         }
-        else if (bke::all_zone_output_node_types().contains(node->type)) {
+        else if (bke::all_zone_output_node_types().contains(node->type_legacy)) {
           child_tree = tree;
         }
       }
@@ -632,7 +657,7 @@ static void find_tree_zone_hash_recursive(
     ComputeContextBuilder &compute_context_builder,
     Map<const bNodeTreeZone *, ComputeContextHash> &r_hash_by_zone)
 {
-  switch (zone.output_node->type) {
+  switch (zone.output_node->type_legacy) {
     case GEO_NODE_SIMULATION_OUTPUT: {
       compute_context_builder.push<bke::SimulationZoneComputeContext>(*zone.output_node);
       break;

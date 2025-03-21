@@ -36,6 +36,9 @@ Sphinx: PDF generation
     cd doc/python_api/sphinx-out
     make
 """
+__all__ = (
+    "main",
+)
 
 import os
 import sys
@@ -71,8 +74,8 @@ SCRIPT_DIR = os.path.abspath(os.path.dirname(__file__))
 # For now, ignore add-ons and internal sub-classes of `bpy.types.PropertyGroup`.
 #
 # Besides disabling this line, the main change will be to add a
-# 'toctree' to 'write_rst_index' which contains the generated RST files.
-# This 'toctree' can be generated automatically.
+# `toctree` to `write_rst_index` which contains the generated RST files.
+# This `toctree` can be generated automatically.
 #
 # See: D6261 for reference.
 USE_ONLY_BUILTIN_RNA_TYPES = True
@@ -595,6 +598,7 @@ from types import (
 
 _BPY_STRUCT_FAKE = "bpy_struct"
 _BPY_PROP_COLLECTION_FAKE = "bpy_prop_collection"
+_BPY_PROP_COLLECTION_IDPROP_FAKE = "bpy_prop_collection_idprop"
 
 if _BPY_PROP_COLLECTION_FAKE:
     _BPY_PROP_COLLECTION_ID = ":class:`{:s}`".format(_BPY_PROP_COLLECTION_FAKE)
@@ -646,20 +650,6 @@ def undocumented_message(module_name, type_name, identifier):
     )
 
     return "Undocumented, consider `contributing <https://developer.blender.org/>`__."
-
-
-def range_str(val):
-    """
-    Converts values to strings for the range directive.
-    (unused function it seems)
-    """
-    if val < -10000000:
-        return "-inf"
-    if val > 10000000:
-        return "inf"
-    if type(val) == float:
-        return "{:g}".format(val)
-    return str(val)
 
 
 def example_extract_docstring(filepath):
@@ -1187,7 +1177,8 @@ context_type_map = {
     "active_object": [("Object", False)],
     "active_operator": [("Operator", False)],
     "active_pose_bone": [("PoseBone", False)],
-    "active_sequence_strip": [("Sequence", False)],
+    "active_sequence_strip": [("Strip", False)],
+    "active_strip": [("Strip", False)],
     "active_editable_fcurve": [("FCurve", False)],
     "active_nla_strip": [("NlaStrip", False)],
     "active_nla_track": [("NlaTrack", False)],
@@ -1247,7 +1238,8 @@ context_type_map = {
     "selected_editable_fcurves": [("FCurve", True)],
     "selected_editable_keyframes": [("Keyframe", True)],
     "selected_editable_objects": [("Object", True)],
-    "selected_editable_sequences": [("Sequence", True)],
+    "selected_editable_sequences": [("Strip", True)],
+    "selected_editable_strips": [("Strip", True)],
     "selected_files": [("FileSelectEntry", True)],
     "selected_ids": [("ID", True)],
     "selected_nla_strips": [("NlaStrip", True)],
@@ -1256,10 +1248,12 @@ context_type_map = {
     "selected_objects": [("Object", True)],
     "selected_pose_bones": [("PoseBone", True)],
     "selected_pose_bones_from_active_object": [("PoseBone", True)],
-    "selected_sequences": [("Sequence", True)],
+    "selected_sequences": [("Strip", True)],
+    "selected_strips": [("Strip", True)],
     "selected_visible_actions": [("Action", True)],
     "selected_visible_fcurves": [("FCurve", True)],
-    "sequences": [("Sequence", True)],
+    "sequences": [("Strip", True)],
+    "strips": [("Strip", True)],
     "soft_body": [("SoftBodyModifier", False)],
     "speaker": [("Speaker", False)],
     "texture": [("Texture", False)],
@@ -1686,7 +1680,8 @@ def pyrna2sphinx(basepath):
             if len(func.return_values) == 1:
                 write_param("      ", fw, func.return_values[0], is_return=True)
             elif func.return_values:  # Multiple return values.
-                fw("      :return ({:s}):\n".format(", ".join(prop.identifier for prop in func.return_values)))
+                fw("      :return:\n")
+                type_descrs = []
                 for prop in func.return_values:
                     # TODO: pyrna_enum2sphinx for multiple return values,
                     # actually don't think we even use this but still!
@@ -1701,6 +1696,7 @@ def pyrna2sphinx(basepath):
                         collection_id=_BPY_PROP_COLLECTION_ID,
                         enum_descr_override=enum_descr_override,
                     )
+                    type_descrs.append(type_descr)
                     descr = prop.description
                     if not descr:
                         descr = prop.name
@@ -1709,6 +1705,7 @@ def pyrna2sphinx(basepath):
                         prop.identifier,
                         ", ".join((val for val in (descr, type_descr) if val))
                     ))
+                fw("      :rtype: ({:s})\n".format(", ".join(type_descrs)))
 
             write_example_ref("      ", fw, struct_module_name + "." + struct_id + "." + func.identifier)
 
@@ -1873,16 +1870,22 @@ def pyrna2sphinx(basepath):
             )
 
         if _BPY_PROP_COLLECTION_FAKE:
-            class_value = bpy.data.objects.__class__
+            class_value = bpy.types.bpy_prop_collection
             fake_bpy_type(
                 "bpy.types", class_value, _BPY_PROP_COLLECTION_FAKE,
                 "built-in class used for all collections.", use_subclasses=False,
             )
 
+        if _BPY_PROP_COLLECTION_IDPROP_FAKE:
+            class_value = bpy.types.bpy_prop_collection_idprop
+            fake_bpy_type(
+                "bpy.types", class_value, _BPY_PROP_COLLECTION_IDPROP_FAKE,
+                "built-in class used for user defined collections.", use_subclasses=False,
+            )
+
     # Operators.
     def write_ops():
         API_BASEURL = "https://projects.blender.org/blender/blender/src/branch/main/scripts"
-        API_BASEURL_ADDON = "https://projects.blender.org/blender/blender-addons"
 
         op_modules = {}
         op = None
@@ -1921,13 +1924,8 @@ def pyrna2sphinx(basepath):
 
                 location = op.get_location()
                 if location != (None, None):
-                    if location[0].startswith("addons_core" + os.sep):
-                        url_base = API_BASEURL_ADDON
-                    else:
-                        url_base = API_BASEURL
-
                     fw("   :File: `{:s}\\:{:d} <{:s}/{:s}#L{:d}>`__\n\n".format(
-                        location[0], location[1], url_base, location[0], location[1]
+                        location[0], location[1], API_BASEURL, location[0], location[1]
                     ))
 
                 if op.args:

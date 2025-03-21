@@ -26,6 +26,8 @@
 
 #include "transform_mode.hh"
 
+namespace blender::ed::transform {
+
 /* -------------------------------------------------------------------- */
 /** \name Transform (Tilt)
  * \{ */
@@ -48,7 +50,7 @@ static void applyTilt(TransInfo *t)
   if (hasNumInput(&t->num)) {
     char c[NUM_STR_REP_LEN];
 
-    outputNumInput(&(t->num), c, &t->scene->unit);
+    outputNumInput(&(t->num), c, t->scene->unit);
 
     SNPRINTF(str, "%s %s" BLI_STR_UTF8_DEGREE_SIGN " %s", IFACE_("Tilt:"), &c[0], t->proptext);
 
@@ -109,3 +111,5 @@ TransModeInfo TransMode_tilt = {
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
 };
+
+}  // namespace blender::ed::transform

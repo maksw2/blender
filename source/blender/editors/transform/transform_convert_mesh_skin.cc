@@ -22,6 +22,8 @@
 
 #include "transform_convert.hh"
 
+namespace blender::ed::transform {
+
 /* -------------------------------------------------------------------- */
 /** \name Edit Mesh #CD_MVERT_SKIN Transform Creation
  * \{ */
@@ -168,7 +170,7 @@ static void createTransMeshSkin(bContext * /*C*/, TransInfo *t)
       }
     }
 
-    /* Detect CrazySpace [tm]. */
+    /* Detect CrazySpace [TM]. */
     transform_convert_mesh_crazyspace_detect(t, tc, em, &crazyspace_data);
 
     /* Create TransData. */
@@ -294,3 +296,5 @@ TransConvertTypeInfo TransConvertType_MeshSkin = {
     /*recalc_data*/ recalcData_mesh_skin,
     /*special_aftertrans_update*/ nullptr,
 };
+
+}  // namespace blender::ed::transform

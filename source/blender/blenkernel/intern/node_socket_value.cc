@@ -8,7 +8,6 @@
 
 #include <sstream>
 
-#include "BKE_customdata.hh"
 #include "BKE_node.hh"
 #include "BKE_node_socket_value.hh"
 #include "BKE_volume_grid.hh"
@@ -274,6 +273,11 @@ bool SocketValueVariant::is_context_dependent_field() const
 bool SocketValueVariant::is_volume_grid() const
 {
   return kind_ == Kind::Grid;
+}
+
+bool SocketValueVariant::is_single() const
+{
+  return kind_ == Kind::Single;
 }
 
 void SocketValueVariant::convert_to_single()

@@ -2,16 +2,22 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_extra_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_extra_point_base)
+VERTEX_SHADER_CREATE_INFO(draw_modelmat)
+
+#include "draw_model_lib.glsl"
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
 #include "select_lib.glsl"
 
 void main()
 {
   select_id_set(in_select_buf[gl_VertexID]);
 
-  vec3 world_pos = point_object_to_world(pos);
-  gl_Position = point_world_to_ndc(world_pos);
+  vec3 world_pos = drw_point_object_to_world(data_buf[gl_VertexID].pos_.xyz);
+  gl_Position = drw_point_world_to_homogenous(world_pos);
 
   gl_PointSize = sizeObjectCenter;
   float radius = 0.5 * sizeObjectCenter;
@@ -22,7 +28,7 @@ void main()
   radii[3] = radius - outline_width - 1.0;
   radii /= sizeObjectCenter;
 
-  fillColor = ucolor;
+  fillColor = data_buf[gl_VertexID].color_;
   outlineColor = colorOutline;
 
 #ifdef SELECT_ENABLE

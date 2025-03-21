@@ -34,17 +34,17 @@ static void node_declare(NodeDeclarationBuilder &b)
       .hide_value()
       .description(
           "An index used to group curves together. Filling is done separately for each group");
-  b.add_output<decl::Geometry>("Mesh");
+  b.add_output<decl::Geometry>("Mesh").propagate_all_instance_attributes();
 }
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryCurveFill *data = MEM_cnew<NodeGeometryCurveFill>(__func__);
+  NodeGeometryCurveFill *data = MEM_callocN<NodeGeometryCurveFill>(__func__);
 
   data->mode = GEO_NODE_CURVE_FILL_MODE_TRIANGULATED;
   node->storage = data;
@@ -339,16 +339,19 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-
-  geo_node_type_base(&ntype, GEO_NODE_FILL_CURVE, "Fill Curve", NODE_CLASS_GEOMETRY);
-
+  geo_node_type_base(&ntype, "GeometryNodeFillCurve", GEO_NODE_FILL_CURVE);
+  ntype.ui_name = "Fill Curve";
+  ntype.ui_description =
+      "Generate a mesh on the XY plane with faces on the inside of input curves";
+  ntype.enum_name_legacy = "FILL_CURVE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.initfunc = node_init;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryCurveFill", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryCurveFill", node_free_standard_storage, node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

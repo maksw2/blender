@@ -4,18 +4,10 @@
 
 set(INC
   ../include
-  ../../blenkernel
-  ../../blentranslation
-  ../../bmesh
-  ../../gpu
-  ../../imbuf
   ../../makesrna
-  ../../windowmanager
   ../../../../extern/curve_fit_nd
-  ../../geometry
   ../sculpt_paint
   ../../modifiers/intern/lineart
-  ../../functions
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
@@ -38,6 +30,7 @@ set(SRC
   intern/grease_pencil_modes.cc
   intern/grease_pencil_ops.cc
   intern/grease_pencil_primitive.cc
+  intern/grease_pencil_randomize.cc
   intern/grease_pencil_select.cc
   intern/grease_pencil_trim.cc
   intern/grease_pencil_undo.cc
@@ -47,13 +40,20 @@ set(SRC
 )
 
 set(LIB
-  bf_blenkernel
+  PRIVATE bf::blenkernel
   PRIVATE bf::animrig
   PRIVATE bf::blenlib
+  PRIVATE bf::blentranslation
+  PRIVATE bf::bmesh
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
+  PRIVATE bf::functions
+  PRIVATE bf::geometry
+  PRIVATE bf::gpu
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::intern::clog
+  PRIVATE bf::windowmanager
   extern_curve_fit_nd
   extern_fmtlib
 )

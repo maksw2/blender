@@ -2,8 +2,13 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_armature_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_armature_sphere_solid)
+
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
+#include "overlay_common_lib.glsl"
 #include "select_lib.glsl"
 
 /* Sphere radius */
@@ -14,12 +19,13 @@ void main()
   select_id_set(in_select_buf[gl_InstanceID]);
 
   vec4 bone_color, state_color;
+  mat4 inst_obmat = data_buf[gl_InstanceID];
   mat4 model_mat = extract_matrix_packed_data(inst_obmat, state_color, bone_color);
 
-  mat4 model_view_matrix = drw_view.viewmat * model_mat;
+  mat4 model_view_matrix = drw_view().viewmat * model_mat;
   sphereMatrix = inverse(model_view_matrix);
 
-  bool is_persp = (drw_view.winmat[3][3] == 0.0);
+  bool is_persp = (drw_view().winmat[3][3] == 0.0);
 
   /* This is the local space camera ray (not normalize).
    * In perspective mode it's also the view-space position
@@ -71,7 +77,7 @@ void main()
 
   vec4 pos_4d = vec4(cam_pos, 1.0);
   vec4 V = model_view_matrix * pos_4d;
-  gl_Position = drw_view.winmat * V;
+  gl_Position = drw_view().winmat * V;
   viewPosition = V.xyz;
 
   finalStateColor = state_color.xyz;

@@ -33,8 +33,10 @@ set(SRC
   kernel_camera_projection_test.cpp
   render_graph_finalize_test.cpp
   util_aligned_malloc_test.cpp
+  util_boundbox_test.cpp
   util_ies_test.cpp
   util_math_test.cpp
+  util_math_fast_test.cpp
   util_md5_test.cpp
   util_path_test.cpp
   util_string_test.cpp

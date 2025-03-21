@@ -13,8 +13,6 @@
 
 #include "BKE_unit.hh"
 
-#include "DNA_gpencil_legacy_types.h"
-
 #include "ED_screen.hh"
 
 #include "UI_interface.hh"
@@ -26,6 +24,8 @@
 #include "transform_snap.hh"
 
 #include "transform_mode.hh"
+
+namespace blender::ed::transform {
 
 /* -------------------------------------------------------------------- */
 /** \name Transform (GPencil Strokes Opacity)
@@ -49,7 +49,7 @@ static void applyGPOpacity(TransInfo *t)
   if (hasNumInput(&t->num)) {
     char c[NUM_STR_REP_LEN];
 
-    outputNumInput(&(t->num), c, &t->scene->unit);
+    outputNumInput(&(t->num), c, t->scene->unit);
     SNPRINTF(str, IFACE_("Opacity: %s"), c);
   }
   else {
@@ -115,3 +115,5 @@ TransModeInfo TransMode_gpopacity = {
     /*snap_apply_fn*/ nullptr,
     /*draw_fn*/ nullptr,
 };
+
+}  // namespace blender::ed::transform

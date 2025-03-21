@@ -8,14 +8,21 @@
 
 #include "draw_sculpt.hh"
 
+#include "DNA_mesh_types.h"
+#include "DNA_scene_types.h"
 #include "draw_attributes.hh"
+#include "draw_context_private.hh"
+#include "draw_view.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_customdata.hh"
-#include "BKE_mesh_types.hh"
+#include "BKE_object.hh"
 #include "BKE_paint.hh"
 
+#include "BLI_math_matrix.hh"
+
 #include "DRW_pbvh.hh"
+#include "DRW_render.hh"
 
 namespace blender::draw {
 
@@ -48,7 +55,7 @@ static Vector<SculptBatch> sculpt_batches_get_ex(const Object *ob,
   }
 
   /* TODO(Miguel Pozo): Don't use global context. */
-  const DRWContextState *drwctx = DRW_context_state_get();
+  const DRWContext *drwctx = DRW_context_get();
   RegionView3D *rv3d = drwctx->rv3d;
   const bool navigating = rv3d && (rv3d->rflag & RV3D_NAVIGATING);
 
@@ -59,7 +66,7 @@ static Vector<SculptBatch> sculpt_batches_get_ex(const Object *ob,
 
   /* TODO: take into account partial redraw for clipping planes. */
   /* Frustum planes to show only visible pbvh::Tree nodes. */
-  std::array<float4, 6> draw_frustum_planes = DRW_view_frustum_planes_get(DRW_view_default_get());
+  std::array<float4, 6> draw_frustum_planes = View::default_get().frustum_planes_get();
   /* Transform clipping planes to object space. Transforming a plane with a
    * 4x4 matrix is done by multiplying with the transpose inverse.
    * The inverse cancels out here since we transform by inverse(obmat). */
@@ -155,11 +162,11 @@ Vector<SculptBatch> sculpt_batches_per_material_get(const Object *ob,
                                                     Span<const GPUMaterial *> materials)
 {
   BLI_assert(ob->type == OB_MESH);
-  const Mesh *mesh = static_cast<const Mesh *>(ob->data);
+  const Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(*ob);
 
   DRW_Attributes draw_attrs;
   DRW_MeshCDMask cd_needed;
-  DRW_mesh_get_attributes(*ob, *mesh, materials.data(), materials.size(), &draw_attrs, &cd_needed);
+  DRW_mesh_get_attributes(*ob, mesh, materials, &draw_attrs, &cd_needed);
 
   Vector<pbvh::AttributeRequest, 16> attrs;
 
@@ -174,8 +181,8 @@ Vector<SculptBatch> sculpt_batches_per_material_get(const Object *ob,
   /* UV maps are not in attribute requests. */
   for (uint i = 0; i < 32; i++) {
     if (cd_needed.uv & (1 << i)) {
-      int layer_i = CustomData_get_layer_index_n(&mesh->corner_data, CD_PROP_FLOAT2, i);
-      CustomDataLayer *layer = layer_i != -1 ? mesh->corner_data.layers + layer_i : nullptr;
+      int layer_i = CustomData_get_layer_index_n(&mesh.corner_data, CD_PROP_FLOAT2, i);
+      CustomDataLayer *layer = layer_i != -1 ? mesh.corner_data.layers + layer_i : nullptr;
       if (layer) {
         attrs.append(pbvh::GenericRequest{layer->name, CD_PROP_FLOAT2, bke::AttrDomain::Corner});
       }

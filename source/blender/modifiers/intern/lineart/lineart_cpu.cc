@@ -11,14 +11,11 @@
 #include "MOD_lineart.hh"
 
 #include "BLI_listbase.h"
-#include "BLI_math_base.hh"
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_rotation.h"
-#include "BLI_math_vector.hh"
 #include "BLI_sort.hh"
-#include "BLI_string.h"
 #include "BLI_task.h"
 #include "BLI_time.h"
 #include "BLI_utildefines.h"
@@ -32,12 +29,10 @@
 #include "BKE_deform.hh"
 #include "BKE_geometry_set.hh"
 #include "BKE_global.hh"
-#include "BKE_gpencil_geom_legacy.h"
 #include "BKE_gpencil_legacy.h"
 #include "BKE_grease_pencil.hh"
-#include "BKE_grease_pencil_legacy_convert.hh"
 #include "BKE_lib_id.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mesh.hh"
 #include "BKE_object.hh"
 #include "BKE_scene.hh"
@@ -46,7 +41,6 @@
 
 #include "DNA_camera_types.h"
 #include "DNA_collection_types.h"
-#include "DNA_gpencil_legacy_types.h"
 #include "DNA_light_types.h"
 #include "DNA_material_types.h"
 #include "DNA_meshdata_types.h"
@@ -63,8 +57,6 @@
 #include "GEO_join_geometries.hh"
 
 #include "lineart_intern.hh"
-
-#include <algorithm> /* For `min/max`. */
 
 using blender::float3;
 using blender::int3;
@@ -384,8 +376,7 @@ static void lineart_bounding_area_line_add(LineartBoundingArea *ba, LineartEdge 
     return;
   }
   if (ba->line_count >= ba->max_line_count) {
-    LineartEdge **new_array = static_cast<LineartEdge **>(
-        MEM_malloc_arrayN(ba->max_line_count * 2, sizeof(LineartEdge *), __func__));
+    LineartEdge **new_array = MEM_malloc_arrayN<LineartEdge *>(ba->max_line_count * 2, __func__);
     memcpy(new_array, ba->linked_lines, sizeof(LineartEdge *) * ba->max_line_count);
     ba->max_line_count *= 2;
     MEM_freeN(ba->linked_lines);
@@ -480,8 +471,8 @@ static void lineart_occlusion_worker(TaskPool *__restrict /*pool*/, LineartRende
 void lineart_main_occlusion_begin(LineartData *ld)
 {
   int thread_count = ld->thread_count;
-  LineartRenderTaskInfo *rti = static_cast<LineartRenderTaskInfo *>(
-      MEM_callocN(sizeof(LineartRenderTaskInfo) * thread_count, __func__));
+  LineartRenderTaskInfo *rti = MEM_calloc_arrayN<LineartRenderTaskInfo>(size_t(thread_count),
+                                                                        __func__);
   int i;
 
   TaskPool *tp = BLI_task_pool_create(nullptr, TASK_PRIORITY_HIGH);
@@ -1750,8 +1741,8 @@ void lineart_add_edge_to_array(LineartPendingEdges *pe, LineartEdge *e)
       pe->max = 1000;
     }
 
-    LineartEdge **new_array = static_cast<LineartEdge **>(
-        MEM_mallocN(sizeof(LineartEdge *) * pe->max * 2, "LineartPendingEdges array"));
+    LineartEdge **new_array = MEM_malloc_arrayN<LineartEdge *>(size_t(pe->max) * 2,
+                                                               "LineartPendingEdges array");
     if (LIKELY(pe->array)) {
       memcpy(new_array, pe->array, sizeof(LineartEdge *) * pe->max);
       MEM_freeN(pe->array);
@@ -1777,8 +1768,8 @@ void lineart_finalize_object_edge_array_reserve(LineartPendingEdges *pe, int cou
   }
 
   pe->max = count;
-  LineartEdge **new_array = static_cast<LineartEdge **>(
-      MEM_mallocN(sizeof(LineartEdge *) * pe->max, "LineartPendingEdges array final"));
+  LineartEdge **new_array = MEM_malloc_arrayN<LineartEdge *>(size_t(pe->max),
+                                                             "LineartPendingEdges array final");
   pe->array = new_array;
 }
 
@@ -1941,10 +1932,10 @@ static void lineart_sort_adjacent_items(LineartAdjacentEdge *ai, int length)
 static LineartEdgeNeighbor *lineart_build_edge_neighbor(Mesh *mesh, int total_edges)
 {
   /* Because the mesh is triangulated, so `mesh->edges_num` should be reliable? */
-  LineartAdjacentEdge *adj_e = static_cast<LineartAdjacentEdge *>(
-      MEM_mallocN(sizeof(LineartAdjacentEdge) * total_edges, "LineartAdjacentEdge arr"));
-  LineartEdgeNeighbor *edge_nabr = static_cast<LineartEdgeNeighbor *>(
-      MEM_mallocN(sizeof(LineartEdgeNeighbor) * total_edges, "LineartEdgeNeighbor arr"));
+  LineartAdjacentEdge *adj_e = MEM_malloc_arrayN<LineartAdjacentEdge>(size_t(total_edges),
+                                                                      "LineartAdjacentEdge arr");
+  LineartEdgeNeighbor *edge_nabr = MEM_malloc_arrayN<LineartEdgeNeighbor>(
+      size_t(total_edges), "LineartEdgeNeighbor arr");
 
   TaskParallelSettings en_settings;
   BLI_parallel_range_settings_defaults(&en_settings);
@@ -2057,8 +2048,8 @@ static void lineart_geometry_object_load(LineartObjectInfo *ob_info,
       ((usage == OBJECT_LRT_NO_INTERSECTION) ? LRT_ELEMENT_NO_INTERSECTION : 0));
 
   /* Note this memory is not from pool, will be deleted after culling. */
-  LineartTriangleAdjacent *tri_adj = static_cast<LineartTriangleAdjacent *>(MEM_callocN(
-      sizeof(LineartTriangleAdjacent) * corner_tris.size(), "LineartTriangleAdjacent"));
+  LineartTriangleAdjacent *tri_adj = MEM_calloc_arrayN<LineartTriangleAdjacent>(
+      size_t(corner_tris.size()), "LineartTriangleAdjacent");
   /* Link is minimal so we use pool anyway. */
   BLI_spin_lock(&la_data->lock_task);
   lineart_list_append_pointer_pool_thread(
@@ -2161,8 +2152,7 @@ static void lineart_geometry_object_load(LineartObjectInfo *ob_info,
     /* Only identifying floating edges at this point because other edges has been taken care of
      * inside #lineart_identify_corner_tri_feature_edges function. */
     const LooseEdgeCache &loose_edges = mesh->loose_edges();
-    loose_data.loose_array = static_cast<int *>(
-        MEM_malloc_arrayN(loose_edges.count, sizeof(int), __func__));
+    loose_data.loose_array = MEM_malloc_arrayN<int>(size_t(loose_edges.count), __func__);
     if (loose_edges.count > 0) {
       loose_data.loose_count = 0;
       for (const int64_t edge_i : IndexRange(mesh->edges_num)) {
@@ -2515,7 +2505,7 @@ static void lineart_object_load_single_instance(LineartData *ld,
     }
   }
   else {
-    use_mesh = BKE_mesh_new_from_object(depsgraph, ob, true, true);
+    use_mesh = BKE_mesh_new_from_object(depsgraph, ob, true, true, true);
   }
 
   /* In case we still can not get any mesh geometry data from the object, same as above. */
@@ -2540,7 +2530,7 @@ static void lineart_object_load_single_instance(LineartData *ld,
   copy_m4d_m4(obi->normal, imat);
 
   obi->original_me = use_mesh;
-  obi->original_ob = (ref_ob->id.orig_id ? (Object *)ref_ob->id.orig_id : (Object *)ref_ob);
+  obi->original_ob = (ref_ob->id.orig_id ? (Object *)ref_ob->id.orig_id : ref_ob);
   obi->original_ob_eval = DEG_get_evaluated_object(depsgraph, obi->original_ob);
   lineart_geometry_load_assign_thread(olti, obi, thread_count, use_mesh->faces_num);
 }
@@ -3327,8 +3317,8 @@ static void lineart_add_isec_thread(LineartIsecThread *th,
 {
   if (th->current == th->max) {
 
-    LineartIsecSingle *new_array = static_cast<LineartIsecSingle *>(
-        MEM_mallocN(sizeof(LineartIsecSingle) * th->max * 2, "LineartIsecSingle"));
+    LineartIsecSingle *new_array = MEM_malloc_arrayN<LineartIsecSingle>(size_t(th->max) * 2,
+                                                                        "LineartIsecSingle");
     memcpy(new_array, th->array, sizeof(LineartIsecSingle) * th->max);
     th->max *= 2;
     MEM_freeN(th->array);
@@ -3394,8 +3384,7 @@ static bool lineart_schedule_new_triangle_task(LineartIsecThread *th)
  */
 static void lineart_init_isec_thread(LineartIsecData *d, LineartData *ld, int thread_count)
 {
-  d->threads = static_cast<LineartIsecThread *>(
-      MEM_callocN(sizeof(LineartIsecThread) * thread_count, "LineartIsecThread arr"));
+  d->threads = MEM_calloc_arrayN<LineartIsecThread>(size_t(thread_count), "LineartIsecThread arr");
   d->ld = ld;
   d->thread_count = thread_count;
 
@@ -3405,8 +3394,7 @@ static void lineart_init_isec_thread(LineartIsecData *d, LineartData *ld, int th
 
   for (int i = 0; i < thread_count; i++) {
     LineartIsecThread *it = &d->threads[i];
-    it->array = static_cast<LineartIsecSingle *>(
-        MEM_mallocN(sizeof(LineartIsecSingle) * 100, "LineartIsecSingle arr"));
+    it->array = MEM_malloc_arrayN<LineartIsecSingle>(100, "LineartIsecSingle arr");
     it->max = 100;
     it->current = 0;
     it->thread_id = i;
@@ -3578,8 +3566,7 @@ void MOD_lineart_destroy_render_data_v3(GreasePencilLineartModifierData *lmd)
 
 LineartCache *MOD_lineart_init_cache()
 {
-  LineartCache *lc = static_cast<LineartCache *>(
-      MEM_callocN(sizeof(LineartCache), "Lineart Cache"));
+  LineartCache *lc = MEM_callocN<LineartCache>("Lineart Cache");
   return lc;
 }
 
@@ -3599,8 +3586,7 @@ static LineartData *lineart_create_render_buffer_v3(Scene *scene,
                                                     Object *active_camera,
                                                     LineartCache *lc)
 {
-  LineartData *ld = static_cast<LineartData *>(
-      MEM_callocN(sizeof(LineartData), "Line Art render buffer"));
+  LineartData *ld = MEM_callocN<LineartData>("Line Art render buffer");
   lmd->cache = lc;
   lmd->la_data_ptr = ld;
   lc->all_enabled_edge_types = lmd->edge_types_override;
@@ -3801,10 +3787,9 @@ void lineart_main_bounding_area_make_initial(LineartData *ld)
       /* Init linked_triangles array. */
       ba->max_triangle_count = LRT_TILE_SPLITTING_TRIANGLE_LIMIT;
       ba->max_line_count = LRT_TILE_EDGE_COUNT_INITIAL;
-      ba->linked_triangles = static_cast<LineartTriangle **>(
-          MEM_callocN(sizeof(LineartTriangle *) * ba->max_triangle_count, "ba_linked_triangles"));
-      ba->linked_lines = static_cast<LineartEdge **>(
-          MEM_callocN(sizeof(LineartEdge *) * ba->max_line_count, "ba_linked_lines"));
+      ba->linked_triangles = MEM_calloc_arrayN<LineartTriangle *>(ba->max_triangle_count,
+                                                                  "ba_linked_triangles");
+      ba->linked_lines = MEM_calloc_arrayN<LineartEdge *>(ba->max_line_count, "ba_linked_lines");
 
       BLI_spin_init(&ba->lock);
     }
@@ -4046,10 +4031,9 @@ static void lineart_bounding_area_split(LineartData *ld,
   for (int i = 0; i < 4; i++) {
     ba[i].max_triangle_count = LRT_TILE_SPLITTING_TRIANGLE_LIMIT;
     ba[i].max_line_count = LRT_TILE_EDGE_COUNT_INITIAL;
-    ba[i].linked_triangles = static_cast<LineartTriangle **>(
-        MEM_callocN(sizeof(LineartTriangle *) * ba[i].max_triangle_count, "ba_linked_triangles"));
-    ba[i].linked_lines = static_cast<LineartEdge **>(
-        MEM_callocN(sizeof(LineartEdge *) * ba[i].max_line_count, "ba_linked_lines"));
+    ba[i].linked_triangles = MEM_calloc_arrayN<LineartTriangle *>(ba[i].max_triangle_count,
+                                                                  "ba_linked_triangles");
+    ba[i].linked_lines = MEM_calloc_arrayN<LineartEdge *>(ba[i].max_line_count, "ba_linked_lines");
     BLI_spin_init(&ba[i].lock);
   }
 
@@ -4342,8 +4326,8 @@ static void lineart_clear_linked_edges_recursive(LineartData *ld, LineartBoundin
   }
   root_ba->line_count = 0;
   root_ba->max_line_count = 128;
-  root_ba->linked_lines = static_cast<LineartEdge **>(
-      MEM_callocN(sizeof(LineartEdge *) * root_ba->max_line_count, "cleared lineart edges"));
+  root_ba->linked_lines = MEM_calloc_arrayN<LineartEdge *>(root_ba->max_line_count,
+                                                           "cleared lineart edges");
 }
 void lineart_main_clear_linked_edges(LineartData *ld)
 {
@@ -4400,8 +4384,8 @@ static void lineart_main_remove_unused_lines_recursive(LineartBoundingArea *ba,
     return;
   }
 
-  LineartEdge **new_array = static_cast<LineartEdge **>(
-      MEM_callocN(sizeof(LineartEdge *) * usable_count, "cleaned lineart edge array"));
+  LineartEdge **new_array = MEM_calloc_arrayN<LineartEdge *>(size_t(usable_count),
+                                                             "cleaned lineart edge array");
 
   int new_i = 0;
   for (int i = 0; i < ba->line_count; i++) {
@@ -4458,12 +4442,8 @@ static bool lineart_get_triangle_bounding_areas(
   if ((*rowend) >= ld->qtree.count_y) {
     (*rowend) = ld->qtree.count_y - 1;
   }
-  if ((*colbegin) < 0) {
-    (*colbegin) = 0;
-  }
-  if ((*rowbegin) < 0) {
-    (*rowbegin) = 0;
-  }
+  *colbegin = std::max(*colbegin, 0);
+  *rowbegin = std::max(*rowbegin, 0);
 
   return true;
 }
@@ -4531,12 +4511,8 @@ LineartBoundingArea *MOD_lineart_get_parent_bounding_area(LineartData *ld, doubl
   if (row >= ld->qtree.count_y) {
     row = ld->qtree.count_y - 1;
   }
-  if (col < 0) {
-    col = 0;
-  }
-  if (row < 0) {
-    row = 0;
-  }
+  col = std::max(col, 0);
+  row = std::max(row, 0);
 
   return &ld->qtree.initials[row * ld->qtree.count_x + col];
 }
@@ -4547,12 +4523,8 @@ static LineartBoundingArea *lineart_get_bounding_area(LineartData *ld, double x,
   double sp_w = ld->qtree.tile_width, sp_h = ld->qtree.tile_height;
   int c = int((x + 1.0) / sp_w);
   int r = ld->qtree.count_y - int((y + 1.0) / sp_h) - 1;
-  if (r < 0) {
-    r = 0;
-  }
-  if (c < 0) {
-    c = 0;
-  }
+  r = std::max(r, 0);
+  c = std::max(c, 0);
   if (r >= ld->qtree.count_y) {
     r = ld->qtree.count_y - 1;
   }
@@ -5094,7 +5066,7 @@ bool MOD_lineart_compute_feature_lines_v3(Depsgraph *depsgraph,
   lineart_main_get_view_vector(ld);
 
   LineartModifierRuntime *runtime = reinterpret_cast<LineartModifierRuntime *>(lmd.runtime);
-  blender::Set<const Object *> *included_objects = runtime ? runtime->object_dependencies.get() :
+  blender::Set<const Object *> *included_objects = runtime ? &runtime->object_dependencies :
                                                              nullptr;
 
   lineart_main_load_geometries(depsgraph,
@@ -5226,10 +5198,10 @@ bool MOD_lineart_compute_feature_lines_v3(Depsgraph *depsgraph,
   return true;
 }
 
-typedef struct LineartChainWriteInfo {
+struct LineartChainWriteInfo {
   LineartEdgeChain *chain;
   int point_count;
-} LineartChainWriteInfo;
+};
 
 void MOD_lineart_gpencil_generate_v3(const LineartCache *cache,
                                      const blender::float4x4 &inverse_mat,
@@ -5310,7 +5282,7 @@ void MOD_lineart_gpencil_generate_v3(const LineartCache *cache,
       continue;
     }
     if (orig_col && ec->object_ref) {
-      if (BKE_collection_has_object_recursive_instanced(orig_col, (Object *)ec->object_ref)) {
+      if (BKE_collection_has_object_recursive_instanced(orig_col, ec->object_ref)) {
         if (modifier_flags & MOD_LINEART_INVERT_COLLECTION) {
           continue;
         }
@@ -5460,7 +5432,9 @@ void MOD_lineart_gpencil_generate_v3(const LineartCache *cache,
       int point_i = i + up_to_point;
       point_positions[point_i] = blender::math::transform_point(inverse_mat, float3(eci->gpos));
       point_radii.span[point_i] = thickness / 2.0f;
-      point_opacities.span[point_i] = opacity;
+      if (point_opacities) {
+        point_opacities.span[point_i] = opacity;
+      }
 
       if (src_deform_group >= 0) {
         int vindex;

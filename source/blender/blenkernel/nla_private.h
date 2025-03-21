@@ -10,11 +10,11 @@
 
 #include "BLI_bitmap.h"
 #include "BLI_ghash.h"
-#include "RNA_types.hh"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "DNA_anim_types.h"
+#include "DNA_listBase.h"
+
+#include "RNA_types.hh"
 
 struct AnimationEvalContext;
 
@@ -290,7 +290,3 @@ void nlasnapshot_blend_strip_no_blend(PointerRNA *ptr,
                                       NlaEvalStrip *nes,
                                       NlaEvalSnapshot *snapshot,
                                       const struct AnimationEvalContext *anim_eval_context);
-
-#ifdef __cplusplus
-}
-#endif

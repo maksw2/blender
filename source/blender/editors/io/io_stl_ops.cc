@@ -34,7 +34,9 @@
 #  include "io_stl_ops.hh"
 #  include "io_utils.hh"
 
-static int wm_stl_export_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_stl_export_invoke(bContext *C,
+                                             wmOperator *op,
+                                             const wmEvent * /*event*/)
 {
   ED_fileselect_ensure_default_filepath(C, op, ".stl");
 
@@ -42,13 +44,13 @@ static int wm_stl_export_invoke(bContext *C, wmOperator *op, const wmEvent * /*e
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int wm_stl_export_execute(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_stl_export_exec(bContext *C, wmOperator *op)
 {
   if (!RNA_struct_property_is_set_ex(op->ptr, "filepath", false)) {
     BKE_report(op->reports, RPT_ERROR, "No filename given");
     return OPERATOR_CANCELLED;
   }
-  STLExportParams export_params{};
+  STLExportParams export_params;
   RNA_string_get(op->ptr, "filepath", export_params.filepath);
   export_params.forward_axis = eIOAxis(RNA_enum_get(op->ptr, "forward_axis"));
   export_params.up_axis = eIOAxis(RNA_enum_get(op->ptr, "up_axis"));
@@ -65,7 +67,12 @@ static int wm_stl_export_execute(bContext *C, wmOperator *op)
 
   STL_export(C, &export_params);
 
-  return BKE_reports_contain(op->reports, RPT_ERROR) ? OPERATOR_CANCELLED : OPERATOR_FINISHED;
+  if (BKE_reports_contain(op->reports, RPT_ERROR)) {
+    return OPERATOR_CANCELLED;
+  }
+
+  BKE_report(op->reports, RPT_INFO, "File exported successfully");
+  return OPERATOR_FINISHED;
 }
 
 static void wm_stl_export_draw(bContext *C, wmOperator *op)
@@ -133,7 +140,7 @@ void WM_OT_stl_export(wmOperatorType *ot)
   ot->idname = "WM_OT_stl_export";
 
   ot->invoke = wm_stl_export_invoke;
-  ot->exec = wm_stl_export_execute;
+  ot->exec = wm_stl_export_exec;
   ot->poll = WM_operator_winactive;
   ot->ui = wm_stl_export_draw;
   ot->check = wm_stl_export_check;
@@ -190,9 +197,9 @@ void WM_OT_stl_export(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_HIDDEN);
 }
 
-static int wm_stl_import_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_stl_import_exec(bContext *C, wmOperator *op)
 {
-  STLImportParams params{};
+  STLImportParams params;
   params.forward_axis = eIOAxis(RNA_enum_get(op->ptr, "forward_axis"));
   params.up_axis = eIOAxis(RNA_enum_get(op->ptr, "up_axis"));
   params.use_facet_normal = RNA_boolean_get(op->ptr, "use_facet_normal");
@@ -242,16 +249,16 @@ static void ui_stl_import_settings(const bContext *C, uiLayout *layout, PointerR
 
   if (uiLayout *panel = uiLayoutPanel(C, layout, "STL_import_general", false, IFACE_("General"))) {
     uiLayout *col = uiLayoutColumn(panel, false);
-    uiItemR(col, ptr, "global_scale", UI_ITEM_NONE, nullptr, ICON_NONE);
-    uiItemR(col, ptr, "use_scene_unit", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, ptr, "global_scale", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    uiItemR(col, ptr, "use_scene_unit", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     uiItemR(col, ptr, "forward_axis", UI_ITEM_NONE, IFACE_("Forward Axis"), ICON_NONE);
-    uiItemR(col, ptr, "up_axis", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, ptr, "up_axis", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
   if (uiLayout *panel = uiLayoutPanel(C, layout, "STL_import_options", false, IFACE_("Options"))) {
     uiLayout *col = uiLayoutColumn(panel, false);
-    uiItemR(col, ptr, "use_facet_normal", UI_ITEM_NONE, nullptr, ICON_NONE);
-    uiItemR(col, ptr, "use_mesh_validate", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, ptr, "use_facet_normal", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    uiItemR(col, ptr, "use_mesh_validate", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 }
 

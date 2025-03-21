@@ -6,9 +6,10 @@
  * \ingroup draw
  */
 
+#include <climits>
+
 #include "BLI_map.hh"
 #include "BLI_ordered_edge.hh"
-#include "BLI_vector.hh"
 
 #include "BKE_editmesh.hh"
 

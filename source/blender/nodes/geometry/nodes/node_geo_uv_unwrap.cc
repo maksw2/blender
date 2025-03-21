@@ -2,9 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "GEO_uv_parametrizer.hh"
+#include "DNA_mesh_types.h"
 
-#include "BKE_mesh.hh"
+#include "GEO_uv_parametrizer.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
@@ -46,7 +46,7 @@ static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryUVUnwrap *data = MEM_cnew<NodeGeometryUVUnwrap>(__func__);
+  NodeGeometryUVUnwrap *data = MEM_callocN<NodeGeometryUVUnwrap>(__func__);
   data->method = GEO_NODE_UV_UNWRAP_METHOD_ANGLE_BASED;
   node->storage = data;
 }
@@ -212,14 +212,18 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_UV_UNWRAP, "UV Unwrap", NODE_CLASS_CONVERTER);
+  geo_node_type_base(&ntype, "GeometryNodeUVUnwrap", GEO_NODE_UV_UNWRAP);
+  ntype.ui_name = "UV Unwrap";
+  ntype.ui_description = "Generate a UV map based on seam edges";
+  ntype.enum_name_legacy = "UV_UNWRAP";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.initfunc = node_init;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryUVUnwrap", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryUVUnwrap", node_free_standard_storage, node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

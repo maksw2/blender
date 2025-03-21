@@ -12,14 +12,11 @@
 #include "DNA_anim_types.h"
 #include "DNA_scene_types.h"
 
-#include "MEM_guardedalloc.h"
-
-#include "BLI_utildefines.h"
-
 #include "BLT_translation.hh"
 
 #include "BKE_action.hh"
 #include "BKE_blender.hh"
+#include "BKE_report.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -28,12 +25,13 @@
 #include "rna_internal.hh"
 
 #include "ANIM_action.hh"
-#include "ANIM_action_legacy.hh"
 
 #include "WM_types.hh"
 
 using namespace blender;
 
+/* Disabled for now, see comment in `rna_def_action_layer()` for more info. */
+#if 0
 const EnumPropertyItem rna_enum_layer_mix_mode_items[] = {
     {int(animrig::Layer::MixMode::Replace),
      "REPLACE",
@@ -62,6 +60,7 @@ const EnumPropertyItem rna_enum_layer_mix_mode_items[] = {
      "Channels in this layer are multiplied with underlying layers on a per-channel basis"},
     {0, nullptr, 0, nullptr, nullptr},
 };
+#endif
 
 const EnumPropertyItem rna_enum_strip_type_items[] = {
     {int(animrig::Strip::Type::Keyframe),
@@ -74,7 +73,7 @@ const EnumPropertyItem rna_enum_strip_type_items[] = {
 
 /* Cannot use rna_enum_dummy_DEFAULT_items because the UNSPECIFIED entry needs
  * to exist as it is the default. */
-const EnumPropertyItem default_ActionSlot_id_root_items[] = {
+const EnumPropertyItem default_ActionSlot_target_id_type_items[] = {
     {0,
      "UNSPECIFIED",
      ICON_NONE,
@@ -89,8 +88,12 @@ const EnumPropertyItem default_ActionSlot_id_root_items[] = {
 #  include <algorithm>
 
 #  include "BLI_math_base.h"
+#  include "BLI_string.h"
+#  include "BLI_string_utf8.h"
 
 #  include "BKE_fcurve.hh"
+#  include "BKE_main.hh"
+#  include "BKE_report.hh"
 
 #  include "DEG_depsgraph.hh"
 
@@ -101,8 +104,6 @@ const EnumPropertyItem default_ActionSlot_id_root_items[] = {
 #  include "WM_api.hh"
 
 #  include "UI_interface_icons.hh"
-
-#  include "DEG_depsgraph.hh"
 
 #  include "ANIM_action_legacy.hh"
 #  include "ANIM_keyframing.hh"
@@ -130,11 +131,14 @@ static animrig::Strip &rna_data_strip(const PointerRNA *ptr)
   return reinterpret_cast<ActionStrip *>(ptr->data)->wrap();
 }
 
-static void rna_Action_tag_animupdate(Main *, Scene *, PointerRNA *ptr)
+/* Disabled for now, see comment in `rna_def_action_layer()` for more info. */
+#  if 0
+static void rna_Action_tag_animupdate(Main * /*main*/, Scene * /*scene*/, PointerRNA *ptr)
 {
   animrig::Action &action = rna_action(ptr);
   DEG_id_tag_update(&action.id, ID_RECALC_ANIMATION);
 }
+#  endif
 
 static animrig::Channelbag &rna_data_channelbag(const PointerRNA *ptr)
 {
@@ -142,15 +146,19 @@ static animrig::Channelbag &rna_data_channelbag(const PointerRNA *ptr)
 }
 
 template<typename T>
-static void rna_iterator_array_begin(CollectionPropertyIterator *iter, Span<T *> items)
+static void rna_iterator_array_begin(CollectionPropertyIterator *iter,
+                                     PointerRNA *ptr,
+                                     Span<T *> items)
 {
-  rna_iterator_array_begin(iter, (void *)items.data(), sizeof(T *), items.size(), 0, nullptr);
+  rna_iterator_array_begin(iter, ptr, (void *)items.data(), sizeof(T *), items.size(), 0, nullptr);
 }
 
 template<typename T>
-static void rna_iterator_array_begin(CollectionPropertyIterator *iter, MutableSpan<T *> items)
+static void rna_iterator_array_begin(CollectionPropertyIterator *iter,
+                                     PointerRNA *ptr,
+                                     MutableSpan<T *> items)
 {
-  rna_iterator_array_begin(iter, (void *)items.data(), sizeof(T *), items.size(), 0, nullptr);
+  rna_iterator_array_begin(iter, ptr, (void *)items.data(), sizeof(T *), items.size(), 0, nullptr);
 }
 
 static PointerRNA rna_ActionSlots_active_get(PointerRNA *ptr)
@@ -161,7 +169,7 @@ static PointerRNA rna_ActionSlots_active_get(PointerRNA *ptr)
   if (!active_slot) {
     return PointerRNA_NULL;
   }
-  return RNA_pointer_create(&action.id, &RNA_ActionSlot, active_slot);
+  return RNA_pointer_create_discrete(&action.id, &RNA_ActionSlot, active_slot);
 }
 
 static void rna_ActionSlots_active_set(PointerRNA *ptr,
@@ -216,7 +224,7 @@ void rna_Action_slots_remove(bAction *dna_action,
     return;
   }
 
-  RNA_POINTER_INVALIDATE(slot_ptr);
+  slot_ptr->invalidate();
   WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN, nullptr);
   DEG_id_tag_update(&action.id, ID_RECALC_ANIMATION);
 }
@@ -224,7 +232,7 @@ void rna_Action_slots_remove(bAction *dna_action,
 static void rna_iterator_action_layers_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
 {
   animrig::Action &action = rna_action(ptr);
-  rna_iterator_array_begin(iter, action.layers());
+  rna_iterator_array_begin(iter, ptr, action.layers());
 }
 
 static int rna_iterator_action_layers_length(PointerRNA *ptr)
@@ -273,7 +281,7 @@ void rna_Action_layers_remove(bAction *dna_action,
     return;
   }
 
-  RNA_POINTER_INVALIDATE(layer_ptr);
+  layer_ptr->invalidate();
   WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN, nullptr);
   DEG_id_tag_update(&action.id, ID_RECALC_ANIMATION);
 }
@@ -281,7 +289,7 @@ void rna_Action_layers_remove(bAction *dna_action,
 static void rna_iterator_animation_slots_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
 {
   animrig::Action &action = rna_action(ptr);
-  rna_iterator_array_begin(iter, action.slots());
+  rna_iterator_array_begin(iter, ptr, action.slots());
 }
 
 static int rna_iterator_animation_slots_length(PointerRNA *ptr)
@@ -299,7 +307,7 @@ static std::optional<std::string> rna_ActionSlot_path(const PointerRNA *ptr)
   return fmt::format("slots[\"{}\"]", identifier_esc);
 }
 
-int rna_ActionSlot_id_root_icon_get(PointerRNA *ptr)
+int rna_ActionSlot_target_id_type_icon_get(PointerRNA *ptr)
 {
   animrig::Slot &slot = rna_data_slot(ptr);
   return UI_icon_from_idcode(slot.idtype);
@@ -309,7 +317,7 @@ int rna_ActionSlot_id_root_icon_get(PointerRNA *ptr)
 void rna_ActionSlot_name_display_get(PointerRNA *ptr, char *value)
 {
   animrig::Slot &slot = rna_data_slot(ptr);
-  slot.identifier_without_prefix().unsafe_copy(value);
+  slot.identifier_without_prefix().copy_unsafe(value);
 }
 
 int rna_ActionSlot_name_display_length(PointerRNA *ptr)
@@ -325,13 +333,11 @@ static void rna_ActionSlot_name_display_set(PointerRNA *ptr, const char *name)
   const StringRef name_ref(name);
 
   if (name_ref.is_empty()) {
-    WM_report(RPT_ERROR, "Action slot display names cannot be empty");
+    WM_global_report(RPT_ERROR, "Action slot display names cannot be empty");
     return;
   }
 
-  /* Construct the new internal name, from the slot's type and the given name. */
-  const std::string internal_name = slot.identifier_prefix_for_idtype() + name_ref;
-  action.slot_identifier_define(slot, internal_name);
+  action.slot_display_name_define(slot, name);
 }
 
 static void rna_ActionSlot_identifier_set(PointerRNA *ptr, const char *identifier)
@@ -341,25 +347,27 @@ static void rna_ActionSlot_identifier_set(PointerRNA *ptr, const char *identifie
   const StringRef identifier_ref(identifier);
 
   if (identifier_ref.size() < animrig::Slot::identifier_length_min) {
-    WM_report(RPT_ERROR, "Action slot identifiers should be at least three characters");
+    WM_global_report(RPT_ERROR, "Action slot identifiers should be at least three characters");
     return;
   }
 
-  if (slot.has_idtype()) {
-    /* Check if the new identifier is going to be compatible with the already-established ID type.
-     */
-    const std::string expect_prefix = slot.identifier_prefix_for_idtype();
+  /* Sanity check. These should never be out of sync in higher-level code. */
+  BLI_assert(slot.idtype_string() == slot.identifier_prefix());
 
-    if (!identifier_ref.startswith(expect_prefix)) {
-      const std::string new_prefix = identifier_ref.substr(0, 2);
-      WM_reportf(RPT_WARNING,
-                 "Action slot identifier set with unexpected prefix \"%s\" (expected \"%s\").\n",
-                 new_prefix.c_str(),
-                 expect_prefix.c_str());
-    }
+  const std::string identifier_with_correct_prefix = slot.idtype_string() +
+                                                     identifier_ref.substr(2);
+
+  if (identifier_with_correct_prefix != identifier_ref) {
+    WM_global_reportf(
+        RPT_WARNING,
+        "Attempted to set slot identifier to \"%s\", but the type prefix doesn't match the "
+        "slot's 'target_id_type' \"%s\". Setting to \"%s\" instead.\n",
+        identifier,
+        slot.idtype_string().c_str(),
+        identifier_with_correct_prefix.c_str());
   }
 
-  action.slot_identifier_define(slot, identifier);
+  action.slot_identifier_define(slot, identifier_with_correct_prefix);
 }
 
 static void rna_ActionSlot_identifier_update(Main *bmain, Scene *, PointerRNA *ptr)
@@ -369,28 +377,19 @@ static void rna_ActionSlot_identifier_update(Main *bmain, Scene *, PointerRNA *p
   action.slot_identifier_propagate(*bmain, slot);
 }
 
-#  ifndef NDEBUG
-static void rna_ActionSlot_debug_log_users(const ID *action_id, ActionSlot *dna_slot, Main *bmain)
+static CollectionVector rna_ActionSlot_users(struct ActionSlot *self, Main *bmain)
 {
-  using namespace blender::animrig;
-  const Action &action = reinterpret_cast<const bAction *>(action_id)->wrap();
-  Slot &slot = dna_slot->wrap();
+  animrig::Slot &slot = self->wrap();
+  const Span<ID *> slot_users = slot.users(*bmain);
 
-  printf("\033[38;5;214mAction Slot users of '%s' on Action '%s':\033[0m\n",
-         slot.identifier,
-         action.id.name + 2);
-  if (bmain->is_action_slot_to_id_map_dirty) {
-    printf("  User map is \033[93mdirty\033[0m, this will trigger a recompute.\n");
-  }
-  else {
-    printf("  User map is \033[92mclean\033[0m.\n");
+  CollectionVector vector{};
+  vector.items.resize(slot_users.size());
+  for (const int i : slot_users.index_range()) {
+    vector.items[i] = RNA_id_pointer_create(slot_users[i]);
   }
 
-  for (const ID *user : slot.users(*bmain)) {
-    printf("  - %s\n", user->name);
-  }
+  return vector;
 }
-#  endif /* NDEBUG */
 
 static std::optional<std::string> rna_ActionLayer_path(const PointerRNA *ptr)
 {
@@ -405,7 +404,7 @@ static void rna_iterator_ActionLayer_strips_begin(CollectionPropertyIterator *it
                                                   PointerRNA *ptr)
 {
   animrig::Layer &layer = rna_data_layer(ptr);
-  rna_iterator_array_begin(iter, layer.strips());
+  rna_iterator_array_begin(iter, ptr, layer.strips());
 }
 
 static int rna_iterator_ActionLayer_strips_length(PointerRNA *ptr)
@@ -457,7 +456,7 @@ void rna_ActionStrips_remove(
     return;
   }
 
-  RNA_POINTER_INVALIDATE(strip_ptr);
+  strip_ptr->invalidate();
   WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN, nullptr);
   DEG_id_tag_update(action_id, ID_RECALC_ANIMATION);
 }
@@ -474,7 +473,7 @@ static std::optional<std::string> rna_ActionStrip_path(const PointerRNA *ptr)
       continue;
     }
 
-    PointerRNA layer_ptr = RNA_pointer_create(&action.id, &RNA_ActionLayer, layer);
+    PointerRNA layer_ptr = RNA_pointer_create_discrete(&action.id, &RNA_ActionLayer, layer);
     const std::optional<std::string> layer_path = rna_ActionLayer_path(&layer_ptr);
     BLI_assert_msg(layer_path, "Every animation layer should have a valid RNA path.");
     const std::string strip_path = fmt::format("{}.strips[{}]", *layer_path, index);
@@ -489,7 +488,8 @@ static void rna_iterator_keyframestrip_channelbags_begin(CollectionPropertyItera
 {
   animrig::Action &action = reinterpret_cast<bAction *>(ptr->owner_id)->wrap();
   animrig::Strip &strip = rna_data_strip(ptr);
-  rna_iterator_array_begin(iter, strip.data<animrig::StripKeyframeData>(action).channelbags());
+  rna_iterator_array_begin(
+      iter, ptr, strip.data<animrig::StripKeyframeData>(action).channelbags());
 }
 
 static int rna_iterator_keyframestrip_channelbags_length(PointerRNA *ptr)
@@ -539,7 +539,7 @@ static void rna_Channelbags_remove(ID *dna_action_id,
     return;
   }
 
-  RNA_POINTER_INVALIDATE(channelbag_ptr);
+  channelbag_ptr->invalidate();
   WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN, nullptr);
   DEG_id_tag_update(dna_action_id, ID_RECALC_ANIMATION);
 }
@@ -595,7 +595,7 @@ static std::optional<std::string> rna_Channelbag_path(const PointerRNA *ptr)
         continue;
       }
 
-      PointerRNA layer_ptr = RNA_pointer_create(&action.id, &RNA_ActionLayer, layer);
+      PointerRNA layer_ptr = RNA_pointer_create_discrete(&action.id, &RNA_ActionLayer, layer);
       const std::optional<std::string> layer_path = rna_ActionLayer_path(&layer_ptr);
       BLI_assert_msg(layer_path, "Every animation layer should have a valid RNA path.");
       return fmt::format("{}.strips[{}].channelbags[{}]", *layer_path, strip_index, index);
@@ -605,11 +605,21 @@ static std::optional<std::string> rna_Channelbag_path(const PointerRNA *ptr)
   return std::nullopt;
 }
 
+static PointerRNA rna_Channelbag_slot_get(PointerRNA *ptr)
+{
+  animrig::Action &action = rna_action(ptr);
+  animrig::Channelbag &channelbag = rna_data_channelbag(ptr);
+  animrig::Slot *slot = action.slot_for_handle(channelbag.slot_handle);
+  BLI_assert(slot);
+
+  return RNA_pointer_create_with_parent(*ptr, &RNA_ActionSlot, slot);
+}
+
 static void rna_iterator_Channelbag_fcurves_begin(CollectionPropertyIterator *iter,
                                                   PointerRNA *ptr)
 {
   animrig::Channelbag &bag = rna_data_channelbag(ptr);
-  rna_iterator_array_begin(iter, bag.fcurves());
+  rna_iterator_array_begin(iter, ptr, bag.fcurves());
 }
 
 static int rna_iterator_Channelbag_fcurves_length(PointerRNA *ptr)
@@ -687,7 +697,7 @@ static void rna_Channelbag_fcurve_clear(ID *dna_action_id,
 static void rna_iterator_Channelbag_groups_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
 {
   animrig::Channelbag &bag = rna_data_channelbag(ptr);
-  rna_iterator_array_begin(iter, bag.channel_groups());
+  rna_iterator_array_begin(iter, ptr, bag.channel_groups());
 }
 
 static int rna_iterator_Channelbag_groups_length(PointerRNA *ptr)
@@ -720,17 +730,23 @@ static void rna_Channelbag_group_remove(ActionChannelbag *dna_channelbag,
     return;
   }
 
-  RNA_POINTER_INVALIDATE(agrp_ptr);
+  agrp_ptr->invalidate();
   WM_main_add_notifier(NC_ANIMATION | ND_KEYFRAME | NA_EDITED, nullptr);
 }
 
-static ActionChannelbag *rna_ActionStrip_channels(ID *dna_action_id,
-                                                  ActionStrip *self,
-                                                  const animrig::slot_handle_t slot_handle)
+static ActionChannelbag *rna_ActionStrip_channelbag(ID *dna_action_id,
+                                                    ActionStrip *self,
+                                                    const ActionSlot *dna_slot,
+                                                    const bool ensure)
 {
   animrig::Action &action = reinterpret_cast<bAction *>(dna_action_id)->wrap();
   animrig::StripKeyframeData &strip_data = self->wrap().data<animrig::StripKeyframeData>(action);
-  return strip_data.channelbag_for_slot(slot_handle);
+  const animrig::Slot &slot = dna_slot->wrap();
+
+  if (ensure) {
+    return &strip_data.channelbag_for_slot_ensure(slot);
+  }
+  return strip_data.channelbag_for_slot(slot);
 }
 
 /**
@@ -760,7 +776,7 @@ static void rna_ActionGroup_channels_begin(CollectionPropertyIterator *iter, Poi
 {
   bActionGroup *group = (bActionGroup *)ptr->data;
 
-  ActionGroupChannelsIterator *custom_iter = MEM_cnew<ActionGroupChannelsIterator>(__func__);
+  ActionGroupChannelsIterator *custom_iter = MEM_callocN<ActionGroupChannelsIterator>(__func__);
 
   iter->internal.custom = custom_iter;
 
@@ -848,7 +864,7 @@ static PointerRNA rna_ActionGroup_channels_get(CollectionPropertyIterator *iter)
       break;
   }
 
-  return rna_pointer_inherit_refine(&iter->parent, &RNA_FCurve, fcurve);
+  return RNA_pointer_create_with_parent(iter->parent, &RNA_FCurve, fcurve);
 }
 
 /* Use the backward-compatible API only when we're working with the action as a
@@ -867,10 +883,10 @@ static void rna_iterator_Action_groups_begin(CollectionPropertyIterator *iter, P
     if (!channelbag) {
       return;
     }
-    rna_iterator_array_begin(iter, channelbag->channel_groups());
+    rna_iterator_array_begin(iter, ptr, channelbag->channel_groups());
   }
   else {
-    rna_iterator_listbase_begin(iter, &action.groups, nullptr);
+    rna_iterator_listbase_begin(iter, ptr, &action.groups, nullptr);
   }
 }
 static void rna_iterator_Action_groups_next(CollectionPropertyIterator *iter)
@@ -904,7 +920,7 @@ static PointerRNA rna_iterator_Action_groups_get(CollectionPropertyIterator *ite
     group = static_cast<bActionGroup *>(rna_iterator_listbase_get(iter));
   }
 
-  return RNA_pointer_create(&action.id, &RNA_ActionGroup, group);
+  return RNA_pointer_create_with_parent(iter->parent, &RNA_ActionGroup, group);
 }
 static int rna_iterator_Action_groups_length(PointerRNA *ptr)
 {
@@ -989,7 +1005,7 @@ static void rna_Action_groups_remove(bAction *act, ReportList *reports, PointerR
   }
 
   MEM_freeN(agrp);
-  RNA_POINTER_INVALIDATE(agrp_ptr);
+  agrp_ptr->invalidate();
 
   DEG_id_tag_update(&act->id, ID_RECALC_ANIMATION_NO_FLUSH);
   WM_main_add_notifier(NC_ANIMATION | ND_KEYFRAME | NA_EDITED, nullptr);
@@ -1004,10 +1020,10 @@ static void rna_iterator_Action_fcurves_begin(CollectionPropertyIterator *iter, 
     if (!channelbag) {
       return;
     }
-    rna_iterator_array_begin(iter, channelbag->fcurves());
+    rna_iterator_array_begin(iter, ptr, channelbag->fcurves());
   }
   else {
-    rna_iterator_listbase_begin(iter, &action.curves, nullptr);
+    rna_iterator_listbase_begin(iter, ptr, &action.curves, nullptr);
   }
 }
 static void rna_iterator_Action_fcurves_next(CollectionPropertyIterator *iter)
@@ -1041,7 +1057,7 @@ static PointerRNA rna_iterator_Action_fcurves_get(CollectionPropertyIterator *it
     fcurve = static_cast<FCurve *>(rna_iterator_listbase_get(iter));
   }
 
-  return RNA_pointer_create(&action.id, &RNA_FCurve, fcurve);
+  return RNA_pointer_create_with_parent(iter->parent, &RNA_FCurve, fcurve);
 }
 static int rna_iterator_Action_fcurves_length(PointerRNA *ptr)
 {
@@ -1152,7 +1168,7 @@ static void rna_Action_fcurve_remove(bAction *act, ReportList *reports, PointerR
       BKE_reportf(reports, RPT_ERROR, "F-Curve not found in action '%s'", act->id.name + 2);
       return;
     }
-    RNA_POINTER_INVALIDATE(fcu_ptr);
+    fcu_ptr->invalidate();
 
     DEG_id_tag_update(&act->id, ID_RECALC_ANIMATION_NO_FLUSH);
     WM_main_add_notifier(NC_ANIMATION | ND_KEYFRAME | NA_EDITED, nullptr);
@@ -1172,7 +1188,7 @@ static void rna_Action_fcurve_remove(bAction *act, ReportList *reports, PointerR
 
     action_groups_remove_channel(act, fcu);
     BKE_fcurve_free(fcu);
-    RNA_POINTER_INVALIDATE(fcu_ptr);
+    fcu_ptr->invalidate();
   }
   else {
     if (BLI_findindex(&act->curves, fcu) == -1) {
@@ -1182,7 +1198,7 @@ static void rna_Action_fcurve_remove(bAction *act, ReportList *reports, PointerR
 
     BLI_remlink(&act->curves, fcu);
     BKE_fcurve_free(fcu);
-    RNA_POINTER_INVALIDATE(fcu_ptr);
+    fcu_ptr->invalidate();
   }
 
   DEG_id_tag_update(&act->id, ID_RECALC_ANIMATION_NO_FLUSH);
@@ -1209,7 +1225,7 @@ static void rna_Action_fcurve_clear(bAction *act)
 
 static TimeMarker *rna_Action_pose_markers_new(bAction *act, const char name[])
 {
-  TimeMarker *marker = static_cast<TimeMarker *>(MEM_callocN(sizeof(TimeMarker), "TimeMarker"));
+  TimeMarker *marker = MEM_callocN<TimeMarker>("TimeMarker");
   marker->flag = SELECT;
   marker->frame = 1;
   STRNCPY_UTF8(marker->name, name);
@@ -1232,14 +1248,14 @@ static void rna_Action_pose_markers_remove(bAction *act,
   }
 
   MEM_freeN(marker);
-  RNA_POINTER_INVALIDATE(marker_ptr);
+  marker_ptr->invalidate();
 }
 
 static PointerRNA rna_Action_active_pose_marker_get(PointerRNA *ptr)
 {
   bAction *act = (bAction *)ptr->data;
-  return rna_pointer_inherit_refine(
-      ptr, &RNA_TimelineMarker, BLI_findlink(&act->markers, act->active_marker - 1));
+  return RNA_pointer_create_with_parent(
+      *ptr, &RNA_TimelineMarker, BLI_findlink(&act->markers, act->active_marker - 1));
 }
 
 static void rna_Action_active_pose_marker_set(PointerRNA *ptr,
@@ -1351,8 +1367,42 @@ static void rna_Action_deselect_keys(bAction *act)
   WM_main_add_notifier(NC_ANIMATION | ND_KEYFRAME | NA_EDITED, nullptr);
 }
 
-/* Used to check if an action (value pointer)
- * is suitable to be assigned to the ID-block that is ptr. */
+static FCurve *rna_Action_fcurve_ensure_for_datablock(bAction *_self,
+                                                      Main *bmain,
+                                                      ReportList *reports,
+                                                      ID *datablock,
+                                                      const char *data_path,
+                                                      const int array_index)
+{
+  /* Precondition checks. */
+  {
+    if (blender::animrig::get_action(*datablock) != _self) {
+      BKE_reportf(reports,
+                  RPT_ERROR_INVALID_INPUT,
+                  "Assign action \"%s\" to \"%s\" before calling this function",
+                  _self->id.name + 2,
+                  datablock->name + 2);
+      return nullptr;
+    }
+
+    BLI_assert(data_path != nullptr);
+    if (data_path[0] == '\0') {
+      BKE_report(reports, RPT_ERROR_INVALID_INPUT, "F-Curve data path empty, invalid argument");
+      return nullptr;
+    }
+  }
+
+  FCurve &fcurve = blender::animrig::action_fcurve_ensure(
+      bmain, *_self, *datablock, {data_path, array_index});
+
+  WM_main_add_notifier(NC_ANIMATION | ND_KEYFRAME | NA_EDITED, nullptr);
+  return &fcurve;
+}
+
+/**
+ * Used to check if an action (value pointer)
+ * is suitable to be assigned to the ID-block that is ptr.
+ */
 bool rna_Action_id_poll(PointerRNA *ptr, PointerRNA value)
 {
   ID *srcId = ptr->owner_id;
@@ -1369,9 +1419,9 @@ bool rna_Action_id_poll(PointerRNA *ptr, PointerRNA value)
      * be able to resolve an idroot for automatically, so let these through
      */
     if (action.idroot == 0) {
-      return 1;
+      return true;
     }
-    else if (srcId) {
+    if (srcId) {
       return GS(srcId->name) == action.idroot;
     }
   }
@@ -1381,8 +1431,10 @@ bool rna_Action_id_poll(PointerRNA *ptr, PointerRNA value)
   return true;
 }
 
-/* Used to check if an action (value pointer)
- * can be assigned to Action Editor given current mode. */
+/**
+ * Used to check if an action (value pointer)
+ * can be assigned to Action Editor given current mode.
+ */
 bool rna_Action_actedit_assign_poll(PointerRNA *ptr, PointerRNA value)
 {
   SpaceAction *saction = (SpaceAction *)ptr->data;
@@ -1414,8 +1466,10 @@ bool rna_Action_actedit_assign_poll(PointerRNA *ptr, PointerRNA value)
   return false;
 }
 
-/** Iterate the FCurves of the given bAnimContext and validate the RNA path. Sets the flag
- * FCURVE_DISABLED if the path can't be resolved. */
+/**
+ * Iterate the FCurves of the given bAnimContext and validate the RNA path. Sets the flag
+ * #FCURVE_DISABLED if the path can't be resolved.
+ */
 static void reevaluate_fcurve_errors(bAnimContext *ac)
 {
   /* Need to take off the flag before filtering, else the filter code would skip the FCurves, which
@@ -1497,17 +1551,24 @@ static std::optional<std::string> rna_DopeSheet_path(const PointerRNA *ptr)
   return "dopesheet";
 }
 
-static const EnumPropertyItem *rna_ActionSlot_id_root_itemf(bContext * /* C */,
-                                                            PointerRNA * /* ptr */,
-                                                            PropertyRNA * /* prop */,
-                                                            bool *r_free)
+/**
+ * Used for both `action.id_root` and `slot.target_id_type`.
+ *
+ * Note that `action.id_root` is deprecated, as it is only relevant to legacy
+ * Animato actions. So in practice this function is primarily here for
+ * `slot.target_id_type`.
+ */
+static const EnumPropertyItem *rna_ActionSlot_target_id_type_itemf(bContext * /* C */,
+                                                                   PointerRNA * /* ptr */,
+                                                                   PropertyRNA * /* prop */,
+                                                                   bool *r_free)
 {
   /* These items don't change, as the ID types are hard-coded. So better to
    * cache the list of enum items. */
-  static EnumPropertyItem *_rna_ActionSlot_id_root_items = nullptr;
+  static EnumPropertyItem *_rna_ActionSlot_target_id_type_items = nullptr;
 
-  if (_rna_ActionSlot_id_root_items) {
-    return _rna_ActionSlot_id_root_items;
+  if (_rna_ActionSlot_target_id_type_items) {
+    return _rna_ActionSlot_target_id_type_items;
   }
 
   int totitem = 0;
@@ -1525,7 +1586,7 @@ static const EnumPropertyItem *rna_ActionSlot_id_root_itemf(bContext * /* C */,
     i++;
   }
 
-  RNA_enum_item_add(&items, &totitem, &default_ActionSlot_id_root_items[0]);
+  RNA_enum_item_add(&items, &totitem, &default_ActionSlot_target_id_type_items[0]);
 
   RNA_enum_item_end(&items, &totitem);
 
@@ -1534,15 +1595,82 @@ static const EnumPropertyItem *rna_ActionSlot_id_root_itemf(bContext * /* C */,
    * Blender use memory after it is freed:
    *
    * >>> slot = C.object.animation_data.action_slot
-   * >>> enum_item = s.bl_rna.properties['id_root'].enum_items[slot.id_root]
+   * >>> enum_item = s.bl_rna.properties['target_id_type'].enum_items[slot.target_id_type]
    * >>> print(enum_item.name)
    */
   *r_free = false;
-  _rna_ActionSlot_id_root_items = items;
+  _rna_ActionSlot_target_id_type_items = items;
 
   BKE_blender_atexit_register(MEM_freeN, items);
 
   return items;
+}
+
+static void rna_ActionSlot_target_id_type_set(PointerRNA *ptr, int value)
+{
+  animrig::Action &action = reinterpret_cast<bAction *>(ptr->owner_id)->wrap();
+  animrig::Slot &slot = reinterpret_cast<ActionSlot *>(ptr->data)->wrap();
+
+  if (slot.idtype != 0) {
+    /* Ignore the assignment. */
+    printf(
+        "WARNING: ignoring assignment to target_id_type of Slot '%s' in Action '%s'. A Slot's "
+        "target_id_type can only be changed when currently 'UNSPECIFIED'.\n",
+        slot.identifier,
+        action.id.name);
+    return;
+  }
+
+  action.slot_idtype_define(slot, ID_Type(value));
+}
+
+/**
+ * For API backwards compatibility with pre-layered-actions (Blender 4.3 and
+ * earlier), we treat `Action.id_root` as a proxy for the `target_id_type`
+ * property (`idtype` in DNA) of the Action's first Slot.
+ *
+ * If the Action has no slots, then we fallback to returning 'unspecified' (0).
+ */
+static int rna_Action_id_root_get(PointerRNA *ptr)
+{
+  animrig::Action &action = reinterpret_cast<bAction *>(ptr->owner_id)->wrap();
+
+  if (action.slots().is_empty()) {
+    return 0;
+  }
+
+  return action.slot(0)->idtype;
+}
+
+/**
+ * For API backwards compatibility with pre-layered-actions (Blender 4.3 and
+ * earlier), we treat `Action.id_root` as a proxy for the `target_id_type`
+ * property (`idtype` in DNA) of the Action's first Slot.
+ *
+ * If the Action has no slots, then a legacy slot is created and its
+ * `target_id_type` is set.
+ */
+static void rna_Action_id_root_set(PointerRNA *ptr, int value)
+{
+  animrig::Action &action = reinterpret_cast<bAction *>(ptr->owner_id)->wrap();
+
+  animrig::Slot &slot = animrig::legacy::slot_ensure(action);
+  action.slot_idtype_define(slot, ID_Type(value));
+}
+
+static void rna_Action_id_root_update(Main *bmain, Scene *, PointerRNA *ptr)
+{
+  animrig::Action &action = rna_action(ptr);
+
+  if (action.slots().is_empty()) {
+    /* Nothing to do: id_root can't be set without at least one slot, so no
+     * change was possible that would necessitate an update. */
+    return;
+  }
+
+  /* Setting id_root actually sets the target ID type of the first slot, so it's
+   * the resulting changes to the first slot that we need to propagate. */
+  action.slot_identifier_propagate(*bmain, *action.slot(0));
 }
 
 #else
@@ -1972,6 +2100,8 @@ static void rna_def_action_slot(BlenderRNA *brna)
 {
   StructRNA *srna;
   PropertyRNA *prop;
+  PropertyRNA *parm;
+  FunctionRNA *func;
 
   srna = RNA_def_struct(brna, "ActionSlot", nullptr);
   RNA_def_struct_path_func(srna, "rna_ActionSlot_path");
@@ -1987,7 +2117,7 @@ static void rna_def_action_slot(BlenderRNA *brna)
   prop = RNA_def_property(srna, "identifier", PROP_STRING, PROP_NONE);
   RNA_def_struct_name_property(srna, prop);
   RNA_def_property_string_funcs(prop, nullptr, nullptr, "rna_ActionSlot_identifier_set");
-  RNA_def_property_string_maxlength(prop, sizeof(ActionSlot::identifier) - 2);
+  RNA_def_property_string_maxlength(prop, sizeof(ActionSlot::identifier));
   RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN, "rna_ActionSlot_identifier_update");
   RNA_def_property_ui_text(
       prop,
@@ -1995,18 +2125,21 @@ static void rna_def_action_slot(BlenderRNA *brna)
       "Used when connecting an Action to a data-block, to find the correct slot handle. This is "
       "the display name, prefixed by two characters determined by the slot's ID type");
 
-  prop = RNA_def_property(srna, "id_root", PROP_ENUM, PROP_NONE);
+  prop = RNA_def_property(srna, "target_id_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "idtype");
-  RNA_def_property_enum_items(prop, default_ActionSlot_id_root_items);
-  RNA_def_property_enum_funcs(prop, nullptr, nullptr, "rna_ActionSlot_id_root_itemf");
+  RNA_def_property_enum_items(prop, default_ActionSlot_target_id_type_items);
+  RNA_def_property_enum_funcs(
+      prop, nullptr, "rna_ActionSlot_target_id_type_set", "rna_ActionSlot_target_id_type_itemf");
+  RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN, "rna_ActionSlot_identifier_update");
   RNA_def_property_flag(prop, PROP_ENUM_NO_CONTEXT);
-  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
-  RNA_def_property_ui_text(
-      prop, "ID Root Type", "Type of data-block that can be animated by this slot");
+  RNA_def_property_ui_text(prop,
+                           "Target ID Type",
+                           "Type of data-block that this slot is intended to animate; can be set "
+                           "when 'UNSPECIFIED' but is otherwise read-only");
   RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_ID_ID);
 
-  prop = RNA_def_property(srna, "id_root_icon", PROP_INT, PROP_NONE);
-  RNA_def_property_int_funcs(prop, "rna_ActionSlot_id_root_icon_get", nullptr, nullptr);
+  prop = RNA_def_property(srna, "target_id_type_icon", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(prop, "rna_ActionSlot_target_id_type_icon_get", nullptr, nullptr);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
 
   prop = RNA_def_property(srna, "name_display", PROP_STRING, PROP_NONE);
@@ -2054,15 +2187,14 @@ static void rna_def_action_slot(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update_notifier(prop, NC_ANIMATION | ND_ANIMCHAN | NA_SELECTED);
 
-#  ifndef NDEBUG
-  /* Slot.debug_log_users() */
-  {
-    FunctionRNA *func;
-
-    func = RNA_def_function(srna, "debug_log_users", "rna_ActionSlot_debug_log_users");
-    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_MAIN);
-  }
-#  endif
+  func = RNA_def_function(srna, "users", "rna_ActionSlot_users");
+  RNA_def_function_flag(func, FUNC_USE_MAIN);
+  RNA_def_function_ui_description(
+      func, "Return the data-blocks that are animated by this slot of this action");
+  /* Return value. */
+  parm = RNA_def_property(func, "users", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_struct_type(parm, "ID");
+  RNA_def_function_return(func, parm);
 }
 
 static void rna_def_ActionLayer_strips(BlenderRNA *brna, PropertyRNA *cprop)
@@ -2114,6 +2246,12 @@ static void rna_def_action_layer(BlenderRNA *brna)
   prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
   RNA_def_struct_name_property(srna, prop);
 
+  /* Disabled in RNA until layered animation is actually implemented.
+   *
+   * The animation evaluation already takes these into account, but there is no guarantee that the
+   * mixing that is currently implemented is going to be mathematically identical to the eventual
+   * implementation. */
+#  if 0
   prop = RNA_def_property(srna, "influence", PROP_FLOAT, PROP_FACTOR);
   RNA_def_property_range(prop, 0.0f, 1.0f);
   RNA_def_property_ui_text(
@@ -2129,6 +2267,7 @@ static void rna_def_action_layer(BlenderRNA *brna)
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_enum_items(prop, rna_enum_layer_mix_mode_items);
   RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN, "rna_Action_tag_animupdate");
+#  endif
 
   /* Collection properties. */
   prop = RNA_def_property(srna, "strips", PROP_COLLECTION, PROP_NONE);
@@ -2217,20 +2356,18 @@ static void rna_def_action_keyframe_strip(BlenderRNA *brna)
     FunctionRNA *func;
     PropertyRNA *parm;
 
-    /* Strip.channels(...). */
-    func = RNA_def_function(srna, "channels", "rna_ActionStrip_channels");
+    /* Strip.channelbag(...). */
+    func = RNA_def_function(srna, "channelbag", "rna_ActionStrip_channelbag");
     RNA_def_function_flag(func, FUNC_USE_SELF_ID);
     RNA_def_function_ui_description(func, "Find the ActionChannelbag for a specific Slot");
-    parm = RNA_def_int(func,
-                       "slot_handle",
-                       0,
-                       0,
-                       INT_MAX,
-                       "Slot Handle",
-                       "Number that identifies a specific action slot",
-                       0,
-                       INT_MAX);
+    parm = RNA_def_pointer(
+        func, "slot", "ActionSlot", "Slot", "The slot for which to find the channelbag");
     RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+    RNA_def_boolean(func,
+                    "ensure",
+                    false,
+                    "Create if necessary",
+                    "Ensure the channelbag exists for this slot, creating it if necessary");
     parm = RNA_def_pointer(func, "channels", "ActionChannelbag", "Channels", "");
     RNA_def_function_return(func, parm);
 
@@ -2419,6 +2556,12 @@ static void rna_def_action_channelbag(BlenderRNA *brna)
   prop = RNA_def_property(srna, "slot_handle", PROP_INT, PROP_NONE);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
 
+  prop = RNA_def_property(srna, "slot", PROP_POINTER, PROP_NONE);
+  RNA_def_property_struct_type(prop, "ActionSlot");
+  RNA_def_property_ui_text(prop, "Slot", "The Slot that the Channelbag's animation data is for");
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_pointer_funcs(prop, "rna_Channelbag_slot_get", nullptr, nullptr, nullptr);
+
   /* Channelbag.fcurves */
   prop = RNA_def_property(srna, "fcurves", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_funcs(prop,
@@ -2578,7 +2721,11 @@ static void rna_def_action_fcurves(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_property_srna(cprop, "ActionFCurves");
   srna = RNA_def_struct(brna, "ActionFCurves", nullptr);
   RNA_def_struct_sdna(srna, "bAction");
-  RNA_def_struct_ui_text(srna, "Action F-Curves", "Collection of action F-Curves");
+  RNA_def_struct_ui_text(
+      srna,
+      "Action F-Curves",
+      "Collection of action F-Curves. Note that this is a legacy API that is unaware of action "
+      "slots, and will only consider the F-Curves for this action's first slot");
   RNA_def_property_collection_funcs(cprop,
                                     "rna_iterator_Action_fcurves_begin",
                                     "rna_iterator_Action_fcurves_next",
@@ -2591,7 +2738,9 @@ static void rna_def_action_fcurves(BlenderRNA *brna, PropertyRNA *cprop)
 
   /* Action.fcurves.new(...) */
   func = RNA_def_function(srna, "new", "rna_Action_fcurve_new");
-  RNA_def_function_ui_description(func, "Add an F-Curve to the action");
+  RNA_def_function_ui_description(func,
+                                  "Add an F-Curve for the first slot of this action, creating the "
+                                  "necessary layer, strip, and slot if necessary");
   RNA_def_function_flag(func, FUNC_USE_REPORTS | FUNC_USE_MAIN);
   parm = RNA_def_string(func, "data_path", nullptr, 0, "Data Path", "F-Curve data path to use");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
@@ -2607,7 +2756,7 @@ static void rna_def_action_fcurves(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_function_ui_description(
       func,
       "Find an F-Curve. Note that this function performs a linear scan "
-      "of all F-Curves in the action.");
+      "of all F-Curves for the action's first slot.");
   RNA_def_function_flag(func, FUNC_USE_REPORTS);
   parm = RNA_def_string(func, "data_path", nullptr, 0, "Data Path", "F-Curve data path");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
@@ -2618,7 +2767,7 @@ static void rna_def_action_fcurves(BlenderRNA *brna, PropertyRNA *cprop)
 
   /* Action.fcurves.remove(...) */
   func = RNA_def_function(srna, "remove", "rna_Action_fcurve_remove");
-  RNA_def_function_ui_description(func, "Remove F-Curve");
+  RNA_def_function_ui_description(func, "Remove the F-Curve from the action's first slot");
   RNA_def_function_flag(func, FUNC_USE_REPORTS);
   parm = RNA_def_pointer(func, "fcurve", "FCurve", "", "F-Curve to remove");
   RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED | PARM_RNAPTR);
@@ -2626,7 +2775,7 @@ static void rna_def_action_fcurves(BlenderRNA *brna, PropertyRNA *cprop)
 
   /* Action.fcurves.clear() */
   func = RNA_def_function(srna, "clear", "rna_Action_fcurve_clear");
-  RNA_def_function_ui_description(func, "Remove all F-Curves");
+  RNA_def_function_ui_description(func, "Remove all F-Curves from the action's first slot");
 }
 
 static void rna_def_action_pose_markers(BlenderRNA *brna, PropertyRNA *cprop)
@@ -2687,26 +2836,40 @@ static void rna_def_action_legacy(BlenderRNA *brna, StructRNA *srna)
   prop = RNA_def_property(srna, "fcurves", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_sdna(prop, nullptr, "curves", nullptr);
   RNA_def_property_struct_type(prop, "FCurve");
-  RNA_def_property_ui_text(prop, "F-Curves", "The individual F-Curves that make up the action");
+  RNA_def_property_ui_text(
+      prop,
+      "F-Curves",
+      "Legacy API, for backward compatibility with code that does not handle slotted actions yet. "
+      "This collection contains the F-Curves for the action's first slot");
   rna_def_action_fcurves(brna, prop);
 
   prop = RNA_def_property(srna, "groups", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_sdna(prop, nullptr, "groups", nullptr);
   RNA_def_property_struct_type(prop, "ActionGroup");
-  RNA_def_property_ui_text(prop, "Groups", "Convenient groupings of F-Curves");
+  RNA_def_property_ui_text(
+      prop,
+      "Groups",
+      "Legacy API, for backward compatibility with code that does not handle slotted actions yet. "
+      "This collection contains the F-Curve groups for the action's first slot");
   rna_def_action_groups(brna, prop);
 
   /* special "type" limiter - should not really be edited in general,
    * but is still available/editable in 'emergencies' */
   prop = RNA_def_property(srna, "id_root", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "idroot");
-  RNA_def_property_enum_items(prop, default_ActionSlot_id_root_items);
-  RNA_def_property_enum_funcs(prop, nullptr, nullptr, "rna_ActionSlot_id_root_itemf");
+  RNA_def_property_enum_items(prop, default_ActionSlot_target_id_type_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_Action_id_root_get",
+                              "rna_Action_id_root_set",
+                              "rna_ActionSlot_target_id_type_itemf");
+  RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN, "rna_Action_id_root_update");
   RNA_def_property_flag(prop, PROP_ENUM_NO_CONTEXT);
-  RNA_def_property_ui_text(prop,
-                           "ID Root Type",
-                           "Type of ID block that action can be used on - "
-                           "DO NOT CHANGE UNLESS YOU KNOW WHAT YOU ARE DOING");
+  RNA_def_property_ui_text(
+      prop,
+      "ID Root Type",
+      "Legacy API, for backward compatibility with code that does not handle slotted actions yet. "
+      "Type of data-block that the action's first slot can be used on. Do not change unless you "
+      "know what you are doing");
   RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_ID_ID);
 }
 
@@ -2714,6 +2877,9 @@ static void rna_def_action(BlenderRNA *brna)
 {
   StructRNA *srna;
   PropertyRNA *prop;
+
+  FunctionRNA *func;
+  PropertyRNA *parm;
 
   srna = RNA_def_struct(brna, "Action", "ID");
   RNA_def_struct_sdna(srna, "bAction");
@@ -2733,7 +2899,9 @@ static void rna_def_action(BlenderRNA *brna)
       prop,
       "Is Legacy Action",
       "Return whether this is a legacy Action. Legacy Actions have no layers or slots. An "
-      "empty Action considered as both a 'legacy' and a 'layered' Action.");
+      "empty Action considered as both a 'legacy' and a 'layered' Action. Since Blender 4.4 "
+      "actions are automatically updated to layered actions, and thus this will only return True "
+      "when the action is empty");
   RNA_def_property_boolean_funcs(prop, "rna_Action_is_action_legacy_get", nullptr);
 
   prop = RNA_def_property(srna, "is_action_layered", PROP_BOOLEAN, PROP_NONE);
@@ -2853,9 +3021,33 @@ static void rna_def_action(BlenderRNA *brna)
   RNA_def_property_float_funcs(prop, "rna_Action_curve_frame_range_get", nullptr, nullptr);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
 
-  FunctionRNA *func = RNA_def_function(srna, "deselect_keys", "rna_Action_deselect_keys");
+  func = RNA_def_function(srna, "deselect_keys", "rna_Action_deselect_keys");
   RNA_def_function_ui_description(
       func, "Deselects all keys of the Action. The selection status of F-Curves is unchanged.");
+
+  /* action.fcurve_ensure_for_datablock() */
+  func = RNA_def_function(
+      srna, "fcurve_ensure_for_datablock", "rna_Action_fcurve_ensure_for_datablock");
+  RNA_def_function_ui_description(
+      func,
+      "Ensure that an F-Curve exists, with the given data path and array index, for the given "
+      "data-block. This action must already be assigned to the data-block. This function will "
+      "also create the layer, keyframe strip, and action slot if necessary, and take care of "
+      "assigning the action slot too");
+  RNA_def_function_flag(func, FUNC_USE_MAIN | FUNC_USE_REPORTS);
+
+  parm = RNA_def_pointer(func,
+                         "datablock",
+                         "ID",
+                         "",
+                         "The data-block animated by this action, for which to ensure the F-Curve "
+                         "exists. This action must already be assigned to the data-block");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
+  parm = RNA_def_string(func, "data_path", nullptr, 0, "Data Path", "F-Curve data path");
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  RNA_def_int(func, "index", 0, 0, INT_MAX, "Index", "Array index", 0, INT_MAX);
+  parm = RNA_def_pointer(func, "fcurve", "FCurve", "", "The found or created F-Curve");
+  RNA_def_function_return(func, parm);
 
   rna_def_action_legacy(brna, srna);
 

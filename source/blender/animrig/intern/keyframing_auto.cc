@@ -11,9 +11,6 @@
 #include "BKE_fcurve.hh"
 #include "BKE_scene.hh"
 
-#include "BLI_listbase.h"
-#include "BLI_string.h"
-
 #include "DNA_scene_types.h"
 
 #include "RNA_access.hh"
@@ -28,7 +25,7 @@
 
 namespace blender::animrig {
 
-static eInsertKeyFlags get_autokey_flags(Scene *scene)
+static eInsertKeyFlags get_autokey_flags(const Scene *scene)
 {
   eInsertKeyFlags flag = INSERTKEY_NOFLAGS;
 
@@ -102,7 +99,7 @@ bool autokeyframe_cfra_can_key(const Scene *scene, ID *id)
   return true;
 }
 
-void autokeyframe_object(bContext *C, Scene *scene, Object *ob, Span<RNAPath> rna_paths)
+void autokeyframe_object(bContext *C, const Scene *scene, Object *ob, Span<RNAPath> rna_paths)
 {
   BLI_assert(ob != nullptr);
   BLI_assert(scene != nullptr);

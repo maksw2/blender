@@ -3,10 +3,9 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set(INC
-  .
+  PUBLIC .
   intern
   intern/library_types
-  ../blenkernel
 )
 
 set(INC_SYS
@@ -23,8 +22,8 @@ set(SRC
   intern/asset_representation.cc
   intern/library_types/all_library.cc
   intern/library_types/essentials_library.cc
-  intern/library_types/preferences_on_disk_library.cc
   intern/library_types/on_disk_library.cc
+  intern/library_types/preferences_on_disk_library.cc
   intern/library_types/runtime_library.cc
   intern/utils.cc
 
@@ -39,22 +38,24 @@ set(SRC
   intern/asset_library_service.hh
   intern/library_types/all_library.hh
   intern/library_types/essentials_library.hh
-  intern/library_types/preferences_on_disk_library.hh
   intern/library_types/on_disk_library.hh
+  intern/library_types/preferences_on_disk_library.hh
   intern/library_types/runtime_library.hh
   intern/utils.hh
 )
 
 set(LIB
-  bf_blenkernel
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
   PRIVATE bf::dna
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
 )
 
 
 blender_add_lib(bf_asset_system "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
+add_library(bf::asset_system ALIAS bf_asset_system)
 
 if(WITH_GTESTS)
   set(TEST_INC

@@ -9,7 +9,6 @@
  */
 
 #include "BLI_compiler_compat.h"
-#include "BLI_sys_types.h"
 
 #include "BLI_math_matrix_types.hh"
 
@@ -70,7 +69,7 @@ BLI_INLINE float IMB_colormanagement_get_luminance(const float rgb[3]);
 /**
  * Byte equivalent of #IMB_colormanagement_get_luminance().
  */
-BLI_INLINE unsigned char IMB_colormanagement_get_luminance_byte(const unsigned char[3]);
+BLI_INLINE unsigned char IMB_colormanagement_get_luminance_byte(const unsigned char rgb[3]);
 
 /**
  * Conversion between scene linear and other color spaces.
@@ -105,28 +104,17 @@ bool IMB_colormanagement_set_whitepoint(const float whitepoint[3],
  * \{ */
 
 /**
- * Convert the whole buffer from specified by name color space to another.
+ * Convert a float image buffer from one color space to another.
  */
-void IMB_colormanagement_transform(float *buffer,
-                                   int width,
-                                   int height,
-                                   int channels,
-                                   const char *from_colorspace,
-                                   const char *to_colorspace,
-                                   bool predivide);
+void IMB_colormanagement_transform_float(float *buffer,
+                                         int width,
+                                         int height,
+                                         int channels,
+                                         const char *from_colorspace,
+                                         const char *to_colorspace,
+                                         bool predivide);
 /**
- * Convert the whole buffer from specified by name color space to another
- * will do threaded conversion.
- */
-void IMB_colormanagement_transform_threaded(float *buffer,
-                                            int width,
-                                            int height,
-                                            int channels,
-                                            const char *from_colorspace,
-                                            const char *to_colorspace,
-                                            bool predivide);
-/**
- * Similar to #IMB_colormanagement_transform_threaded, but operates on byte buffer.
+ * Convert a byte image buffer from one color space to another.
  */
 void IMB_colormanagement_transform_byte(unsigned char *buffer,
                                         int width,
@@ -134,29 +122,17 @@ void IMB_colormanagement_transform_byte(unsigned char *buffer,
                                         int channels,
                                         const char *from_colorspace,
                                         const char *to_colorspace);
-void IMB_colormanagement_transform_byte_threaded(unsigned char *buffer,
+
+/**
+ * Convert a byte image buffer into a float buffer, changing the color spaces too.
+ */
+void IMB_colormanagement_transform_byte_to_float(float *float_buffer,
+                                                 unsigned char *byte_buffer,
                                                  int width,
                                                  int height,
                                                  int channels,
                                                  const char *from_colorspace,
                                                  const char *to_colorspace);
-/**
- * Similar to #IMB_colormanagement_transform_byte_threaded, but gets float buffer from display one.
- */
-void IMB_colormanagement_transform_from_byte(float *float_buffer,
-                                             unsigned char *byte_buffer,
-                                             int width,
-                                             int height,
-                                             int channels,
-                                             const char *from_colorspace,
-                                             const char *to_colorspace);
-void IMB_colormanagement_transform_from_byte_threaded(float *float_buffer,
-                                                      unsigned char *byte_buffer,
-                                                      int width,
-                                                      int height,
-                                                      int channels,
-                                                      const char *from_colorspace,
-                                                      const char *to_colorspace);
 void IMB_colormanagement_transform_v4(float pixel[4],
                                       const char *from_colorspace,
                                       const char *to_colorspace);
@@ -549,4 +525,4 @@ void IMB_colormanagement_wavelength_to_rgb_table(float *r_table, int width);
 
 /** \} */
 
-#include "intern/colormanagement_inline.h"
+#include "intern/colormanagement_inline.h"  // IWYU pragma: export

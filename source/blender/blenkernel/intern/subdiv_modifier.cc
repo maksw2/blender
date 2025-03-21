@@ -12,7 +12,6 @@
 #include "DNA_userdef_types.h"
 
 #include "BKE_attribute.hh"
-#include "BKE_customdata.hh"
 #include "BKE_mesh.hh"
 #include "BKE_modifier.hh"
 #include "BKE_subdiv.hh"
@@ -59,28 +58,11 @@ bool BKE_subsurf_modifier_runtime_init(SubsurfModifierData *smd, const bool use_
 
   /* Allocate runtime data if it did not exist yet. */
   if (runtime_data == nullptr) {
-    runtime_data = MEM_cnew<SubsurfRuntimeData>(__func__);
+    runtime_data = MEM_callocN<SubsurfRuntimeData>(__func__);
     smd->modifier.runtime = runtime_data;
   }
   runtime_data->settings = settings;
   return true;
-}
-
-static ModifierData *modifier_get_last_enabled_for_mode(const Scene *scene,
-                                                        const Object *ob,
-                                                        int required_mode)
-{
-  ModifierData *md = static_cast<ModifierData *>(ob->modifiers.last);
-
-  while (md) {
-    if (BKE_modifier_is_enabled(scene, md, required_mode)) {
-      break;
-    }
-
-    md = md->prev;
-  }
-
-  return md;
 }
 
 bool BKE_subsurf_modifier_use_custom_loop_normals(const SubsurfModifierData *smd, const Mesh *mesh)
@@ -102,14 +84,13 @@ bool BKE_subsurf_modifier_has_split_normals(const SubsurfModifierData *smd, cons
 
 static bool is_subdivision_evaluation_possible_on_gpu()
 {
-  /* Only OpenGL is supported for OpenSubdiv evaluation for now. */
-  if (GPU_backend_get_type() != GPU_BACKEND_OPENGL) {
+  if (GPU_backend_get_type() == GPU_BACKEND_NONE) {
     return false;
   }
 
   /* Now that we know it is OpenGL, check for Qualcomm GPUs,
    * which GPU subdiv is broken on some of (#124515) */
-  if (GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_WIN, GPU_DRIVER_ANY)) {
+  if (GPU_type_matches_ex(GPU_DEVICE_QUALCOMM, GPU_OS_WIN, GPU_DRIVER_ANY, GPU_BACKEND_OPENGL)) {
     return false;
   }
 
@@ -133,31 +114,16 @@ bool BKE_subsurf_modifier_force_disable_gpu_evaluation_for_mesh(const SubsurfMod
     return false;
   }
 
+  /* Deactivate GPU subdivision if sharp edges or custom normals are used as those are
+   * complicated to support on GPU, and should really be separate workflows. */
   return BKE_subsurf_modifier_has_split_normals(smd, mesh);
 }
 
-bool BKE_subsurf_modifier_can_do_gpu_subdiv(const Scene *scene,
-                                            const Object *ob,
-                                            const Mesh *mesh,
-                                            const SubsurfModifierData *smd,
-                                            int required_mode)
+bool BKE_subsurf_modifier_can_do_gpu_subdiv(const SubsurfModifierData *smd, const Mesh *mesh)
 {
-  if ((U.gpu_flag & USER_GPU_FLAG_SUBDIVISION_EVALUATION) == 0) {
-    return false;
-  }
-
-  /* Deactivate GPU subdivision if sharp edges or custom normals are used as those are
-   * complicated to support on GPU, and should really be separate workflows. */
-  if (BKE_subsurf_modifier_has_split_normals(smd, mesh)) {
-    return false;
-  }
-
-  ModifierData *md = modifier_get_last_enabled_for_mode(scene, ob, required_mode);
-  if (md != (const ModifierData *)smd) {
-    return false;
-  }
-
-  return is_subdivision_evaluation_possible_on_gpu();
+  return (U.gpu_flag & USER_GPU_FLAG_SUBDIVISION_EVALUATION) &&
+         is_subdivision_evaluation_possible_on_gpu() &&
+         !BKE_subsurf_modifier_has_split_normals(smd, mesh);
 }
 
 bool BKE_subsurf_modifier_has_gpu_subdiv(const Mesh *mesh)

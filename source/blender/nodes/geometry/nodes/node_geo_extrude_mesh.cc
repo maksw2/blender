@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "BLI_array_utils.hh"
+#include "BLI_listbase.h"
 #include "BLI_task.hh"
 #include "BLI_vector_set.hh"
 
@@ -23,6 +24,8 @@
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
+
+#include "FN_multi_function_builder.hh"
 
 #include "node_geometry_util.hh"
 
@@ -64,7 +67,7 @@ static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryExtrudeMesh *data = MEM_cnew<NodeGeometryExtrudeMesh>(__func__);
+  NodeGeometryExtrudeMesh *data = MEM_callocN<NodeGeometryExtrudeMesh>(__func__);
   data->mode = GEO_NODE_EXTRUDE_MESH_FACES;
   node->storage = data;
 }
@@ -103,28 +106,28 @@ static void remove_non_propagated_attributes(MutableAttributeAccessor attributes
 
 static void remove_unsupported_vert_data(Mesh &mesh)
 {
-  CustomData_free_layers(&mesh.vert_data, CD_ORCO, mesh.verts_num);
-  CustomData_free_layers(&mesh.vert_data, CD_SHAPEKEY, mesh.verts_num);
-  CustomData_free_layers(&mesh.vert_data, CD_CLOTH_ORCO, mesh.verts_num);
-  CustomData_free_layers(&mesh.vert_data, CD_MVERT_SKIN, mesh.verts_num);
+  CustomData_free_layers(&mesh.vert_data, CD_ORCO);
+  CustomData_free_layers(&mesh.vert_data, CD_SHAPEKEY);
+  CustomData_free_layers(&mesh.vert_data, CD_CLOTH_ORCO);
+  CustomData_free_layers(&mesh.vert_data, CD_MVERT_SKIN);
 }
 
 static void remove_unsupported_edge_data(Mesh &mesh)
 {
-  CustomData_free_layers(&mesh.edge_data, CD_FREESTYLE_EDGE, mesh.edges_num);
+  CustomData_free_layers(&mesh.edge_data, CD_FREESTYLE_EDGE);
 }
 
 static void remove_unsupported_face_data(Mesh &mesh)
 {
-  CustomData_free_layers(&mesh.face_data, CD_FREESTYLE_FACE, mesh.faces_num);
+  CustomData_free_layers(&mesh.face_data, CD_FREESTYLE_FACE);
 }
 
 static void remove_unsupported_corner_data(Mesh &mesh)
 {
-  CustomData_free_layers(&mesh.corner_data, CD_MDISPS, mesh.corners_num);
-  CustomData_free_layers(&mesh.corner_data, CD_TANGENT, mesh.corners_num);
-  CustomData_free_layers(&mesh.corner_data, CD_MLOOPTANGENT, mesh.corners_num);
-  CustomData_free_layers(&mesh.corner_data, CD_GRID_PAINT_MASK, mesh.corners_num);
+  CustomData_free_layers(&mesh.corner_data, CD_MDISPS);
+  CustomData_free_layers(&mesh.corner_data, CD_TANGENT);
+  CustomData_free_layers(&mesh.corner_data, CD_MLOOPTANGENT);
+  CustomData_free_layers(&mesh.corner_data, CD_GRID_PAINT_MASK);
 }
 
 static void expand_mesh(Mesh &mesh,
@@ -1541,14 +1544,20 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(&ntype, GEO_NODE_EXTRUDE_MESH, "Extrude Mesh", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeExtrudeMesh", GEO_NODE_EXTRUDE_MESH);
+  ntype.ui_name = "Extrude Mesh";
+  ntype.ui_description =
+      "Generate new vertices, edges, or faces from selected elements and move them based on an "
+      "offset while keeping them connected by their boundary";
+  ntype.enum_name_legacy = "EXTRUDE_MESH";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
   ntype.geometry_node_execute = node_geo_exec;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryExtrudeMesh", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryExtrudeMesh", node_free_standard_storage, node_copy_standard_storage);
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

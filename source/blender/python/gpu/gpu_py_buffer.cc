@@ -13,6 +13,8 @@
 
 #include <Python.h>
 
+#include <algorithm>
+
 #include "BLI_utildefines.h"
 
 #include "MEM_guardedalloc.h"
@@ -149,9 +151,8 @@ static BPyGPUBuffer *pygpu_buffer_make_from_data(PyObject *parent,
   buffer->parent = nullptr;
   buffer->format = format;
   buffer->shape_len = shape_len;
-  buffer->shape = static_cast<Py_ssize_t *>(
-      MEM_mallocN(shape_len * sizeof(*buffer->shape), "BPyGPUBuffer shape"));
-  memcpy(buffer->shape, shape, shape_len * sizeof(*buffer->shape));
+  buffer->shape = MEM_malloc_arrayN<Py_ssize_t>(size_t(shape_len), "BPyGPUBuffer shape");
+  memcpy(buffer->shape, shape, sizeof(*buffer->shape) * size_t(shape_len));
   buffer->buf.as_void = buf;
 
   if (parent) {
@@ -263,14 +264,13 @@ static int pygpu_buffer_dimensions_set(BPyGPUBuffer *self, PyObject *value, void
     return -1;
   }
 
-  size_t size = shape_len * sizeof(*self->shape);
   if (shape_len != self->shape_len) {
     MEM_freeN(self->shape);
-    self->shape = static_cast<Py_ssize_t *>(MEM_mallocN(size, __func__));
+    self->shape = MEM_malloc_arrayN<Py_ssize_t>(size_t(shape_len), __func__);
   }
 
   self->shape_len = shape_len;
-  memcpy(self->shape, shape, size);
+  memcpy(self->shape, shape, sizeof(*self->shape) * size_t(shape_len));
   return 0;
 }
 
@@ -327,15 +327,9 @@ static int pygpu_buffer_ass_slice(BPyGPUBuffer *self,
   PyObject *item;
   int count, err = 0;
 
-  if (begin < 0) {
-    begin = 0;
-  }
-  if (end > self->shape[0]) {
-    end = self->shape[0];
-  }
-  if (begin > end) {
-    begin = end;
-  }
+  begin = std::max<Py_ssize_t>(begin, 0);
+  end = std::min(end, self->shape[0]);
+  begin = std::min(begin, end);
 
   if (!PySequence_Check(seq)) {
     PyErr_Format(PyExc_TypeError,
@@ -447,15 +441,9 @@ static PyObject *pygpu_buffer_slice(BPyGPUBuffer *self, Py_ssize_t begin, Py_ssi
   PyObject *list;
   Py_ssize_t count;
 
-  if (begin < 0) {
-    begin = 0;
-  }
-  if (end > self->shape[0]) {
-    end = self->shape[0];
-  }
-  if (begin > end) {
-    begin = end;
-  }
+  begin = std::max<Py_ssize_t>(begin, 0);
+  end = std::min(end, self->shape[0]);
+  begin = std::min(begin, end);
 
   list = PyList_New(end - begin);
 
@@ -636,7 +624,7 @@ static int pygpu_buffer__bf_getbuffer(BPyGPUBuffer *self, Py_buffer *view, int f
   memset(view, 0, sizeof(*view));
 
   view->obj = (PyObject *)self;
-  view->buf = (void *)self->buf.as_void;
+  view->buf = self->buf.as_void;
   view->len = bpygpu_Buffer_size(self);
   view->readonly = 0;
   view->itemsize = GPU_texture_dataformat_size(eGPUDataFormat(self->format));
@@ -648,8 +636,7 @@ static int pygpu_buffer__bf_getbuffer(BPyGPUBuffer *self, Py_buffer *view, int f
     view->shape = self->shape;
   }
   if (flags & PyBUF_STRIDES) {
-    view->strides = static_cast<Py_ssize_t *>(
-        MEM_mallocN(view->ndim * sizeof(*view->strides), "BPyGPUBuffer strides"));
+    view->strides = MEM_malloc_arrayN<Py_ssize_t>(size_t(view->ndim), "BPyGPUBuffer strides");
     pygpu_buffer_strides_calc(
         eGPUDataFormat(self->format), view->ndim, view->shape, view->strides);
   }

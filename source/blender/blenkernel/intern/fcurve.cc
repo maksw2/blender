@@ -15,19 +15,18 @@
 #include "MEM_guardedalloc.h"
 
 #include "ANIM_action.hh"
-#include "ANIM_animdata.hh"
 
 #include "DNA_action_types.h"
 #include "DNA_anim_types.h"
-#include "DNA_object_types.h"
-#include "DNA_text_types.h"
 
-#include "BLI_blenlib.h"
 #include "BLI_easing.h"
 #include "BLI_ghash.h"
+#include "BLI_listbase.h"
 #include "BLI_math_vector.h"
 #include "BLI_math_vector_types.hh"
+#include "BLI_rect.h"
 #include "BLI_sort_utils.h"
+#include "BLI_string.h"
 #include "BLI_string_utils.hh"
 #include "BLI_task.hh"
 
@@ -43,7 +42,6 @@
 #include "BKE_idprop.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_nla.hh"
-#include "BKE_scene.hh"
 
 #include "BLO_read_write.hh"
 
@@ -63,7 +61,7 @@ static CLG_LogRef LOG = {"bke.fcurve"};
 
 FCurve *BKE_fcurve_create()
 {
-  FCurve *fcu = static_cast<FCurve *>(MEM_callocN(sizeof(FCurve), __func__));
+  FCurve *fcu = MEM_callocN<FCurve>(__func__);
   return fcu;
 }
 
@@ -224,7 +222,7 @@ FCurve *id_data_find_fcurve(
     return nullptr;
   }
 
-  PointerRNA ptr = RNA_pointer_create(id, type, data);
+  PointerRNA ptr = RNA_pointer_create_discrete(id, type, data);
   prop = RNA_struct_find_property(&ptr, prop_name);
   if (prop == nullptr) {
     return nullptr;
@@ -781,7 +779,7 @@ float *BKE_fcurves_calc_keyed_frames_ex(FCurve **fcurve_array,
   }
 
   const size_t frames_len = BLI_gset_len(frames_unique);
-  float *frames = static_cast<float *>(MEM_mallocN(sizeof(*frames) * frames_len, __func__));
+  float *frames = MEM_malloc_arrayN<float>(frames_len, __func__);
 
   GSetIterator gs_iter;
   int i = 0;
@@ -1002,8 +1000,8 @@ void fcurve_store_samples(FCurve *fcu, void *data, int start, int end, FcuSample
 
   /* Set up sample data. */
   FPoint *new_fpt;
-  FPoint *fpt = new_fpt = static_cast<FPoint *>(
-      MEM_callocN(sizeof(FPoint) * (end - start + 1), "FPoint Samples"));
+  FPoint *fpt = new_fpt = MEM_calloc_arrayN<FPoint>(size_t(end) - size_t(start) + 1,
+                                                    "FPoint Samples");
 
   /* Use the sampling callback at 1-frame intervals from start to end frames. */
   for (int cfra = start; cfra <= end; cfra++, fpt++) {
@@ -1063,8 +1061,8 @@ void fcurve_samples_to_keyframes(FCurve *fcu, const int start, const int end)
   int keyframes_to_insert = end - start;
   int sample_points = fcu->totvert;
 
-  BezTriple *bezt = fcu->bezt = static_cast<BezTriple *>(
-      MEM_callocN(sizeof(*fcu->bezt) * size_t(keyframes_to_insert), __func__));
+  BezTriple *bezt = fcu->bezt = MEM_calloc_arrayN<BezTriple>(size_t(keyframes_to_insert),
+                                                             __func__);
   fcu->totvert = keyframes_to_insert;
 
   /* Get first sample point to 'copy' as keyframe. */
@@ -1610,10 +1608,9 @@ bool BKE_fcurve_bezt_subdivide_handles(BezTriple *bezt,
   return true;
 }
 
-void BKE_fcurve_bezt_shrink(FCurve *fcu, const int new_totvert)
+void BKE_fcurve_bezt_resize(FCurve *fcu, const int new_totvert)
 {
   BLI_assert(new_totvert >= 0);
-  BLI_assert(new_totvert <= fcu->totvert);
 
   /* No early return when new_totvert == fcu->totvert. There is no way to know the intention of the
    * caller, nor the history of the FCurve so far, so `fcu->bezt` may actually have allocated space
@@ -1626,6 +1623,14 @@ void BKE_fcurve_bezt_shrink(FCurve *fcu, const int new_totvert)
 
   fcu->bezt = static_cast<BezTriple *>(
       MEM_reallocN(fcu->bezt, new_totvert * sizeof(*(fcu->bezt))));
+
+  /* Zero out all the newly-allocated beztriples. This is necessary, as it is likely that only some
+   * of the fields will actually be updated by the caller. */
+  const int old_totvert = fcu->totvert;
+  if (new_totvert > old_totvert) {
+    memset(&fcu->bezt[old_totvert], 0, sizeof(fcu->bezt[0]) * (new_totvert - old_totvert));
+  }
+
   fcu->totvert = new_totvert;
 }
 
@@ -1679,8 +1684,7 @@ void BKE_fcurve_delete_keys(FCurve *fcu, blender::uint2 index_range)
 BezTriple *BKE_bezier_array_merge(
     const BezTriple *a, const int size_a, const BezTriple *b, const int size_b, int *r_merged_size)
 {
-  BezTriple *large_array = static_cast<BezTriple *>(
-      MEM_callocN((size_a + size_b) * sizeof(BezTriple), "beztriple"));
+  BezTriple *large_array = MEM_calloc_arrayN<BezTriple>(size_t(size_a + size_b), "beztriple");
 
   int iterator_a = 0;
   int iterator_b = 0;
@@ -1816,8 +1820,7 @@ void BKE_fcurve_merge_duplicate_keys(FCurve *fcu, const int sel_flag, const bool
 
       /* If nothing found yet, create a new one */
       if (found == false) {
-        tRetainedKeyframe *rk = static_cast<tRetainedKeyframe *>(
-            MEM_callocN(sizeof(tRetainedKeyframe), "tRetainedKeyframe"));
+        tRetainedKeyframe *rk = MEM_callocN<tRetainedKeyframe>("tRetainedKeyframe");
 
         rk->frame = bezt->vec[1][0];
         rk->val = bezt->vec[1][1];
@@ -1942,7 +1945,7 @@ void BKE_fcurve_deduplicate_keys(FCurve *fcu)
     }
   }
 
-  BKE_fcurve_bezt_shrink(fcu, prev_bezt_index + 1);
+  BKE_fcurve_bezt_resize(fcu, prev_bezt_index + 1);
 }
 
 /** \} */

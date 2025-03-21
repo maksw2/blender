@@ -138,7 +138,12 @@ typedef struct LayoutPanelState {
   /** Identifier of the panel. */
   char *idname;
   uint8_t flag;
-  char _pad[7];
+  char _pad[3];
+  /**
+   * A logical time set from #layout_panel_states_clock when the panel is used by the UI. This is
+   * used to detect the least-recently-used panel states when some panel states should be removed.
+   */
+  uint32_t last_used;
 } LayoutPanelState;
 
 enum LayoutPanelStateFlag {
@@ -180,6 +185,13 @@ typedef struct Panel {
    * `layout.panel(...)` in Python. For more information on layout-panels, see `uiLayoutPanelProp`.
    */
   ListBase layout_panel_states;
+  /**
+   * This is increased whenever a layout panel state is used by the UI. This is used to allow for
+   * some garbage collection of panel states when #layout_panel_states becomes large. It works by
+   * removing all least-recently-used panel states up to a certain threshold.
+   */
+  uint32_t layout_panel_states_clock;
+  char _pad2[4];
 
   struct Panel_Runtime *runtime;
 } Panel;
@@ -329,7 +341,12 @@ typedef struct uiViewState {
    * and the default should be used.
    */
   int custom_height;
-  char _pad[4];
+  /**
+   * Amount of vertical scrolling. View types decide on the unit:
+   * - Tree views: Number of items scrolled out of view (#scroll_offset of 5 means 5 items are
+   *   scrolled out of view).
+   */
+  int scroll_offset;
 } uiViewState;
 
 /**
@@ -423,15 +440,15 @@ typedef struct ScrArea {
   /** Rect bound by v1 v2 v3 v4. */
   rcti totrct;
 
+  /** eSpace_Type (SPACE_FOO). */
+  char spacetype;
   /**
    * eSpace_Type (SPACE_FOO).
    *
    * Temporarily used while switching area type, otherwise this should be SPACE_EMPTY.
-   * Also, versioning uses it to nicely replace deprecated * editors.
+   * Also, versioning uses it to nicely replace deprecated editors.
    * It's been there for ages, name doesn't fit any more.
    */
-  char spacetype;
-  /** #eSpace_Type (SPACE_FOO). */
   char butspacetype;
   short butspacetype_subtype;
 
@@ -485,8 +502,6 @@ typedef struct ARegion {
   View2D v2d;
   /** Coordinates of region. */
   rcti winrct;
-  /** Runtime for partial redraw, same or smaller than winrct. */
-  rcti drawrct;
   /** Size. */
   short winx, winy;
   /**
@@ -508,12 +523,12 @@ typedef struct ARegion {
    */
   short sizex, sizey;
 
-  /** Private, cached notifier events. */
-  short do_draw_paintcursor;
   /** Private, set for indicate drawing overlapped. */
   short overlap;
   /** Temporary copy of flag settings for clean full-screen. */
   short flagfullscreen;
+
+  char _pad[2];
 
   /** Panel. */
   ListBase panels;

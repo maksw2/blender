@@ -37,10 +37,10 @@
 
 struct DriverDropper {
   /* Destination property (i.e. where we'll add a driver) */
-  PointerRNA ptr;
-  PropertyRNA *prop;
-  int index;
-  bool is_undo;
+  PointerRNA ptr = {};
+  PropertyRNA *prop = nullptr;
+  int index = 0;
+  bool is_undo = false;
 
   /* TODO: new target? */
 };
@@ -127,7 +127,7 @@ static void driverdropper_cancel(bContext *C, wmOperator *op)
 }
 
 /* main modal status check */
-static int driverdropper_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus driverdropper_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   DriverDropper *ddr = static_cast<DriverDropper *>(op->customdata);
 
@@ -152,7 +152,9 @@ static int driverdropper_modal(bContext *C, wmOperator *op, const wmEvent *event
 }
 
 /* Modal Operator init */
-static int driverdropper_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus driverdropper_invoke(bContext *C,
+                                             wmOperator *op,
+                                             const wmEvent * /*event*/)
 {
   /* init */
   if (driverdropper_init(C, op)) {
@@ -170,7 +172,7 @@ static int driverdropper_invoke(bContext *C, wmOperator *op, const wmEvent * /*e
 }
 
 /* Repeat operator */
-static int driverdropper_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus driverdropper_exec(bContext *C, wmOperator *op)
 {
   /* init */
   if (driverdropper_init(C, op)) {

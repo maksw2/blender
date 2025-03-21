@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 4.4.0 Alpha (b'62b2bb48e8bf')\n"
+"Project-Id-Version: Blender 4.4.0 Release Candidate (b'f896f7ffc32a')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-12-02 16:18+0000\n"
+"POT-Creation-Date: 2025-03-17 16:18+0000\n"
 "PO-Revision-Date: 2024-11-14 16:56+0000\n"
 "Last-Translator: Aras Pranckevičius <aras@nesnausk.org>\n"
 "Language-Team: Lithuanian <https://translate.blender.org/projects/blender-ui/ui/lt/>\n"
@@ -37,10 +37,6 @@ msgstr "Reikšmė"
 
 msgid "Action F-Curves"
 msgstr "Veiksmo „F“-kreivės"
-
-
-msgid "Collection of action F-Curves"
-msgstr "Veiksmo „F“-kreivių rinkinys"
 
 
 msgid "Groups of F-Curves"
@@ -157,26 +153,6 @@ msgstr "Pasirinkti"
 
 msgid "Expanded"
 msgstr "Išplėsta/-s"
-
-
-msgid "Mix Mode"
-msgstr "Maišymo veiksena"
-
-
-msgid "Replace"
-msgstr "Pakeisti"
-
-
-msgid "Add"
-msgstr "Pridėti"
-
-
-msgid "Subtract"
-msgstr "Atimti"
-
-
-msgid "Multiply"
-msgstr "Dauginti"
 
 
 msgid "Strips"
@@ -404,10 +380,6 @@ msgid "Auto"
 msgstr "Automatinis/-iškas"
 
 
-msgid "HIP RT (Experimental)"
-msgstr "„HIP RT“ (Eksperimentinis)"
-
-
 msgid "        Filter by Name"
 msgstr "        Filtruoti pagal pavadinimą"
 
@@ -448,8 +420,24 @@ msgid "Action"
 msgstr "Veiksmas"
 
 
+msgid "Replace"
+msgstr "Pakeisti"
+
+
 msgid "Combine"
 msgstr "Sujungti"
+
+
+msgid "Add"
+msgstr "Pridėti"
+
+
+msgid "Subtract"
+msgstr "Atimti"
+
+
+msgid "Multiply"
+msgstr "Dauginti"
 
 
 msgid "Hold"
@@ -1045,52 +1033,9 @@ msgid "Imported ID"
 msgstr "Importuotas ID"
 
 
+msgctxt "ID"
 msgid "ID Type"
 msgstr "ID tipas"
-
-
-msgid "Camera"
-msgstr "Kamera/Fotoaparatas"
-
-
-msgid "Font"
-msgstr "Šriftas"
-
-
-msgid "Key"
-msgstr "Raktas"
-
-
-msgid "Library"
-msgstr "Biblioteka"
-
-
-msgid "Material"
-msgstr "Medžiaga"
-
-
-msgid "Screen"
-msgstr "Ekranas"
-
-
-msgid "Sound"
-msgstr "Garsas"
-
-
-msgid "Speaker"
-msgstr "Garsiakalbis"
-
-
-msgid "Text"
-msgstr "Tekstas"
-
-
-msgid "Volume"
-msgstr "Tū̃ris"
-
-
-msgid "World"
-msgstr "Pasaulis"
 
 
 msgid "Import Info"
@@ -1143,6 +1088,10 @@ msgstr "Atsitiktinis/-ė"
 
 msgid "Average"
 msgstr "Vidutinis/-ė"
+
+
+msgid "Volume"
+msgstr "Tū̃ris"
 
 
 msgctxt "Armature"
@@ -1211,6 +1160,10 @@ msgid "Mode"
 msgstr "Veiksena"
 
 
+msgid "Material"
+msgstr "Medžiaga"
+
+
 msgctxt "GPencil"
 msgid "Caps Type"
 msgstr "Galų tipas"
@@ -1240,20 +1193,8 @@ msgid "Stroke"
 msgstr "Potepis"
 
 
-msgid "Direction"
-msgstr "Kryptis"
-
-
-msgid "Normal"
-msgstr "Normalė"
-
-
 msgid "All"
 msgstr "Visi"
-
-
-msgid "Radius"
-msgstr "Spindulys"
 
 
 msgid "Layer Mode"
@@ -1494,6 +1435,10 @@ msgid "Lighten"
 msgstr "Šviesinti"
 
 
+msgid "Screen"
+msgstr "Ekranas"
+
+
 msgid "Difference"
 msgstr "Skirtumas"
 
@@ -1539,6 +1484,10 @@ msgid "Error"
 msgstr "Klaida"
 
 
+msgid "Mix Mode"
+msgstr "Maišymo veiksena"
+
+
 msgid "X"
 msgstr "„X“"
 
@@ -1549,6 +1498,10 @@ msgstr "„Y“"
 
 msgid "Z"
 msgstr "„Z“"
+
+
+msgid "Camera"
+msgstr "Kamera/Fotoaparatas"
 
 
 msgid "Limit Mode"
@@ -1593,6 +1546,10 @@ msgstr "Paviršius"
 
 msgid "View"
 msgstr "Rodymas"
+
+
+msgid "Radius"
+msgstr "Spindulys"
 
 
 msgctxt "Mesh"
@@ -1645,11 +1602,6 @@ msgstr "Šaltinis"
 
 msgid "Variables"
 msgstr "Kintamieji"
-
-
-msgctxt "ID"
-msgid "ID Type"
-msgstr "ID tipas"
 
 
 msgctxt "Brush"
@@ -2191,6 +2143,10 @@ msgid "Domain Settings"
 msgstr "Domeno-Srities nustatymai"
 
 
+msgid "OpenVDB"
+msgstr "„OpenVDB“"
+
+
 msgid "CFL"
 msgstr "„CFL“"
 
@@ -2287,6 +2243,10 @@ msgstr "UV"
 
 msgid "Initial"
 msgstr "Pradinis"
+
+
+msgid "Normal"
+msgstr "Normalė"
 
 
 msgid "Menu"
@@ -2386,8 +2346,17 @@ msgid "A"
 msgstr "A"
 
 
+msgctxt "ID"
+msgid "Type"
+msgstr "Tipas"
+
+
 msgid "Editable"
 msgstr "Redaguojama/-s"
+
+
+msgid "Library"
+msgstr "Biblioteka"
 
 
 msgid "Users"
@@ -2411,13 +2380,12 @@ msgstr "Dėžė"
 
 
 msgctxt "Curves"
-msgid "Custom"
-msgstr "Pasirinktinis/-ė"
-
-
-msgctxt "Curves"
 msgid "Add"
 msgstr "Pridėti"
+
+
+msgid "Direction"
+msgstr "Kryptis"
 
 
 msgid "Has unsaved changes"
@@ -2441,10 +2409,6 @@ msgstr "Piešti"
 
 msgid "Secondary Color"
 msgstr "Antrinė spalva"
-
-
-msgid "Dots"
-msgstr "Taškai"
 
 
 msgid "Edge-to-Edge"
@@ -2491,6 +2455,10 @@ msgstr "Teisinti"
 
 msgid "Middle"
 msgstr "Vidurys"
+
+
+msgid "Font"
+msgstr "Šriftas"
 
 
 msgid "Font Size"
@@ -2783,11 +2751,6 @@ msgstr "Poza"
 
 
 msgctxt "ID"
-msgid "Type"
-msgstr "Tipas"
-
-
-msgctxt "ID"
 msgid "Empty"
 msgstr "Tuščia/-s"
 
@@ -2835,6 +2798,10 @@ msgstr "Vieneto nustatymai"
 msgctxt "World"
 msgid "World"
 msgstr "Pasaulis"
+
+
+msgid "Sound"
+msgstr "Garsas"
 
 
 msgctxt "Text"
@@ -3174,8 +3141,12 @@ msgid "Type of the modifier"
 msgstr "Keitiklio tipas"
 
 
-msgid "Show/Hide"
-msgstr "Rodyti/Slėpti"
+msgid "ID Type"
+msgstr "ID tipas"
+
+
+msgid "Dots"
+msgstr "Taškai"
 
 
 msgid "Apply"
@@ -3186,12 +3157,24 @@ msgid "Track"
 msgstr "Sekti"
 
 
+msgid "Show/Hide"
+msgstr "Rodyti/Slėpti"
+
+
+msgid "Text"
+msgstr "Tekstas"
+
+
 msgid "Animals"
 msgstr "Gyvūnai"
 
 
 msgid "Languages..."
 msgstr "Kalbos..."
+
+
+msgid "Key"
+msgstr "Raktas"
 
 
 msgid "Files"
@@ -3273,6 +3256,10 @@ msgstr "Veiksena"
 
 msgid "Copy"
 msgstr "Kopijuoti"
+
+
+msgid "World"
+msgstr "Pasaulis"
 
 
 msgctxt "Operator"
@@ -3521,10 +3508,6 @@ msgstr "Veiksena"
 msgctxt "Python console"
 msgid "Language"
 msgstr "Kalba"
-
-
-msgid "Animation mode"
-msgstr "Animacijos/-ų veiksena"
 
 
 msgid "Object settings"
@@ -4170,6 +4153,10 @@ msgid "3D Region"
 msgstr "3D regionas"
 
 
+msgid "Speaker"
+msgstr "Garsiakalbis"
+
+
 msgid "3D"
 msgstr "3D"
 
@@ -4312,10 +4299,6 @@ msgstr "Ekranas"
 msgctxt "View3D"
 msgid "Both"
 msgstr "Abu/-i"
-
-
-msgid "AOV"
-msgstr "„AOV“"
 
 
 msgid "EEVEE Settings"
@@ -4477,10 +4460,6 @@ msgid "New"
 msgstr "Nauja/-s/-i"
 
 
-msgid "*Unsaved Changes"
-msgstr "*Neišsaugoti pakeitimai"
-
-
 msgid "Blender IDs"
 msgstr "„Blender“ ID (dgs.)"
 
@@ -4588,17 +4567,21 @@ msgid "Preferences saved"
 msgstr "Nuostatos išsaugotos"
 
 
+msgid "AOV"
+msgstr "„AOV“"
+
+
 msgid "objects"
 msgstr "objektai"
+
+
+msgid "Cancel"
+msgstr "Atšaukti"
 
 
 msgctxt "WindowManager"
 msgid "Search"
 msgstr "Paieška"
-
-
-msgid "Cancel"
-msgstr "Atšaukti"
 
 
 msgctxt "Action"
@@ -4777,10 +4760,6 @@ msgstr "Išsaugota „%s“"
 
 msgid "custom"
 msgstr "pasirinktinis/-ė"
-
-
-msgid "OpenVDB"
-msgstr "„OpenVDB“"
 
 
 msgid "Save As..."

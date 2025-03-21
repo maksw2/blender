@@ -33,6 +33,8 @@
 #include "BKE_main.hh"
 #include "BKE_main_namemap.hh"
 
+#include "BLO_readfile.hh"
+
 #include "lib_intern.hh"
 
 #include "DEG_depsgraph.hh"
@@ -64,6 +66,8 @@ void BKE_libblock_free_data(ID *id, const bool do_id_user)
     MEM_freeN(id->library_weak_reference);
   }
 
+  BKE_libblock_free_runtime_data(id);
+
   BKE_animdata_free(id, do_id_user);
 }
 
@@ -79,6 +83,15 @@ void BKE_libblock_free_datablock(ID *id, const int /*flag*/)
   }
 
   BLI_assert_msg(0, "IDType Missing IDTypeInfo");
+}
+
+void BKE_libblock_free_runtime_data(ID *id)
+{
+  /* During "normal" file loading this data is released when versioning ends. Some versioning code
+   * also deletes IDs, though. For example, in the startup blend file, brushes that were replaced
+   * by assets are deleted. This means that the regular "delete this ID" flow (aka this code here)
+   * also needs to free this data. */
+  BLO_readfile_id_runtime_data_free(*id);
 }
 
 static int id_free(Main *bmain, void *idv, int flag, const bool use_flag_from_idtag)
@@ -155,7 +168,7 @@ static int id_free(Main *bmain, void *idv, int flag, const bool use_flag_from_id
     ListBase *lb = which_libbase(bmain, type);
     BLI_remlink(lb, id);
     if ((flag & LIB_ID_FREE_NO_NAMEMAP_REMOVE) == 0) {
-      BKE_main_namemap_remove_name(bmain, id, id->name + 2);
+      BKE_main_namemap_remove_id(*bmain, *id);
     }
   }
 
@@ -248,8 +261,8 @@ static size_t id_delete(Main *bmain,
   const int remapping_flags = (ID_REMAP_STORE_NEVER_NULL_USAGE | ID_REMAP_FORCE_NEVER_NULL_USAGE |
                                ID_REMAP_FORCE_INTERNAL_RUNTIME_POINTERS | extra_remapping_flags);
 
-  ListBase *lbarray[INDEX_ID_MAX];
-  const int base_count = set_listbasepointers(bmain, lbarray);
+  MainListsArray lbarray = BKE_main_lists_get(*bmain);
+  const int base_count = lbarray.size();
 
   BKE_main_lock(bmain);
   BKE_layer_collection_resync_forbid();
@@ -280,7 +293,7 @@ static size_t id_delete(Main *bmain,
             (ID_IS_LINKED(id_iter) && ids_to_delete.contains(&id_iter->lib->id)))
         {
           BLI_remlink(lb, id_iter);
-          BKE_main_namemap_remove_name(bmain, id_iter, id_iter->name + 2);
+          BKE_main_namemap_remove_id(*bmain, *id_iter);
           ids_to_delete.add(id_iter);
           id_remapper.add(id_iter, nullptr);
           /* Do not tag as no_main now, we want to unlink it first (lower-level ID management
@@ -293,7 +306,7 @@ static size_t id_delete(Main *bmain,
           Key *shape_key = BKE_key_from_id(id_iter);
           if (shape_key && !ids_to_delete.contains(&shape_key->id)) {
             BLI_remlink(&bmain->shapekeys, &shape_key->id);
-            BKE_main_namemap_remove_name(bmain, &shape_key->id, shape_key->id.name + 2);
+            BKE_main_namemap_remove_id(*bmain, shape_key->id);
             ids_to_delete.add(&shape_key->id);
             id_remapper.add(&shape_key->id, nullptr);
           }

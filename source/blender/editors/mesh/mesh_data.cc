@@ -10,16 +10,15 @@
 
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
-#include "DNA_view3d_types.h"
 
 #include "BLI_array.hh"
-#include "BLI_utildefines.h"
 
 #include "BKE_attribute.hh"
 #include "BKE_context.hh"
 #include "BKE_customdata.hh"
 #include "BKE_editmesh.hh"
 #include "BKE_key.hh"
+#include "BKE_library.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_runtime.hh"
 #include "BKE_report.hh"
@@ -47,6 +46,7 @@ using blender::float2;
 using blender::float3;
 using blender::MutableSpan;
 using blender::Span;
+using blender::StringRef;
 
 static CustomData *mesh_customdata_get_type(Mesh *mesh, const char htype, int *r_tot)
 {
@@ -241,7 +241,7 @@ int ED_mesh_uv_add(
     }
 
     BM_data_layer_add_named(em->bm, &em->bm->ldata, CD_PROP_FLOAT2, unique_name.c_str());
-    BM_uv_map_ensure_select_and_pin_attrs(em->bm);
+    BM_uv_map_attr_select_and_pin_ensure(em->bm);
     /* copy data from active UV */
     if (layernum_dst && do_init) {
       const int layernum_src = CustomData_get_active_layer(&em->bm->ldata, CD_PROP_FLOAT2);
@@ -292,7 +292,8 @@ int ED_mesh_uv_add(
   return layernum_dst;
 }
 
-static const bool *mesh_loop_boolean_custom_data_get_by_name(const Mesh &mesh, const char *name)
+static const bool *mesh_loop_boolean_custom_data_get_by_name(const Mesh &mesh,
+                                                             const StringRef name)
 {
   return static_cast<const bool *>(
       CustomData_get_layer_named(&mesh.corner_data, CD_PROP_BOOL, name));
@@ -327,7 +328,7 @@ const bool *ED_mesh_uv_map_pin_layer_get(const Mesh *mesh, const int uv_index)
                                                    BKE_uv_map_pin_name_get(uv_name, buffer));
 }
 
-static bool *ensure_corner_boolean_attribute(Mesh &mesh, const blender::StringRefNull name)
+static bool *ensure_corner_boolean_attribute(Mesh &mesh, const StringRef name)
 {
   bool *data = static_cast<bool *>(CustomData_get_layer_named_for_write(
       &mesh.corner_data, CD_PROP_BOOL, name, mesh.corners_num));
@@ -438,8 +439,8 @@ bool ED_mesh_color_ensure(Mesh *mesh, const char *name)
     return false;
   }
 
-  BKE_id_attributes_active_color_set(&mesh->id, unique_name.c_str());
-  BKE_id_attributes_default_color_set(&mesh->id, unique_name.c_str());
+  BKE_id_attributes_active_color_set(&mesh->id, unique_name);
+  BKE_id_attributes_default_color_set(&mesh->id, unique_name);
   BKE_mesh_tessface_clear(mesh);
   DEG_id_tag_update(&mesh->id, 0);
 
@@ -475,7 +476,7 @@ static bool uv_texture_remove_poll(bContext *C)
   return false;
 }
 
-static int mesh_uv_texture_add_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mesh_uv_texture_add_exec(bContext *C, wmOperator *op)
 {
   Object *ob = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -508,7 +509,7 @@ void MESH_OT_uv_texture_add(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-static int mesh_uv_texture_remove_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mesh_uv_texture_remove_exec(bContext *C, wmOperator *op)
 {
   Object *ob = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -549,14 +550,13 @@ void MESH_OT_uv_texture_remove(wmOperatorType *ot)
 
 /* *** CustomData clear functions, we need an operator for each *** */
 
-static int mesh_customdata_clear_exec__internal(bContext *C,
-                                                char htype,
-                                                const eCustomDataType type)
+static wmOperatorStatus mesh_customdata_clear_exec__internal(bContext *C,
+                                                             char htype,
+                                                             const eCustomDataType type)
 {
   Mesh *mesh = ED_mesh_context(C);
 
-  int tot;
-  CustomData *data = mesh_customdata_get_type(mesh, htype, &tot);
+  CustomData *data = mesh_customdata_get_type(mesh, htype, nullptr);
 
   BLI_assert(CustomData_layertype_is_singleton(type) == true);
 
@@ -565,7 +565,7 @@ static int mesh_customdata_clear_exec__internal(bContext *C,
       BM_data_layer_free(mesh->runtime->edit_mesh->bm, data, type);
     }
     else {
-      CustomData_free_layers(data, type, tot);
+      CustomData_free_layers(data, type);
     }
 
     DEG_id_tag_update(&mesh->id, ID_RECALC_GEOMETRY);
@@ -601,7 +601,7 @@ static bool mesh_customdata_mask_clear_poll(bContext *C)
   }
   return false;
 }
-static int mesh_customdata_mask_clear_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mesh_customdata_mask_clear_exec(bContext *C, wmOperator *op)
 {
   Object *object = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(object->data);
@@ -655,7 +655,7 @@ static bool mesh_customdata_skin_add_poll(bContext *C)
   return (mesh_customdata_skin_state(C) == 0);
 }
 
-static int mesh_customdata_skin_add_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_skin_add_exec(bContext *C, wmOperator * /*op*/)
 {
   Object *ob = blender::ed::object::context_object(C);
   Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -688,7 +688,7 @@ static bool mesh_customdata_skin_clear_poll(bContext *C)
   return (mesh_customdata_skin_state(C) == 1);
 }
 
-static int mesh_customdata_skin_clear_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_skin_clear_exec(bContext *C, wmOperator * /*op*/)
 {
   return mesh_customdata_clear_exec__internal(C, BM_VERT, CD_MVERT_SKIN);
 }
@@ -709,7 +709,8 @@ void MESH_OT_customdata_skin_clear(wmOperatorType *ot)
 }
 
 /* Clear custom loop normals */
-static int mesh_customdata_custom_splitnormals_add_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_custom_splitnormals_add_exec(bContext *C,
+                                                                     wmOperator * /*op*/)
 {
   using namespace blender;
   Mesh *mesh = ED_mesh_context(C);
@@ -750,7 +751,8 @@ void MESH_OT_customdata_custom_splitnormals_add(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-static int mesh_customdata_custom_splitnormals_clear_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus mesh_customdata_custom_splitnormals_clear_exec(bContext *C,
+                                                                       wmOperator * /*op*/)
 {
   Mesh *mesh = ED_mesh_context(C);
 
@@ -809,7 +811,7 @@ static void mesh_add_verts(Mesh *mesh, int len)
     CustomData_add_layer_named(&vert_data, CD_PROP_FLOAT3, CD_SET_DEFAULT, totvert, "position");
   }
 
-  CustomData_free(&mesh->vert_data, mesh->verts_num);
+  CustomData_free(&mesh->vert_data);
   mesh->vert_data = vert_data;
 
   BKE_mesh_runtime_clear_cache(mesh);
@@ -845,7 +847,7 @@ static void mesh_add_edges(Mesh *mesh, int len)
         &edge_data, CD_PROP_INT32_2D, CD_SET_DEFAULT, totedge, ".edge_verts");
   }
 
-  CustomData_free(&mesh->edge_data, mesh->edges_num);
+  CustomData_free(&mesh->edge_data);
   mesh->edge_data = edge_data;
 
   BKE_mesh_runtime_clear_cache(mesh);
@@ -884,7 +886,7 @@ static void mesh_add_loops(Mesh *mesh, int len)
 
   BKE_mesh_runtime_clear_cache(mesh);
 
-  CustomData_free(&mesh->corner_data, mesh->corners_num);
+  CustomData_free(&mesh->corner_data);
   mesh->corner_data = ldata;
 
   mesh->corners_num = totloop;
@@ -921,7 +923,7 @@ static void mesh_add_faces(Mesh *mesh, int len)
   mesh->face_offset_indices[0] = 0;
   mesh->face_offset_indices[faces_num] = mesh->corners_num;
 
-  CustomData_free(&mesh->face_data, mesh->faces_num);
+  CustomData_free(&mesh->face_data);
   mesh->face_data = face_data;
 
   BKE_mesh_runtime_clear_cache(mesh);

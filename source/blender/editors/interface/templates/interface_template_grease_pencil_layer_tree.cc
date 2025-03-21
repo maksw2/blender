@@ -6,6 +6,8 @@
  * \ingroup edinterface
  */
 
+#include "BLI_listbase.h"
+
 #include "BKE_context.hh"
 #include "BKE_grease_pencil.hh"
 
@@ -187,7 +189,7 @@ class LayerViewItemDragController : public AbstractViewItemDragController {
 
   void *create_drag_data() const override
   {
-    wmDragGreasePencilLayer *drag_data = MEM_cnew<wmDragGreasePencilLayer>(__func__);
+    wmDragGreasePencilLayer *drag_data = MEM_callocN<wmDragGreasePencilLayer>(__func__);
     drag_data->node = &dragged_node_;
     drag_data->grease_pencil = &grease_pencil_;
     return drag_data;
@@ -235,9 +237,10 @@ class LayerViewItem : public AbstractTreeViewItem {
 
   void on_activate(bContext &C) override
   {
-    PointerRNA layers_ptr = RNA_pointer_create(
+    PointerRNA layers_ptr = RNA_pointer_create_discrete(
         &grease_pencil_.id, &RNA_GreasePencilv3Layers, nullptr);
-    PointerRNA value_ptr = RNA_pointer_create(&grease_pencil_.id, &RNA_GreasePencilLayer, &layer_);
+    PointerRNA value_ptr = RNA_pointer_create_discrete(
+        &grease_pencil_.id, &RNA_GreasePencilLayer, &layer_);
 
     PropertyRNA *prop = RNA_struct_find_property(&layers_ptr, "active");
 
@@ -262,7 +265,8 @@ class LayerViewItem : public AbstractTreeViewItem {
 
   bool rename(const bContext &C, StringRefNull new_name) override
   {
-    PointerRNA layer_ptr = RNA_pointer_create(&grease_pencil_.id, &RNA_GreasePencilLayer, &layer_);
+    PointerRNA layer_ptr = RNA_pointer_create_discrete(
+        &grease_pencil_.id, &RNA_GreasePencilLayer, &layer_);
     PropertyRNA *prop = RNA_struct_find_property(&layer_ptr, "name");
 
     RNA_property_string_set(&layer_ptr, prop, new_name.c_str());
@@ -304,23 +308,24 @@ class LayerViewItem : public AbstractTreeViewItem {
   void build_layer_buttons(uiLayout &row)
   {
     uiLayout *sub;
-    PointerRNA layer_ptr = RNA_pointer_create(&grease_pencil_.id, &RNA_GreasePencilLayer, &layer_);
+    PointerRNA layer_ptr = RNA_pointer_create_discrete(
+        &grease_pencil_.id, &RNA_GreasePencilLayer, &layer_);
 
     sub = uiLayoutRow(&row, true);
     uiLayoutSetActive(sub, layer_.parent_group().use_masks());
-    uiItemR(sub, &layer_ptr, "use_masks", UI_ITEM_R_ICON_ONLY, nullptr, ICON_NONE);
+    uiItemR(sub, &layer_ptr, "use_masks", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
 
     sub = uiLayoutRow(&row, true);
     uiLayoutSetActive(sub, layer_.parent_group().use_onion_skinning());
-    uiItemR(sub, &layer_ptr, "use_onion_skinning", UI_ITEM_R_ICON_ONLY, nullptr, ICON_NONE);
+    uiItemR(sub, &layer_ptr, "use_onion_skinning", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
 
     sub = uiLayoutRow(&row, true);
     uiLayoutSetActive(sub, layer_.parent_group().is_visible());
-    uiItemR(sub, &layer_ptr, "hide", UI_ITEM_R_ICON_ONLY, nullptr, ICON_NONE);
+    uiItemR(sub, &layer_ptr, "hide", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
 
     sub = uiLayoutRow(&row, true);
     uiLayoutSetActive(sub, !layer_.parent_group().is_locked());
-    uiItemR(sub, &layer_ptr, "lock", UI_ITEM_R_ICON_ONLY, nullptr, ICON_NONE);
+    uiItemR(sub, &layer_ptr, "lock", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
   }
 };
 
@@ -353,7 +358,7 @@ class LayerGroupViewItem : public AbstractTreeViewItem {
 
     /* Let RNA handle the property change. This makes sure all the notifiers and DEG
      * update calls are properly called. */
-    PointerRNA group_ptr = RNA_pointer_create(
+    PointerRNA group_ptr = RNA_pointer_create_discrete(
         &grease_pencil_.id, &RNA_GreasePencilLayerGroup, &group_);
     PropertyRNA *prop = RNA_struct_find_property(&group_ptr, "is_expanded");
 
@@ -390,9 +395,9 @@ class LayerGroupViewItem : public AbstractTreeViewItem {
 
   void on_activate(bContext &C) override
   {
-    PointerRNA grease_pencil_ptr = RNA_pointer_create(
+    PointerRNA grease_pencil_ptr = RNA_pointer_create_discrete(
         &grease_pencil_.id, &RNA_GreasePencilv3LayerGroup, nullptr);
-    PointerRNA value_ptr = RNA_pointer_create(
+    PointerRNA value_ptr = RNA_pointer_create_discrete(
         &grease_pencil_.id, &RNA_GreasePencilLayerGroup, &group_);
 
     PropertyRNA *prop = RNA_struct_find_property(&grease_pencil_ptr, "active");
@@ -418,7 +423,7 @@ class LayerGroupViewItem : public AbstractTreeViewItem {
 
   bool rename(const bContext &C, StringRefNull new_name) override
   {
-    PointerRNA group_ptr = RNA_pointer_create(
+    PointerRNA group_ptr = RNA_pointer_create_discrete(
         &grease_pencil_.id, &RNA_GreasePencilLayerGroup, &group_);
     PropertyRNA *prop = RNA_struct_find_property(&group_ptr, "name");
 
@@ -457,7 +462,7 @@ class LayerGroupViewItem : public AbstractTreeViewItem {
       icon = ICON_LAYERGROUP_COLOR_01 + group_.color_tag;
     }
 
-    uiBut *but = uiItemL_ex(&row, group_.name().c_str(), icon, false, false);
+    uiBut *but = uiItemL_ex(&row, group_.name(), icon, false, false);
     if (!group_.is_editable()) {
       UI_but_disable(but, "Layer Group is locked or not visible");
     }
@@ -466,35 +471,32 @@ class LayerGroupViewItem : public AbstractTreeViewItem {
   void build_layer_group_buttons(uiLayout &row)
   {
     uiLayout *sub;
-    PointerRNA group_ptr = RNA_pointer_create(
+    PointerRNA group_ptr = RNA_pointer_create_discrete(
         &grease_pencil_.id, &RNA_GreasePencilLayerGroup, &group_);
 
     sub = uiLayoutRow(&row, true);
     if (group_.as_node().parent_group()) {
       uiLayoutSetActive(sub, group_.as_node().parent_group()->use_masks());
     }
-    const int icon_mask = (group_.base.flag & GP_LAYER_TREE_NODE_HIDE_MASKS) == 0 ?
-                              ICON_CLIPUV_DEHLT :
-                              ICON_CLIPUV_HLT;
-    uiItemR(sub, &group_ptr, "use_masks", UI_ITEM_R_ICON_ONLY, nullptr, icon_mask);
+    uiItemR(sub, &group_ptr, "use_masks", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
 
     sub = uiLayoutRow(&row, true);
     if (group_.as_node().parent_group()) {
       uiLayoutSetActive(sub, group_.as_node().parent_group()->use_onion_skinning());
     }
-    uiItemR(sub, &group_ptr, "use_onion_skinning", UI_ITEM_R_ICON_ONLY, nullptr, ICON_NONE);
+    uiItemR(sub, &group_ptr, "use_onion_skinning", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
 
     sub = uiLayoutRow(&row, true);
     if (group_.as_node().parent_group()) {
       uiLayoutSetActive(sub, group_.as_node().parent_group()->is_visible());
     }
-    uiItemR(sub, &group_ptr, "hide", UI_ITEM_R_ICON_ONLY, nullptr, ICON_NONE);
+    uiItemR(sub, &group_ptr, "hide", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
 
     sub = uiLayoutRow(&row, true);
     if (group_.as_node().parent_group()) {
       uiLayoutSetActive(sub, !group_.as_node().parent_group()->is_locked());
     }
-    uiItemR(sub, &group_ptr, "lock", UI_ITEM_R_ICON_ONLY, nullptr, ICON_NONE);
+    uiItemR(sub, &group_ptr, "lock", UI_ITEM_R_ICON_ONLY, std::nullopt, ICON_NONE);
   }
 };
 

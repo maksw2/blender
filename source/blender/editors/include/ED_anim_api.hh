@@ -53,6 +53,13 @@ struct uiBlock;
 struct PointerRNA;
 struct PropertyRNA;
 
+struct MPathTarget;
+
+namespace blender::animrig {
+class Action;
+class Slot;
+}  // namespace blender::animrig
+
 /* ************************************************ */
 /* ANIMATION CHANNEL FILTERING */
 /* `anim_filter.cc` */
@@ -190,7 +197,6 @@ enum eAnim_ChannelType {
 
   ANIMTYPE_SHAPEKEY,
 
-  ANIMTYPE_GPDATABLOCK,
   ANIMTYPE_GPLAYER,
 
   ANIMTYPE_GREASE_PENCIL_DATABLOCK,
@@ -405,7 +411,7 @@ ENUM_OPERATORS(eAnimFilter_Flags, ANIMFILTER_TMP_IGNORE_ONLYSEL);
 
 /* XXX check on all of these flags again. */
 
-/* Dopesheet only */
+/* Dope-sheet only. */
 /* 'Scene' channels */
 #define SEL_SCEC(sce) (CHECK_TYPE_INLINE(sce, Scene *), ((sce->flag & SCE_DS_SELECTED)))
 #define EXPANDED_SCEC(sce) (CHECK_TYPE_INLINE(sce, Scene *), ((sce->flag & SCE_DS_COLLAPSED) == 0))
@@ -446,7 +452,7 @@ ENUM_OPERATORS(eAnimFilter_Flags, ANIMFILTER_TMP_IGNORE_ONLYSEL);
 #define EXPANDED_DRVD(adt) ((adt->flag & ADT_DRIVERS_COLLAPSED) == 0)
 #define EXPANDED_ADT(adt) ((adt->flag & ADT_UI_EXPANDED) != 0)
 
-/* Actions (also used for Dopesheet) */
+/* Actions (also used for Dope-sheet). */
 /** Action Channel Group. */
 #define EDITABLE_AGRP(agrp) (((agrp)->flag & AGRP_PROTECTED) == 0)
 #define EXPANDED_AGRP(ac, agrp) \
@@ -514,6 +520,33 @@ ENUM_OPERATORS(eAnimFilter_Flags, ANIMFILTER_TMP_IGNORE_ONLYSEL);
 /* -------------------------------------------------------------------- */
 /** \name Public API
  * \{ */
+
+/**
+ * Add the channel and sub-channels for an Action Slot to `anim_data`, filtered
+ * according to `filter_mode`.
+ *
+ * \param action: the action containing the slot to generate the channels for.
+ *
+ * \param slot: the slot to generate the channels for.
+ *
+ * \param filter_mode: the filters to use for deciding what channels get
+ * included.
+ *
+ * \param animated_id: the particular animated ID that the slot channels are
+ * being generated for. This is needed for filtering channels based on bone
+ * selection, and also for resolving the names of animated properties. This
+ * should never be null, but it's okay(ish) if it's an ID not actually animated
+ * by the slot, in which case it will act as a fallback in case an ID actually
+ * animated by the slot can't be found.
+ *
+ * \return The number of items added to `anim_data`.
+ */
+size_t ANIM_animfilter_action_slot(bAnimContext *ac,
+                                   ListBase * /* bAnimListElem */ anim_data,
+                                   blender::animrig::Action &action,
+                                   blender::animrig::Slot &slot,
+                                   eAnimFilter_Flags filter_mode,
+                                   ID *animated_id);
 
 /**
  * This function filters the active data source to leave only animation channels suitable for
@@ -656,6 +689,18 @@ struct bAnimChannelType {
    * - assume that setting has been checked to be valid for current context.
    */
   void *(*setting_ptr)(bAnimListElem *ale, eAnimChannel_Settings setting, short *r_type);
+
+  /**
+   * Called after a setting was changed via ANIM_channel_setting_set().
+   *
+   * \param ale is marked as 'const', as it could have been duplicated and taken out of context.
+   * This means that any hypothetical changes to `ale->update`, for example, will not be seen by
+   * any `ANIM_animdata_update()` call. So better to keep this `const` and avoid any manipulation.
+   * Also, because of the duplications, the ale's `prev` and `next` pointers will be dangling.
+   */
+  void (*setting_post_update)(Main &bmain,
+                              const bAnimListElem &ale,
+                              eAnimChannel_Settings setting);
 };
 
 /** \} */
@@ -681,7 +726,7 @@ float ANIM_UI_get_channel_button_width();
 /**
  * Get type info from given channel type.
  */
-const bAnimChannelType *ANIM_channel_get_typeinfo(bAnimListElem *ale);
+const bAnimChannelType *ANIM_channel_get_typeinfo(const bAnimListElem *ale);
 
 /**
  * Print debug info string for the given channel.
@@ -1187,12 +1232,12 @@ enum eAnimvizCalcRange {
 Depsgraph *animviz_depsgraph_build(Main *bmain,
                                    Scene *scene,
                                    ViewLayer *view_layer,
-                                   ListBase *targets);
+                                   blender::Span<MPathTarget *> targets);
 
 void animviz_calc_motionpaths(Depsgraph *depsgraph,
                               Main *bmain,
                               Scene *scene,
-                              ListBase *targets,
+                              blender::MutableSpan<MPathTarget *> targets,
                               eAnimvizCalcRange range,
                               bool restore);
 
@@ -1206,9 +1251,16 @@ void animviz_calc_motionpaths(Depsgraph *depsgraph,
 void animviz_motionpath_compute_range(Object *ob, Scene *scene);
 
 /**
- * Get list of motion paths to be baked for the given object.
- * - assumes the given list is ready to be used.
+ * Populate the given vector with MPathTarget elements for the given object.
+ * Will look for pose bones as well. `animviz_free_motionpath_targets` needs to be called
+ * to free the memory allocated in this function.
  */
-void animviz_get_object_motionpaths(Object *ob, ListBase *targets);
+void animviz_build_motionpath_targets(Object *ob, blender::Vector<MPathTarget *> &r_targets);
+
+/**
+ * Free the elements of the vector populated with `animviz_build_motionpath_targets`.
+ * After this function the Vector will have a length of 0.
+ */
+void animviz_free_motionpath_targets(blender::Vector<MPathTarget *> &targets);
 
 /** \} */

@@ -2,7 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_lib.glsl"
+#include "infos/overlay_edit_mode_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_edit_uv_stretching_area)
+
+#include "draw_model_lib.glsl"
+#include "draw_view_lib.glsl"
 
 vec3 weight_to_rgb(float weight)
 {
@@ -68,7 +73,7 @@ float area_ratio_to_stretch(float ratio, float tot_ratio)
 void main()
 {
   vec3 world_pos = vec3(pos, 0.0);
-  gl_Position = point_world_to_ndc(world_pos);
+  gl_Position = drw_point_world_to_homogenous(world_pos);
 
 #ifdef STRETCH_ANGLE
   vec2 v1 = angle_to_v2(uv_angles.x * M_PI);

@@ -14,13 +14,12 @@
 #include "BKE_context.hh"
 #include "BKE_curves.hh"
 #include "BKE_duplilist.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_scene.hh"
 
-#include "BLI_math_matrix.h"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
-#include "BLI_string.h"
 
 #include "BLT_translation.hh"
 
@@ -47,9 +46,9 @@ static void ensure_valid_frame_end(Main * /*main*/, Scene * /*scene*/, PointerRN
   }
 }
 
-static int bake_grease_pencil_animation_invoke(bContext *C,
-                                               wmOperator *op,
-                                               const wmEvent * /*event*/)
+static wmOperatorStatus bake_grease_pencil_animation_invoke(bContext *C,
+                                                            wmOperator *op,
+                                                            const wmEvent * /*event*/)
 {
   const Scene *scene = CTX_data_scene(C);
 
@@ -135,7 +134,7 @@ static Set<int> get_selected_object_keyframes(Span<Object *> bake_targets)
   return keyframes;
 }
 
-static int bake_grease_pencil_animation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus bake_grease_pencil_animation_exec(bContext *C, wmOperator *op)
 {
   using namespace bke::greasepencil;
 

@@ -9,14 +9,19 @@
 #pragma once
 
 #include "BLI_bounds.hh"
+#include "BLI_math_matrix.h"
 #include "BLI_math_matrix.hh"
 
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
+#include "BKE_material.hh"
 #include "BKE_object.hh"
+
+#include "DNA_material_types.h"
 
 #include "ED_grease_pencil.hh"
 
+#include "draw_cache.hh"
 #include "draw_manager_text.hh"
 
 #include "overlay_next_base.hh"
@@ -44,7 +49,7 @@ class GreasePencil : Overlay {
   /* TODO(fclem): This is quite wasteful and expensive, prefer in shader Z modification like the
    * retopology offset. */
   View view_edit_cage_ = {"view_edit_cage"};
-  State::ViewOffsetData offset_data_;
+  View::OffsetData offset_data_;
 
  public:
   void begin_sync(Resources &res, const State &state) final
@@ -109,13 +114,14 @@ class GreasePencil : Overlay {
       auto &pass = edit_grease_pencil_ps_;
       pass.init();
       pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+      pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
       pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL |
                          DRW_STATE_BLEND_ALPHA,
                      state.clipping_plane_count);
 
       if (show_points_) {
         auto &sub = pass.sub("Points");
-        sub.shader_set(res.shaders.curve_edit_points.get());
+        sub.shader_set(res.shaders->curve_edit_points.get());
         sub.bind_texture("weightTex", &res.weight_ramp_tx);
         sub.push_constant("useWeight", show_weight_);
         sub.push_constant("useGreasePencil", true);
@@ -125,7 +131,7 @@ class GreasePencil : Overlay {
 
       if (show_lines_) {
         auto &sub = pass.sub("Lines");
-        sub.shader_set(res.shaders.curve_edit_line.get());
+        sub.shader_set(res.shaders->curve_edit_line.get());
         sub.bind_texture("weightTex", &res.weight_ramp_tx);
         sub.push_constant("useWeight", show_weight_);
         sub.push_constant("useGreasePencil", true);
@@ -146,9 +152,11 @@ class GreasePencil : Overlay {
       pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA | depth_write_state,
                      state.clipping_plane_count);
       if (show_grid_) {
-        const float4 col_grid(0.5f, 0.5f, 0.5f, state.overlay.gpencil_grid_opacity);
-        pass.shader_set(res.shaders.grid_grease_pencil.get());
+        const float4 col_grid(float3(state.overlay.gpencil_grid_color),
+                              state.overlay.gpencil_grid_opacity);
+        pass.shader_set(res.shaders->grid_grease_pencil.get());
         pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+        pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
         pass.push_constant("color", col_grid);
       }
     }
@@ -219,9 +227,14 @@ class GreasePencil : Overlay {
     }
 
     if (show_grid_) {
-      const int grid_lines = 4;
+      const int grid_lines = state.v3d->overlay.gpencil_grid_subdivisions;
       const int line_count = grid_lines * 4 + 2;
-      const float4x4 grid_mat = grid_matrix_get(*ob_ref.object, state.scene);
+
+      const float3 grid_offset = float3(float2(state.v3d->overlay.gpencil_grid_offset), 0.0f);
+      const float3 grid_scale = float3(float2(state.v3d->overlay.gpencil_grid_scale), 0.0f);
+      const float4x4 transform_mat = math::from_loc_scale<float4x4>(grid_offset, grid_scale);
+
+      const float4x4 grid_mat = grid_matrix_get(*ob_ref.object, state.scene) * transform_mat;
 
       grid_ps_.push_constant("xAxis", grid_mat.x_axis());
       grid_ps_.push_constant("yAxis", grid_mat.y_axis());
@@ -260,8 +273,7 @@ class GreasePencil : Overlay {
       return;
     }
 
-    float view_dist = State::view_dist_get(offset_data_, view.winmat());
-    view_edit_cage_.sync(view.viewmat(), winmat_polygon_offset(view.winmat(), view_dist, 0.5f));
+    view_edit_cage_.sync(view.viewmat(), offset_data_.winmat_polygon_offset(view.winmat(), 0.5f));
 
     GPU_framebuffer_bind(framebuffer);
     manager.submit(edit_grease_pencil_ps_, view_edit_cage_);
@@ -276,7 +288,7 @@ class GreasePencil : Overlay {
   {
     using namespace blender;
     using namespace blender::ed::greasepencil;
-    ::GreasePencil &grease_pencil = *static_cast<::GreasePencil *>(ob->data);
+    ::GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<::GreasePencil>(*ob);
 
     const bool is_stroke_order_3d = (grease_pencil.flag & GREASE_PENCIL_STROKE_ORDER_3D) != 0;
 
@@ -298,16 +310,10 @@ class GreasePencil : Overlay {
     const Vector<DrawingInfo> drawings = retrieve_visible_drawings(*scene, grease_pencil, true);
     for (const DrawingInfo info : drawings) {
 
-      const float object_scale = mat4_to_scale(ob->object_to_world().ptr());
-      const float thickness_scale = bke::greasepencil::LEGACY_RADIUS_CONVERSION_FACTOR;
-
       gpu::VertBuf *position_tx = draw::DRW_cache_grease_pencil_position_buffer_get(scene, ob);
       gpu::VertBuf *color_tx = draw::DRW_cache_grease_pencil_color_buffer_get(scene, ob);
 
       pass.push_constant("gpStrokeOrder3d", is_stroke_order_3d);
-      pass.push_constant("gpThicknessScale", object_scale);
-      pass.push_constant("gpThicknessOffset", 0.0f);
-      pass.push_constant("gpThicknessWorldScale", thickness_scale);
       pass.bind_texture("gp_pos_tx", position_tx);
       pass.bind_texture("gp_col_tx", color_tx);
 
@@ -406,7 +412,7 @@ class GreasePencil : Overlay {
   {
     const ToolSettings *ts = scene->toolsettings;
 
-    const ::GreasePencil &grease_pencil = *static_cast<::GreasePencil *>(object.data);
+    const ::GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<::GreasePencil>(object);
     const blender::bke::greasepencil::Layer *active_layer = grease_pencil.get_active_layer();
 
     float4x4 mat = object.object_to_world();
@@ -432,7 +438,8 @@ class GreasePencil : Overlay {
       }
       case GP_LOCKAXIS_VIEW:
         /* view aligned */
-        DRW_view_viewmat_get(nullptr, mat.ptr(), true);
+        /* TODO(fclem): Global access. */
+        mat = blender::draw::View::default_get().viewinv();
         break;
     }
 
@@ -457,7 +464,7 @@ class GreasePencil : Overlay {
     uchar4 color;
     UI_GetThemeColor4ubv(res.object_wire_theme_id(ob_ref, state), color);
 
-    ::GreasePencil &grease_pencil = *static_cast<::GreasePencil *>(object.data);
+    ::GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<::GreasePencil>(object);
 
     Vector<ed::greasepencil::DrawingInfo> drawings = ed::greasepencil::retrieve_visible_drawings(
         *state.scene, grease_pencil, false);

@@ -42,7 +42,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
     @classmethod
     def poll(cls, context):
         ob = context.object
-        return ob and ob.type != 'GPENCIL'
+        return ob
 
     def draw(self, _context):
         layout = self.layout
@@ -67,8 +67,11 @@ class OBJECT_MT_modifier_add(ModifierAddMenu, Menu):
 
         if layout.operator_context == 'EXEC_REGION_WIN':
             layout.operator_context = 'INVOKE_REGION_WIN'
-            layout.operator("WM_OT_search_single_menu", text="Search...",
-                            icon='VIEWZOOM').menu_idname = "OBJECT_MT_modifier_add"
+            layout.operator(
+                "WM_OT_search_single_menu",
+                text="Search...",
+                icon='VIEWZOOM',
+            ).menu_idname = "OBJECT_MT_modifier_add"
             layout.separator()
 
         layout.operator_context = 'INVOKE_REGION_WIN'
@@ -104,7 +107,7 @@ class OBJECT_MT_modifier_add_edit(ModifierAddMenu, Menu):
             self.operator_modifier_add(layout, 'DATA_TRANSFER')
         if ob_type in {'MESH', 'CURVE', 'FONT', 'SURFACE', 'LATTICE'}:
             self.operator_modifier_add(layout, 'MESH_CACHE')
-        if ob_type in {'MESH', 'CURVE', 'CURVES', 'FONT', 'SURFACE', 'POINTCLOUD'}:
+        if ob_type in {'MESH', 'CURVE', 'CURVES', 'FONT', 'POINTCLOUD'}:
             self.operator_modifier_add(layout, 'MESH_SEQUENCE_CACHE')
         if ob_type == 'MESH':
             self.operator_modifier_add(layout, 'UV_PROJECT')
@@ -267,20 +270,6 @@ class OBJECT_MT_modifier_add_color(ModifierAddMenu, Menu):
         layout.template_modifier_asset_menu_items(catalog_path=self.bl_label)
 
 
-class DATA_PT_gpencil_modifiers(ModifierButtonsPanel, Panel):
-    bl_label = "Modifiers"
-
-    @classmethod
-    def poll(cls, context):
-        ob = context.object
-        return ob and ob.type == 'GPENCIL'
-
-    def draw(self, _context):
-        layout = self.layout
-        layout.operator_menu_enum("object.gpencil_modifier_add", "type")
-        layout.template_grease_pencil_modifiers()
-
-
 class AddModifierMenu(Operator):
     bl_idname = "object.add_modifier_menu"
     bl_label = "Add Modifier"
@@ -288,13 +277,10 @@ class AddModifierMenu(Operator):
     @classmethod
     def poll(cls, context):
         # NOTE: This operator only exists to add a poll to the add modifier shortcut in the property editor.
-        object = context.object
         space = context.space_data
-        if object and object.type == 'GPENCIL':
-            return False
         return space and space.type == 'PROPERTIES' and space.context == 'MODIFIER'
 
-    def invoke(self, context, event):
+    def invoke(self, _context, _event):
         return bpy.ops.wm.call_menu(name="OBJECT_MT_modifier_add")
 
 
@@ -307,7 +293,6 @@ classes = (
     OBJECT_MT_modifier_add_normals,
     OBJECT_MT_modifier_add_physics,
     OBJECT_MT_modifier_add_color,
-    DATA_PT_gpencil_modifiers,
     AddModifierMenu,
 )
 

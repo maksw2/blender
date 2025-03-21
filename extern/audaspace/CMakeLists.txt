@@ -23,7 +23,7 @@ endif()
 
 project(audaspace)
 
-set(AUDASPACE_VERSION 1.5)
+set(AUDASPACE_VERSION 1.6)
 set(AUDASPACE_LONG_VERSION ${AUDASPACE_VERSION}.0)
 
 if(DEFINED AUDASPACE_CMAKE_CFG)
@@ -727,7 +727,7 @@ endif()
 if(WITH_PIPEWIRE)
 	if(AUDASPACE_STANDALONE)
 		find_package(PkgConfig)
-		pkg_check_modules(PIPEWIRE ${PACKAGE_OPTION} libpipewire-0.3)
+		pkg_check_modules(PIPEWIRE ${PACKAGE_OPTION} libpipewire-0.3>=1.1.0)
 	endif()
 
 	if(PIPEWIRE_FOUND)

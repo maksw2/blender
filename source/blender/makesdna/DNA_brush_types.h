@@ -19,16 +19,6 @@ struct Image;
 struct MTex;
 struct Material;
 
-typedef struct BrushClone {
-  /** Image for clone tool. */
-  struct Image *image;
-  /** Offset of clone image from canvas. */
-  float offset[2];
-  /** Transparency for drawing of clone image. */
-  float alpha;
-  char _pad[4];
-} BrushClone;
-
 typedef struct BrushGpencilSettings {
   /** Amount of smoothing to apply to newly created strokes. */
   float draw_smoothfac;
@@ -175,7 +165,6 @@ typedef struct Brush {
 
   ID id;
 
-  struct BrushClone clone;
   /** Falloff curve. */
   struct CurveMapping *curve;
   struct MTex mtex;
@@ -298,7 +287,7 @@ typedef struct Brush {
   char gpencil_weight_brush_type;
   /** Active curves sculpt brush type (#eBrushCurvesSculptType). */
   char curves_sculpt_brush_type;
-  char _pad1[6];
+  char _pad1[2];
 
   float autosmooth_factor;
 
@@ -315,6 +304,13 @@ typedef struct Brush {
   float plane_trim;
   /** Affectable height of brush (layer height for layer tool, i.e.). */
   float height;
+
+  /* Plane Brush */
+  float plane_height;
+  float plane_depth;
+  float stabilize_normal;
+  float stabilize_plane;
+  int plane_inversion_mode;
 
   float texture_sample_bias;
 

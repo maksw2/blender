@@ -13,8 +13,8 @@ It's called "global" to avoid confusion with the Blender World data-block.
 bl_info = {
     "name": "Copy Global Transform",
     "author": "Sybren A. Stüvel",
-    "version": (3, 0),
-    "blender": (4, 2, 0),
+    "version": (4, 4),
+    "blender": (4, 4, 0),
     "location": "N-panel in the 3D Viewport",
     "description": "Copy and paste object and bone transforms with ease",
     "category": "Animation",
@@ -28,7 +28,11 @@ import contextlib
 from typing import Iterable, Optional, Union, Any, TypeAlias, Iterator
 
 import bpy
-from bpy.types import Context, Object, Operator, Panel, PoseBone, UILayout, Camera
+from bpy.app.translations import contexts as i18n_contexts
+from bpy.types import (
+    Context, Object, Operator, Panel, PoseBone,
+    UILayout, Camera, ID, ActionChannelbag, KeyingSet,
+)
 from mathutils import Matrix
 
 
@@ -65,7 +69,14 @@ class AutoKeying:
 
     @classmethod
     @contextlib.contextmanager
-    def options(cls, *, keytype="", use_loc=True, use_rot=True, use_scale=True, force_autokey=False) -> Iterator[None]:
+    def options(
+            cls,
+            *,
+            keytype: str = "",
+            use_loc: bool = True,
+            use_rot: bool = True,
+            use_scale: bool = True,
+            force_autokey: bool = False) -> Iterator[None]:
         """Context manager to set various options."""
         default_keytype = cls._keytype
         default_use_loc = cls._use_loc
@@ -103,6 +114,21 @@ class AutoKeying:
         return options
 
     @classmethod
+    def keying_options_from_keyingset(cls, context: Context, keyingset: KeyingSet) -> set[str]:
+        """Retrieve the general keyframing options from user preferences."""
+
+        ts = context.scene.tool_settings
+        options = set()
+
+        if keyingset.use_insertkey_visual:
+            options.add('INSERTKEY_VISUAL')
+        if keyingset.use_insertkey_needed:
+            options.add('INSERTKEY_NEEDED')
+        if ts.use_keyframe_cycle_aware:
+            options.add('INSERTKEY_CYCLE_AWARE')
+        return options
+
+    @classmethod
     def autokeying_options(cls, context: Context) -> Optional[set[str]]:
         """Retrieve the Auto Keyframe options, or None if disabled."""
 
@@ -111,9 +137,10 @@ class AutoKeying:
         if not (cls._force_autokey or ts.use_keyframe_insert_auto):
             return None
 
-        if ts.use_keyframe_insert_keyingset:
-            # No support for keying sets (yet).
-            return None
+        active_keyingset = context.scene.keying_sets_all.active
+        if ts.use_keyframe_insert_keyingset and active_keyingset:
+            # No support for keying sets in this function
+            raise RuntimeError("This function should not be called when there is an active keying set")
 
         prefs = context.preferences
         options = cls.keying_options(context)
@@ -168,12 +195,7 @@ class AutoKeying:
             group = "Object Transforms"
 
         def keyframe(data_path: str, locks: Iterable[bool]) -> None:
-            try:
-                cls.keyframe_channels(target, options, data_path, group, locks)
-            except RuntimeError:
-                # These are expected when "Insert Available" is turned on, and
-                # these curves are not available.
-                pass
+            cls.keyframe_channels(target, options, data_path, group, locks)
 
         if cls._use_loc and not (is_bone and target.bone.use_connect):
             keyframe("location", target.lock_location)
@@ -190,9 +212,86 @@ class AutoKeying:
             keyframe("scale", target.lock_scale)
 
     @classmethod
+    def key_transformation_via_keyingset(cls,
+                                         context: Context,
+                                         target: Union[Object, PoseBone],
+                                         keyingset: KeyingSet) -> None:
+        """Auto-key transformation properties with the given keying set."""
+
+        keyingset.refresh()
+
+        is_bone = isinstance(target, PoseBone)
+        options = cls.keying_options_from_keyingset(context, keyingset)
+
+        paths_to_key = {keysetpath.data_path: keysetpath for keysetpath in keyingset.paths}
+
+        def keyframe(data_path: str, locks: Iterable[bool]) -> None:
+            # Keying sets are relative to the ID.
+            full_data_path = target.path_from_id(data_path)
+            try:
+                keysetpath = paths_to_key[full_data_path]
+            except KeyError:
+                # No biggie, just means this property shouldn't be keyed.
+                return
+
+            match keysetpath.group_method:
+                case 'NAMED':
+                    group = keysetpath.group
+                case 'KEYINGSET':
+                    group = keyingset.name
+                case 'NONE', _:
+                    group = ""
+
+            cls.keyframe_channels(target, options, data_path, group, locks)
+
+        if cls._use_loc and not (is_bone and target.bone.use_connect):
+            keyframe("location", target.lock_location)
+
+        if cls._use_rot:
+            if target.rotation_mode == 'QUATERNION':
+                keyframe("rotation_quaternion", cls.get_4d_rotlock(target))
+            elif target.rotation_mode == 'AXIS_ANGLE':
+                keyframe("rotation_axis_angle", cls.get_4d_rotlock(target))
+            else:
+                keyframe("rotation_euler", target.lock_rotation)
+
+        if cls._use_scale:
+            keyframe("scale", target.lock_scale)
+
+    @classmethod
+    def active_keyingset(cls, context: Context) -> KeyingSet | None:
+        """Return the active keying set, if it should be used.
+
+        Only returns the active keying set when the auto-key settings indicate
+        it should be used, and when it is not using absolute paths (because
+        that's not supported by the Copy Global Transform add-on).
+        """
+        ts = context.scene.tool_settings
+        if not ts.use_keyframe_insert_keyingset:
+            return None
+
+        active_keyingset = context.scene.keying_sets_all.active
+        if not active_keyingset:
+            return None
+
+        active_keyingset.refresh()
+        if active_keyingset.is_path_absolute:
+            # Absolute-path keying sets are not supported (yet?).
+            return None
+
+        return active_keyingset
+
+    @classmethod
     def autokey_transformation(cls, context: Context, target: Union[Object, PoseBone]) -> None:
         """Auto-key transformation properties."""
 
+        # See if the active keying set should be used.
+        keyingset = cls.active_keyingset(context)
+        if keyingset:
+            cls.key_transformation_via_keyingset(context, target, keyingset)
+            return
+
+        # Use regular autokeying options.
         options = cls.autokeying_options(context)
         if options is None:
             return
@@ -223,6 +322,26 @@ def set_matrix(context: Context, mat: Matrix) -> None:
         AutoKeying.autokey_transformation(context, context.active_object)
 
 
+def _channelbag_for_id(animated_id: ID) -> ActionChannelbag | None:
+    # This is on purpose limited to the first layer and strip. To support more
+    # than 1 layer, a rewrite of the caller is needed.
+
+    adt = animated_id.animation_data
+    action = adt and adt.action
+    if action is None:
+        return None
+
+    slot = adt.action_slot
+
+    for layer in action.layers:
+        for strip in layer.strips:
+            assert strip.type == 'KEYFRAME'
+            channelbag = strip.channelbag(slot)
+            return channelbag
+
+    return None
+
+
 def _selected_keyframes(context: Context) -> list[float]:
     """Return the list of frame numbers that have a selected key.
 
@@ -240,7 +359,7 @@ def _selected_keyframes_for_bone(object: Object, bone: PoseBone) -> list[float]:
     Only keys on the given pose bone are considered.
     """
     name = bpy.utils.escape_identifier(bone.name)
-    return _selected_keyframes_in_action(object, "pose.bones[\"{:s}\"].".format(name))
+    return _selected_keyframes_for_action_slot(object, "pose.bones[\"{:s}\"].".format(name))
 
 
 def _selected_keyframes_for_object(object: Object) -> list[float]:
@@ -248,21 +367,21 @@ def _selected_keyframes_for_object(object: Object) -> list[float]:
 
     Only keys on the given object are considered.
     """
-    return _selected_keyframes_in_action(object, "")
+    return _selected_keyframes_for_action_slot(object, "")
 
 
-def _selected_keyframes_in_action(object: Object, rna_path_prefix: str) -> list[float]:
+def _selected_keyframes_for_action_slot(object: Object, rna_path_prefix: str) -> list[float]:
     """Return the list of frame numbers that have a selected key.
 
-    Only keys on the given object's Action on FCurves starting with rna_path_prefix are considered.
+    Only keys on the given object's Action Slot on FCurves starting with rna_path_prefix are considered.
     """
 
-    action = object.animation_data and object.animation_data.action
-    if action is None:
+    cbag = _channelbag_for_id(object)
+    if not cbag:
         return []
 
     keyframes = set()
-    for fcurve in action.fcurves:
+    for fcurve in cbag.fcurves:
         if not fcurve.data_path.startswith(rna_path_prefix):
             continue
 
@@ -324,6 +443,11 @@ class OBJECT_OT_copy_relative_transform(Operator):
 
     def execute(self, context: Context) -> set[str]:
         rel_ob = _get_relative_ob(context)
+        if not rel_ob:
+            self.report(
+                {'ERROR'},
+                "No 'Relative To' object found, set one explicitly or make sure there is an active object")
+            return {'CANCELLED'}
         mat = rel_ob.matrix_world.inverted() @ get_matrix(context)
         _copy_matrix_to_clipboard(context.window_manager, mat)
         return {'FINISHED'}
@@ -460,16 +584,14 @@ class OBJECT_OT_paste_transform(Operator):
         return applicator(context, mat)
 
     def _preprocess_matrix(self, context: Context, matrix: Matrix) -> Matrix:
-        matrix = self._relative_to_world(context, matrix)
+        if self.use_relative:
+            matrix = self._relative_to_world(context, matrix)
 
         if self.use_mirror:
             matrix = self._mirror_matrix(context, matrix)
         return matrix
 
     def _relative_to_world(self, context: Context, matrix: Matrix) -> Matrix:
-        if not self.use_relative:
-            return matrix
-
         rel_ob = _get_relative_ob(context)
         if not rel_ob:
             return matrix
@@ -591,7 +713,7 @@ class OBJECT_OT_paste_transform(Operator):
             context.scene.frame_set(int(current_frame), subframe=current_frame % 1.0)
 
 
-# Mapping from frame number to the dominant key type.
+# Mapping from frame number to the dominant (in terms of genetics) key type.
 # GENERATED is the only recessive key type, others are dominant.
 KeyInfo: TypeAlias = dict[float, str]
 
@@ -606,8 +728,21 @@ class Transformable(metaclass=abc.ABCMeta):
     def matrix_world(self) -> Matrix:
         pass
 
-    @abc.abstractmethod
     def set_matrix_world(self, context: Context, matrix: Matrix) -> None:
+        """Set the world matrix, without autokeying."""
+        self._set_matrix_world(context, matrix)
+
+    def set_matrix_world_autokey(self, context: Context, matrix: Matrix) -> None:
+        """Set the world matrix, and autokey the resulting transform."""
+        self._set_matrix_world(context, matrix)
+        self._autokey_matrix_world(context)
+
+    @abc.abstractmethod
+    def _set_matrix_world(self, context: Context, matrix: Matrix) -> None:
+        pass
+
+    @abc.abstractmethod
+    def _autokey_matrix_world(self, context: Context) -> None:
         pass
 
     @abc.abstractmethod
@@ -630,7 +765,12 @@ class Transformable(metaclass=abc.ABCMeta):
         self._key_info_cache = keyinfo
         return keyinfo
 
-    def remove_keys_of_type(self, key_type: str, *, frame_start=float("-inf"), frame_end=float("inf")) -> None:
+    def remove_keys_of_type(
+            self,
+            key_type: str,
+            *,
+            frame_start: float | int = float("-inf"),
+            frame_end: float | int = float("inf")) -> None:
         self._key_info_cache = None
 
         for fcurve in self._my_fcurves():
@@ -649,25 +789,26 @@ class TransformableObject(Transformable):
         super().__init__()
         self.object = object
 
+    def __str__(self) -> str:
+        return f"TransformableObject({self.object.name})"
+
     def matrix_world(self) -> Matrix:
         return self.object.matrix_world
 
-    def set_matrix_world(self, context: Context, matrix: Matrix) -> None:
+    def _set_matrix_world(self, _context: Context, matrix: Matrix) -> None:
         self.object.matrix_world = matrix
+
+    def _autokey_matrix_world(self, context: Context) -> None:
         AutoKeying.autokey_transformation(context, self.object)
 
     def __hash__(self) -> int:
         return hash(self.object.as_pointer())
 
     def _my_fcurves(self) -> Iterable[bpy.types.FCurve]:
-        action = self._action()
-        if not action:
+        cbag = _channelbag_for_id(self.object)
+        if not cbag:
             return
-        yield from action.fcurves
-
-    def _action(self) -> Optional[bpy.types.Action]:
-        adt = self.object.animation_data
-        return adt and adt.action
+        yield from cbag.fcurves
 
 
 class TransformableBone(Transformable):
@@ -679,32 +820,33 @@ class TransformableBone(Transformable):
         self.arm_object = pose_bone.id_data
         self.pose_bone = pose_bone
 
+    def __str__(self) -> str:
+        return f"TransformableBone({self.arm_object.name}, bone={self.pose_bone.name})"
+
     def matrix_world(self) -> Matrix:
         mat = self.arm_object.matrix_world @ self.pose_bone.matrix
         return mat
 
-    def set_matrix_world(self, context: Context, matrix: Matrix) -> None:
+    def _set_matrix_world(self, context: Context, matrix: Matrix) -> None:
         # Convert matrix to armature-local space
         arm_eval = self.arm_object.evaluated_get(context.view_layer.depsgraph)
         self.pose_bone.matrix = arm_eval.matrix_world.inverted() @ matrix
+
+    def _autokey_matrix_world(self, context: Context) -> None:
         AutoKeying.autokey_transformation(context, self.pose_bone)
 
     def __hash__(self) -> int:
         return hash(self.pose_bone.as_pointer())
 
     def _my_fcurves(self) -> Iterable[bpy.types.FCurve]:
-        action = self._action()
-        if not action:
+        cbag = _channelbag_for_id(self.arm_object)
+        if not cbag:
             return
 
-        rna_prefix = f"{self.pose_bone.path_from_id()}."
-        for fcurve in action.fcurves:
+        rna_prefix = self.pose_bone.path_from_id() + "."
+        for fcurve in cbag.fcurves:
             if fcurve.data_path.startswith(rna_prefix):
                 yield fcurve
-
-    def _action(self) -> Optional[bpy.types.Action]:
-        adt = self.arm_object.animation_data
-        return adt and adt.action
 
 
 class FixToCameraCommon:
@@ -715,10 +857,10 @@ class FixToCameraCommon:
     # Operator method stubs to avoid PyLance/MyPy errors:
     @classmethod
     def poll_message_set(cls, message: str) -> None:
-        raise NotImplementedError()
+        super().poll_message_set(message)
 
     def report(self, level: set[str], message: str) -> None:
-        raise NotImplementedError()
+        super().report(level, message)
 
     # Implement in subclass:
     def _execute(self, context: Context, transformables: list[Transformable]) -> None:
@@ -748,10 +890,19 @@ class FixToCameraCommon:
                 return {'CANCELLED'}
 
         restore_frame = context.scene.frame_current
+        restore_matrices = [(transformable, transformable.matrix_world().copy()) for transformable in transformables]
+
         try:
             self._execute(context, transformables)
         finally:
+            # Restore the state of the scene & the transformables. This is necessary
+            # as not all properties may have been auto-keyed (for example 'only
+            # available' enabled, and rotation is not actually keyed yet), so we can't
+            # assume that going to the original frame restores the entire matrix.
             context.scene.frame_set(restore_frame)
+            for transformable, matrix in restore_matrices:
+                transformable.set_matrix_world(context, matrix)
+
         return {'FINISHED'}
 
     def _transformable_objects(self, context: Context) -> list[Transformable]:
@@ -761,7 +912,7 @@ class FixToCameraCommon:
         return [TransformableBone(pose_bone=bone) for bone in context.selected_pose_bones]
 
 
-class OBJECT_OT_fix_to_camera(Operator, FixToCameraCommon):
+class OBJECT_OT_fix_to_camera(FixToCameraCommon, Operator):
     bl_idname = "object.fix_to_camera"
     bl_label = "Fix to Scene Camera"
     bl_description = "Generate new keys to fix the selected object/bone to the camera on unkeyed frames"
@@ -832,7 +983,7 @@ class OBJECT_OT_fix_to_camera(Operator, FixToCameraCommon):
                         continue
 
                     # No key, or a generated one. Overwrite it with a new transform.
-                    t.set_matrix_world(context, cam_matrix_world @ camera_rel_matrix)
+                    t.set_matrix_world_autokey(context, cam_matrix_world @ camera_rel_matrix)
 
 
 class OBJECT_OT_delete_fix_to_camera_keys(Operator, FixToCameraCommon):
@@ -909,10 +1060,20 @@ class VIEW3D_PT_copy_global_transform_fix_to_camera(PanelMixin, Panel):
 
         # Fix to Scene Camera:
         layout.use_property_split = True
-        props_box = layout.column(heading="Fix", align=True)
+        props_box = layout.column(heading="Fix", heading_ctxt=i18n_contexts.id_camera, align=True)
         props_box.prop(scene, "addon_copy_global_transform_fix_cam_use_loc", text="Location")
         props_box.prop(scene, "addon_copy_global_transform_fix_cam_use_rot", text="Rotation")
         props_box.prop(scene, "addon_copy_global_transform_fix_cam_use_scale", text="Scale")
+
+        keyingset = AutoKeying.active_keyingset(context)
+        if keyingset:
+            # Show an explicit message here, even though the keying set affects
+            # the other operators as well. Fix to Camera is treated as a special
+            # case because it also has options for selecting what to key. The
+            # logical AND of the settings is used, so a property is only keyed
+            # when the keying set AND the above checkboxes say it's ok.
+            props_box.label(text="Keying set is active, which may")
+            props_box.label(text="reduce the effect of the above options")
 
         row = layout.row(align=True)
         props = row.operator("object.fix_to_camera")

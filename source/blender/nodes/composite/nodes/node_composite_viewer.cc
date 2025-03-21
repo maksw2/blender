@@ -37,19 +37,20 @@ static void cmp_node_viewer_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_viewer(bNodeTree * /*ntree*/, bNode *node)
 {
-  ImageUser *iuser = MEM_cnew<ImageUser>(__func__);
+  ImageUser *iuser = MEM_callocN<ImageUser>(__func__);
   node->storage = iuser;
   iuser->sfra = 1;
+  node->custom1 = NODE_VIEWER_SHORTCUT_NONE;
 
   node->id = (ID *)BKE_image_ensure_viewer(G.main, IMA_TYPE_COMPOSITE, "Viewer Node");
 }
 
 static void node_composit_buts_viewer(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "use_alpha", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "use_alpha", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class ViewerOperation : public NodeOperation {
  public:
@@ -57,8 +58,9 @@ class ViewerOperation : public NodeOperation {
 
   void execute() override
   {
-    /* See the compute_domain method for more information on the first condition. */
-    if (!context().use_composite_output() && !context().is_valid_compositing_region()) {
+    /* Viewers are treated as composite outputs that should be in the bounds of the compositing
+     * region, so do nothing if the compositing region is invalid. */
+    if (context().treat_viewer_as_composite_output() && !context().is_valid_compositing_region()) {
       return;
     }
 
@@ -85,12 +87,12 @@ class ViewerOperation : public NodeOperation {
     const Result &image = get_input("Image");
     const Result &alpha = get_input("Alpha");
 
-    float4 color = image.get_color_value();
+    float4 color = image.get_single_value<float4>();
     if (ignore_alpha()) {
       color.w = 1.0f;
     }
     else if (node().input_by_identifier("Alpha")->is_logically_linked()) {
-      color.w = alpha.get_float_value();
+      color.w = alpha.get_single_value<float>();
     }
 
     const Domain domain = compute_domain();
@@ -153,7 +155,8 @@ class ViewerOperation : public NodeOperation {
       if (output_texel.x > bounds.max.x || output_texel.y > bounds.max.y) {
         return;
       }
-      output.store_pixel(texel + bounds.min, float4(image.load_pixel(texel).xyz(), 1.0f));
+      output.store_pixel(texel + bounds.min,
+                         float4(image.load_pixel<float4, true>(texel).xyz(), 1.0f));
     });
   }
 
@@ -207,7 +210,7 @@ class ViewerOperation : public NodeOperation {
       if (output_texel.x > bounds.max.x || output_texel.y > bounds.max.y) {
         return;
       }
-      output.store_pixel(texel + bounds.min, image.load_pixel(texel));
+      output.store_pixel(texel + bounds.min, image.load_pixel<float4>(texel));
     });
   }
 
@@ -266,23 +269,25 @@ class ViewerOperation : public NodeOperation {
         return;
       }
       output.store_pixel(texel + bounds.min,
-                         float4(image.load_pixel(texel).xyz(), alpha.load_pixel(texel).x));
+                         float4(image.load_pixel<float4, true>(texel).xyz(),
+                                alpha.load_pixel<float, true>(texel)));
     });
   }
 
-  /* Returns the bounds of the area of the compositing region. If the context can use the composite
-   * output and thus has a dedicated viewer of an arbitrary size, then use the input in its
-   * entirety. Otherwise, no dedicated viewer exist so only write into the compositing region,
-   * which might be limited to a smaller region of the output texture. */
+  /* Returns the bounds of the area of the viewer, which might be limited to a smaller region of
+   * the output. */
   Bounds<int2> get_output_bounds()
   {
-    if (context().use_composite_output()) {
-      return Bounds<int2>(int2(0), compute_domain().size);
+    /* Viewers are treated as composite outputs that should be in the bounds of the compositing
+     * region. */
+    if (context().treat_viewer_as_composite_output()) {
+      const rcti compositing_region = context().get_compositing_region();
+      return Bounds<int2>(int2(compositing_region.xmin, compositing_region.ymin),
+                          int2(compositing_region.xmax, compositing_region.ymax));
     }
 
-    const rcti compositing_region = context().get_compositing_region();
-    return Bounds<int2>(int2(compositing_region.xmin, compositing_region.ymin),
-                        int2(compositing_region.xmax, compositing_region.ymax));
+    /* Otherwise, use the bounds of the input as is. */
+    return Bounds<int2>(int2(0), compute_domain().size);
   }
 
   /* If true, the alpha channel of the image is set to 1, that is, it becomes opaque. If false, the
@@ -295,17 +300,16 @@ class ViewerOperation : public NodeOperation {
 
   Domain compute_domain() override
   {
-    /* The context can use the composite output and thus has a dedicated viewer of an arbitrary
-     * size, so use the input directly. Otherwise, no dedicated viewer exist so the input should be
-     * in the domain of the compositing region. */
-    if (context().use_composite_output()) {
-      const Domain domain = NodeOperation::compute_domain();
-      /* Fallback to the compositing region size in case of a single value domain. */
-      return domain.size == int2(1) ? Domain(context().get_compositing_region_size()) : domain;
-    }
-    else {
+    /* Viewers are treated as composite outputs that should be in the domain of the compositing
+     * region. */
+    if (context().treat_viewer_as_composite_output()) {
       return Domain(context().get_compositing_region_size());
     }
+
+    /* Otherwise, use the domain of the input as is. */
+    const Domain domain = NodeOperation::compute_domain();
+    /* Fallback to the compositing region size in case of a single value domain. */
+    return domain.size == int2(1) ? Domain(context().get_compositing_region_size()) : domain;
   }
 };
 
@@ -322,15 +326,20 @@ void register_node_type_cmp_viewer()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_VIEWER, "Viewer", NODE_CLASS_OUTPUT);
+  cmp_node_type_base(&ntype, "CompositorNodeViewer", CMP_NODE_VIEWER);
+  ntype.ui_name = "Viewer";
+  ntype.ui_description =
+      "Visualize data from inside a node graph, in the image editor or as a backdrop";
+  ntype.enum_name_legacy = "VIEWER";
+  ntype.nclass = NODE_CLASS_OUTPUT;
   ntype.declare = file_ns::cmp_node_viewer_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_viewer;
   ntype.initfunc = file_ns::node_composit_init_viewer;
   blender::bke::node_type_storage(
-      &ntype, "ImageUser", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "ImageUser", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
   ntype.no_muting = true;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

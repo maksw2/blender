@@ -12,7 +12,6 @@
 #include "FN_multi_function_builder.hh"
 
 #include "BKE_attribute_filter.hh"
-#include "BKE_attribute_math.hh"
 #include "BKE_geometry_fields.hh"
 #include "BKE_geometry_nodes_reference_set.hh"
 #include "BKE_geometry_set.hh"
@@ -97,18 +96,18 @@ class GeoNodeExecParams {
   }
 
   template<typename T>
-  static inline constexpr bool is_field_base_type_v = is_same_any_v<T,
-                                                                    float,
-                                                                    int,
-                                                                    bool,
-                                                                    ColorGeometry4f,
-                                                                    float3,
-                                                                    std::string,
-                                                                    math::Quaternion,
-                                                                    float4x4>;
+  static constexpr bool is_field_base_type_v = is_same_any_v<T,
+                                                             float,
+                                                             int,
+                                                             bool,
+                                                             ColorGeometry4f,
+                                                             float3,
+                                                             std::string,
+                                                             math::Quaternion,
+                                                             float4x4>;
 
   template<typename T>
-  static inline constexpr bool stored_as_SocketValueVariant_v =
+  static constexpr bool stored_as_SocketValueVariant_v =
       is_field_base_type_v<T> || fn::is_field_v<T> || bke::is_VolumeGrid_v<T> ||
       is_same_any_v<T, GField, bke::GVolumeGrid>;
 
@@ -306,6 +305,12 @@ class GeoNodeExecParams {
     const GeometryNodesReferenceSet &set = params_.get_input<GeometryNodesReferenceSet>(lf_index);
     return NodeAttributeFilter(set);
   }
+
+  /**
+   * If the path is relative, attempt to make it absolute. If the current node tree is linked,
+   * the path is relative to the linked file. Otherwise, the path is relative to the current file.
+   */
+  std::optional<std::string> ensure_absolute_path(StringRefNull path) const;
 
  private:
   /* Utilities for detecting common errors at when using this class. */

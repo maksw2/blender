@@ -40,7 +40,7 @@ static void cmp_node_tonemap_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_tonemap(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeTonemap *ntm = MEM_cnew<NodeTonemap>(__func__);
+  NodeTonemap *ntm = MEM_callocN<NodeTonemap>(__func__);
   ntm->type = 1;
   ntm->key = 0.18;
   ntm->offset = 1;
@@ -61,22 +61,35 @@ static void node_composit_buts_tonemap(uiLayout *layout, bContext * /*C*/, Point
   col = uiLayoutColumn(layout, false);
   uiItemR(col, ptr, "tonemap_type", UI_ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
   if (RNA_enum_get(ptr, "tonemap_type") == 0) {
-    uiItemR(col, ptr, "key", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
-    uiItemR(col, ptr, "offset", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-    uiItemR(col, ptr, "gamma", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+    uiItemR(
+        col, ptr, "key", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, std::nullopt, ICON_NONE);
+    uiItemR(col, ptr, "offset", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    uiItemR(col, ptr, "gamma", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   }
   else {
-    uiItemR(col, ptr, "intensity", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-    uiItemR(
-        col, ptr, "contrast", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
-    uiItemR(
-        col, ptr, "adaptation", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
-    uiItemR(
-        col, ptr, "correction", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+    uiItemR(col, ptr, "intensity", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    uiItemR(col,
+            ptr,
+            "contrast",
+            UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+            std::nullopt,
+            ICON_NONE);
+    uiItemR(col,
+            ptr,
+            "adaptation",
+            UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+            std::nullopt,
+            ICON_NONE);
+    uiItemR(col,
+            ptr,
+            "correction",
+            UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+            std::nullopt,
+            ICON_NONE);
   }
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class ToneMapOperation : public NodeOperation {
  public:
@@ -84,10 +97,10 @@ class ToneMapOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &input_image = get_input("Image");
-    Result &output_image = get_result("Image");
+    const Result &input_image = this->get_input("Image");
+    Result &output_image = this->get_result("Image");
     if (input_image.is_single_value()) {
-      input_image.pass_through(output_image);
+      output_image.share_data(input_image);
       return;
     }
 
@@ -160,7 +173,7 @@ class ToneMapOperation : public NodeOperation {
     output.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float4 input_color = image.load_pixel(texel);
+      float4 input_color = image.load_pixel<float4>(texel);
 
       /* Equation (2) from Reinhard's 2002 paper. */
       float4 scaled_color = input_color * luminance_scale;
@@ -273,7 +286,7 @@ class ToneMapOperation : public NodeOperation {
     output.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float4 input_color = input.load_pixel(texel);
+      float4 input_color = input.load_pixel<float4>(texel);
       float input_luminance = math::dot(input_color.xyz(), luminance_coefficients);
 
       /* Trilinear interpolation between equations (6) and (7) from Reinhard's 2005 paper. */
@@ -415,13 +428,19 @@ void register_node_type_cmp_tonemap()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_TONEMAP, "Tonemap", NODE_CLASS_OP_COLOR);
+  cmp_node_type_base(&ntype, "CompositorNodeTonemap", CMP_NODE_TONEMAP);
+  ntype.ui_name = "Tonemap";
+  ntype.ui_description =
+      "Map one set of colors to another in order to approximate the appearance of high dynamic "
+      "range";
+  ntype.enum_name_legacy = "TONEMAP";
+  ntype.nclass = NODE_CLASS_OP_COLOR;
   ntype.declare = file_ns::cmp_node_tonemap_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_tonemap;
   ntype.initfunc = file_ns::node_composit_init_tonemap;
   blender::bke::node_type_storage(
-      &ntype, "NodeTonemap", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeTonemap", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

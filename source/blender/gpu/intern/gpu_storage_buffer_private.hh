@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include "BLI_span.hh"
 #include "BLI_sys_types.h"
 
 struct GPUStorageBuf;
@@ -29,7 +28,7 @@ class VertBuf;
  */
 class StorageBuf {
  protected:
-  /** Data size in bytes. */
+  /** Data size in bytes. Doesn't need to match actual allocation size due to alignment rules. */
   size_t size_in_bytes_;
   /** Continuous memory block to copy to GPU. This data is owned by the StorageBuf. */
   void *data_ = nullptr;

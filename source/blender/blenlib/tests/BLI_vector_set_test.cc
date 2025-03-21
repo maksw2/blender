@@ -7,7 +7,7 @@
 
 #include "testing/testing.h"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 namespace blender::tests {
 
@@ -315,6 +315,68 @@ TEST(vector_set, ExtractVectorEmpty)
   VectorSet<int> set;
   Vector<int> vec = set.extract_vector();
   EXPECT_TRUE(vec.is_empty());
+}
+
+TEST(vector_set, CustomIDVectorSet)
+{
+  struct ThingWithID {
+    int a;
+    std::string b;
+    int c;
+  };
+  struct ThingGetter {
+    StringRef operator()(const ThingWithID &value) const
+    {
+      return value.b;
+    }
+  };
+  CustomIDVectorSet<ThingWithID, ThingGetter> set;
+  set.add_new(ThingWithID{0, "test", 54});
+  EXPECT_TRUE(set.contains_as("test"));
+  set.add_new(ThingWithID{4333, "other", 2});
+  EXPECT_EQ(set.size(), 2);
+  set.add(ThingWithID{3333, "test", 27});
+  EXPECT_EQ(set.size(), 2);
+}
+
+namespace {
+struct KeyWithData {
+  int key;
+  std::string data;
+
+  uint64_t hash() const
+  {
+    return uint64_t(this->key);
+  }
+
+  friend bool operator==(const KeyWithData &a, const KeyWithData &b)
+  {
+    return a.key == b.key;
+  }
+};
+}  // namespace
+
+TEST(vector_set, AddOverwrite)
+{
+  VectorSet<KeyWithData> set;
+  EXPECT_TRUE(set.add_overwrite(KeyWithData{1, "a"}));
+  EXPECT_EQ(set.size(), 1);
+  EXPECT_EQ(set[0].data, "a");
+  EXPECT_FALSE(set.add(KeyWithData{1, "b"}));
+  EXPECT_EQ(set.size(), 1);
+  EXPECT_EQ(set[0].data, "a");
+  EXPECT_EQ(set.lookup_key(KeyWithData{1, "_"}).data, "a");
+  EXPECT_FALSE(set.add_overwrite(KeyWithData{1, "c"}));
+  EXPECT_EQ(set.size(), 1);
+  EXPECT_EQ(set[0].data, "c");
+  EXPECT_EQ(set.lookup_key(KeyWithData{1, "_"}).data, "c");
+
+  const KeyWithData key{2, "d"};
+  EXPECT_TRUE(set.add_overwrite(key));
+  EXPECT_EQ(set.size(), 2);
+  EXPECT_EQ(set[0].data, "c");
+  EXPECT_EQ(set[1].data, "d");
+  EXPECT_EQ(set.lookup_key(key).data, "d");
 }
 
 }  // namespace blender::tests

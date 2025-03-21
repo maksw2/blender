@@ -2,9 +2,17 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_wireframe_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_wireframe)
+
+#include "draw_model_lib.glsl"
+#include "draw_object_infos_lib.glsl"
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
+#include "gpu_shader_math_vector_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
+#include "overlay_common_lib.glsl"
 #include "select_lib.glsl"
 
 #if !defined(POINTS) && !defined(CURVES)
@@ -16,17 +24,10 @@ bool is_edge_sharpness_visible(float wire_data)
 
 void wire_color_get(out vec3 rim_col, out vec3 wire_col)
 {
-#ifdef OBINFO_NEW
-  eObjectInfoFlag ob_flag = eObjectInfoFlag(floatBitsToUint(drw_infos[resource_id].infos.w));
+  eObjectInfoFlag ob_flag = drw_object_infos().flag;
   bool is_selected = flag_test(ob_flag, OBJECT_SELECTED);
   bool is_from_set = flag_test(ob_flag, OBJECT_FROM_SET);
   bool is_active = flag_test(ob_flag, OBJECT_ACTIVE);
-#else
-  int flag = int(abs(ObjectInfo.w));
-  bool is_selected = (flag & DRW_BASE_SELECTED) != 0;
-  bool is_from_set = (flag & DRW_BASE_FROM_SET) != 0;
-  bool is_active = (flag & DRW_BASE_ACTIVE) != 0;
-#endif
 
   if (is_from_set) {
     rim_col = colorWire.rgb;
@@ -59,14 +60,14 @@ vec3 hsv_to_rgb(vec3 hsv)
 
 void wire_object_color_get(out vec3 rim_col, out vec3 wire_col)
 {
-  int flag = int(abs(ObjectInfo.w));
-  bool is_selected = (flag & DRW_BASE_SELECTED) != 0;
+  ObjectInfos info = drw_object_infos();
+  bool is_selected = flag_test(info.flag, OBJECT_SELECTED);
 
   if (colorType == V3D_SHADING_OBJECT_COLOR) {
-    rim_col = wire_col = ObjectColor.rgb * 0.5;
+    rim_col = wire_col = drw_object_infos().ob_color.rgb * 0.5;
   }
   else {
-    float hue = ObjectInfo.z;
+    float hue = info.random;
     vec3 hsv = vec3(hue, 0.75, 0.8);
     rim_col = wire_col = hsv_to_rgb(hsv);
   }
@@ -86,18 +87,20 @@ void wire_object_color_get(out vec3 rim_col, out vec3 wire_col)
 
 void main()
 {
-  select_id_set(drw_CustomID);
+  select_id_set(drw_custom_id());
 
-  vec3 wpos = point_object_to_world(pos);
+  /* If no attribute is available, use a fixed facing value depending on the coloring mode.
+   * This allow to keep most of the contrast between unselected and selected color
+   * while keeping object coloring mode working (see #134011). */
+  float no_nor_facing = (colorType == V3D_SHADING_SINGLE_COLOR) ? 0.0 : 0.5;
+
+  vec3 wpos = drw_point_object_to_world(pos);
 #if defined(POINTS)
   gl_PointSize = sizeVertex * 2.0;
 #elif defined(CURVES)
-  /* Noop */
+  float facing = no_nor_facing;
 #else
-  bool no_attr = all(equal(nor, vec3(0)));
-  /* If no attribute is available, use a direction perpendicular
-   * to the view to have full brightness. */
-  vec3 wnor = no_attr ? drw_view.viewinv[1].xyz : normalize(normal_object_to_world(nor));
+  vec3 wnor = safe_normalize(drw_normal_object_to_world(nor));
 
   if (isHair) {
     mat4 obmat = hairDupliMatrix;
@@ -105,22 +108,14 @@ void main()
     wnor = -normalize(to_float3x3(obmat) * nor);
   }
 
-  bool is_persp = (drw_view.winmat[3][3] == 0.0);
-  vec3 V = (is_persp) ? normalize(drw_view.viewinv[3].xyz - wpos) : drw_view.viewinv[2].xyz;
+  bool is_persp = (drw_view().winmat[3][3] == 0.0);
+  vec3 V = (is_persp) ? normalize(drw_view().viewinv[3].xyz - wpos) : drw_view().viewinv[2].xyz;
 
-  float facing = dot(wnor, V);
+  bool no_attr = all(equal(nor, vec3(0)));
+  float facing = no_attr ? no_nor_facing : dot(wnor, V);
 #endif
 
-  gl_Position = point_world_to_ndc(wpos);
-
-#ifndef CUSTOM_DEPTH_BIAS_CONST
-/* TODO(fclem): Cleanup after overlay next. */
-#  ifndef CUSTOM_DEPTH_BIAS
-  const bool use_custom_depth_bias = false;
-#  else
-  const bool use_custom_depth_bias = true;
-#  endif
-#endif
+  gl_Position = drw_point_world_to_homogenous(wpos);
 
 #if !defined(POINTS) && !defined(CURVES)
   if (!use_custom_depth_bias) {
@@ -128,7 +123,7 @@ void main()
     float flip = sign(facing);           /* Flip when not facing the normal (i.e.: back-facing). */
     float curvature = (1.0 - wd * 0.75); /* Avoid making things worse for curvy areas. */
     vec3 wofs = wnor * (facing_ratio * curvature * flip);
-    wofs = normal_world_to_view(wofs);
+    wofs = drw_normal_world_to_view(wofs);
 
     /* Push vertex half a pixel (maximum) in normal direction. */
     gl_Position.xy += wofs.xy * sizeViewportInv * gl_Position.w;
@@ -136,6 +131,11 @@ void main()
     /* Push the vertex towards the camera. Helps a bit. */
     gl_Position.z -= facing_ratio * curvature * 1.0e-6 * gl_Position.w;
   }
+#endif
+
+  /* Curves do not need the offset since they *are* the curve geometry. */
+#if !defined(CURVES)
+  gl_Position.z -= ndc_offset_factor * 0.5;
 #endif
 
   vec3 rim_col, wire_col;
@@ -152,12 +152,10 @@ void main()
 
 #else
   /* Convert to screen position [0..sizeVp]. */
-  edgeStart = ((gl_Position.xy / gl_Position.w) * 0.5 + 0.5) * sizeViewport.xy;
+  edgeStart = ((gl_Position.xy / gl_Position.w) * 0.5 + 0.5) * sizeViewport;
   edgePos = edgeStart;
 
-#  if defined(CURVES)
-  finalColor.rgb = rim_col;
-#  elif !defined(SELECT_EDGES)
+#  if !defined(SELECT_ENABLE)
   facing = clamp(abs(facing), 0.0, 1.0);
   /* Do interpolation in a non-linear space to have a better visual result. */
   rim_col = pow(rim_col, vec3(1.0 / 2.2));
@@ -177,7 +175,7 @@ void main()
   }
 #  endif
 
-#  ifdef SELECT_EDGES
+#  if defined(SELECT_ENABLE)
   /* HACK: to avoid losing sub-pixel object in selections, we add a bit of randomness to the
    * wire to at least create one fragment that will pass the occlusion query. */
   gl_Position.xy += sizeViewportInv * gl_Position.w * ((gl_VertexID % 2 == 0) ? -1.0 : 1.0);

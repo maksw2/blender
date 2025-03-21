@@ -7,17 +7,11 @@
  */
 
 #include <cerrno>
-#include <cstdio>
 #include <cstdlib>
 
 #include "DNA_ID.h"
-#include "DNA_modifier_types.h"
-#include "DNA_object_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_utildefines.h"
-
-#include "RNA_access.hh"
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
@@ -43,8 +37,9 @@
 #  include "BKE_light.h"
 #  include "BKE_lightprobe.h"
 #  include "BKE_linestyle.h"
+#  include "BKE_main_invariants.hh"
 #  include "BKE_mask.h"
-#  include "BKE_material.h"
+#  include "BKE_material.hh"
 #  include "BKE_mball.hh"
 #  include "BKE_mesh.hh"
 #  include "BKE_movieclip.h"
@@ -129,7 +124,7 @@ static void rna_Main_ID_remove(Main *bmain,
   }
   if (do_unlink) {
     BKE_id_delete(bmain, id);
-    RNA_POINTER_INVALIDATE(id_ptr);
+    id_ptr->invalidate();
     /* Force full redraw, mandatory to avoid crashes when running this from UI... */
     WM_main_add_notifier(NC_WINDOW, nullptr);
   }
@@ -138,7 +133,7 @@ static void rna_Main_ID_remove(Main *bmain,
                      (do_ui_user ? 0 : LIB_ID_FREE_NO_UI_USER);
     /* Still using ID flags here, this is in-between commit anyway... */
     BKE_id_free_ex(bmain, id, flag, true);
-    RNA_POINTER_INVALIDATE(id_ptr);
+    id_ptr->invalidate();
   }
   else {
     BKE_reportf(
@@ -242,7 +237,7 @@ static Object *rna_Main_objects_new(Main *bmain, ReportList *reports, const char
   ob = BKE_object_add_only_object(bmain, type, safe_name);
 
   ob->data = data;
-  BKE_object_materials_test(bmain, ob, static_cast<ID *>(ob->data));
+  BKE_object_materials_sync_length(bmain, ob, static_cast<ID *>(ob->data));
 
   WM_main_add_notifier(NC_ID | NA_ADDED, nullptr);
 
@@ -274,7 +269,8 @@ static void rna_Main_materials_gpencil_remove(Main * /*bmain*/, PointerRNA *id_p
   ID *id = static_cast<ID *>(id_ptr->data);
   Material *ma = (Material *)id;
   if (ma->gp_style) {
-    MEM_SAFE_FREE(ma->gp_style);
+    MEM_freeN(ma->gp_style);
+    ma->gp_style = nullptr;
   }
 }
 
@@ -293,7 +289,7 @@ static bNodeTree *rna_Main_nodetree_new(Main *bmain, const char *name, int type)
   blender::bke::bNodeTreeType *typeinfo = rna_node_tree_type_from_enum(type);
   if (typeinfo) {
     bNodeTree *ntree = blender::bke::node_tree_add_tree(bmain, safe_name, typeinfo->idname);
-    ED_node_tree_propagate_change(nullptr, bmain, ntree);
+    BKE_main_ensure_invariants(*bmain);
 
     id_us_min(&ntree->id);
     return ntree;

@@ -22,7 +22,7 @@
 #include "mathutils.hh"
 #include "mathutils_kdtree.hh" /* own include */
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 struct PyKDTree {
   PyObject_HEAD
@@ -293,7 +293,7 @@ static PyObject *py_kdtree_find_n(PyKDTree *self, PyObject *args, PyObject *kwar
     return nullptr;
   }
 
-  nearest = static_cast<KDTreeNearest_3d *>(MEM_mallocN(sizeof(KDTreeNearest_3d) * n, __func__));
+  nearest = MEM_malloc_arrayN<KDTreeNearest_3d>(n, __func__);
 
   found = BLI_kdtree_3d_find_nearest_n(self->obj, co, nearest, n);
 

@@ -4,6 +4,7 @@
 
 #include "BKE_bake_geometry_nodes_modifier.hh"
 #include "BKE_bake_geometry_nodes_modifier_pack.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_packedFile.hh"
 #include "BKE_report.hh"
@@ -59,14 +60,14 @@ NodesModifierPackedBake *pack_bake_from_disk(const BakePath &bake_path, ReportLi
   const Vector<NodesModifierBakeFile> blob_bake_files = pack_files_from_directory(
       bake_path.blobs_dir, reports);
 
-  NodesModifierPackedBake *packed_bake = MEM_cnew<NodesModifierPackedBake>(__func__);
+  NodesModifierPackedBake *packed_bake = MEM_callocN<NodesModifierPackedBake>(__func__);
   packed_bake->meta_files_num = meta_bake_files.size();
   packed_bake->blob_files_num = blob_bake_files.size();
 
-  packed_bake->meta_files = MEM_cnew_array<NodesModifierBakeFile>(packed_bake->meta_files_num,
-                                                                  __func__);
-  packed_bake->blob_files = MEM_cnew_array<NodesModifierBakeFile>(packed_bake->blob_files_num,
-                                                                  __func__);
+  packed_bake->meta_files = MEM_calloc_arrayN<NodesModifierBakeFile>(packed_bake->meta_files_num,
+                                                                     __func__);
+  packed_bake->blob_files = MEM_calloc_arrayN<NodesModifierBakeFile>(packed_bake->blob_files_num,
+                                                                     __func__);
 
   uninitialized_copy_n(meta_bake_files.data(), meta_bake_files.size(), packed_bake->meta_files);
   uninitialized_copy_n(blob_bake_files.data(), blob_bake_files.size(), packed_bake->blob_files);
@@ -85,7 +86,7 @@ bool unpack_bake_to_disk(const NodesModifierPackedBake &packed_bake,
       BKE_reportf(reports, RPT_ERROR, "Cannot ensure directory: %s", directory.c_str());
       return false;
     }
-    fstream fs(file_path, std::ios::out);
+    fstream fs(file_path, std::ios::out | std::ios::binary);
     fs.write(static_cast<const char *>(bake_file.packed_file->data), bake_file.packed_file->size);
     if (fs.bad()) {
       BKE_reportf(reports, RPT_ERROR, "Cannot write file: %s", file_path);

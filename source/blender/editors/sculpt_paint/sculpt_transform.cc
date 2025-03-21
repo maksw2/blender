@@ -17,6 +17,7 @@
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
 
+#include "BKE_attribute.hh"
 #include "BKE_brush.hh"
 #include "BKE_context.hh"
 #include "BKE_kelvinlet.h"
@@ -301,7 +302,7 @@ static void sculpt_transform_all_vertices(const Depsgraph &depsgraph, const Scul
   switch (pbvh.type()) {
     case bke::pbvh::Type::Mesh: {
       Mesh &mesh = *static_cast<Mesh *>(ob.data);
-      const MeshAttributeData attribute_data(mesh.attributes());
+      const MeshAttributeData attribute_data(mesh);
       MutableSpan<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
       const PositionDeformData position_data(depsgraph, ob);
       node_mask.foreach_index(GrainSize(1), [&](const int i) {
@@ -333,7 +334,7 @@ static void sculpt_transform_all_vertices(const Depsgraph &depsgraph, const Scul
     }
   }
   pbvh.tag_positions_changed(node_mask);
-  bke::pbvh::flush_bounds_to_parents(pbvh);
+  pbvh.flush_bounds_to_parents();
 }
 
 BLI_NOINLINE static void calc_transform_translations(const float4x4 &elastic_transform_mat,
@@ -490,7 +491,7 @@ static void transform_radius_elastic(const Depsgraph &depsgraph,
         Mesh &mesh = *static_cast<Mesh *>(ob.data);
         MutableSpan<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
         const PositionDeformData position_data(depsgraph, ob);
-        const MeshAttributeData attribute_data(mesh.attributes());
+        const MeshAttributeData attribute_data(mesh);
         node_mask.foreach_index(GrainSize(1), [&](const int i) {
           TransformLocalData &tls = all_tls.local();
           elastic_transform_node_mesh(sd,
@@ -531,7 +532,7 @@ static void transform_radius_elastic(const Depsgraph &depsgraph,
     }
   }
   pbvh.tag_positions_changed(node_mask);
-  bke::pbvh::flush_bounds_to_parents(pbvh);
+  pbvh.flush_bounds_to_parents();
 }
 
 void update_modal_transform(bContext *C, Object &ob)
@@ -573,6 +574,16 @@ void update_modal_transform(bContext *C, Object &ob)
   copy_v3_v3(ss.prev_pivot_scale, ss.pivot_scale);
 
   flush_update_step(C, UpdateType::Position);
+}
+
+void cancel_modal_transform(bContext *C, Object &ob)
+{
+  /* Canceling "Elastic" transforms (due to its #TransformDisplacementMode::Incremental nature),
+   * requires restoring positions from undo. For "All Vertices" there is no benefit in using the
+   * transform system to update to original positions either. */
+  Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
+
+  undo::restore_position_from_undo_step(*depsgraph, ob);
 }
 
 void end_transform(bContext *C, Object &ob)
@@ -677,7 +688,7 @@ static float3 average_unmasked_position(const Depsgraph &depsgraph,
     case bke::pbvh::Type::Mesh: {
       const Span<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
       const Mesh &mesh = *static_cast<const Mesh *>(object.data);
-      const MeshAttributeData attribute_data(mesh.attributes());
+      const MeshAttributeData attribute_data(mesh);
       const Span<float3> vert_positions = bke::pbvh::vert_positions_eval(depsgraph, object);
       const AveragePositionAccumulation total = threading::parallel_reduce(
           node_mask.index_range(),
@@ -896,7 +907,7 @@ static float3 average_mask_border_position(const Depsgraph &depsgraph,
   return float3(0);
 }
 
-static int set_pivot_position_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus set_pivot_position_exec(bContext *C, wmOperator *op)
 {
   Object &ob = *CTX_data_active_object(C);
   SculptSession &ss = *ob.sculpt;
@@ -952,7 +963,9 @@ static int set_pivot_position_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int set_pivot_position_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus set_pivot_position_invoke(bContext *C,
+                                                  wmOperator *op,
+                                                  const wmEvent *event)
 {
   RNA_float_set(op->ptr, "mouse_x", event->mval[0]);
   RNA_float_set(op->ptr, "mouse_y", event->mval[1]);

@@ -12,12 +12,11 @@
 #include "BKE_context.hh"
 #include "BKE_main.hh"
 #include "BLI_fileops.h"
+#include "BLI_listbase.h"
 #include "BLI_path_utils.hh"
 #include "BLO_readfile.hh"
 
 #include "DEG_depsgraph.hh"
-
-#include "WM_api.hh"
 
 #include "usd.hh"
 
@@ -48,7 +47,7 @@ class UsdUsdzExportTest : public BlendfileLoadingBaseTest {
     return true;
   }
 
-  virtual void SetUp() override
+  void SetUp() override
   {
     BlendfileLoadingBaseTest::SetUp();
 
@@ -64,7 +63,7 @@ class UsdUsdzExportTest : public BlendfileLoadingBaseTest {
     BLI_path_join(output_filepath, FILE_MAX, temp_output_dir, "output_новый.usdz");
   }
 
-  virtual void TearDown() override
+  void TearDown() override
   {
     BlendfileLoadingBaseTest::TearDown();
     CTX_free(context);

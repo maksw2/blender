@@ -1369,8 +1369,7 @@ static void move_adjacent_handle(const ViewContext *vc, const wmEvent *event, Li
     }
     adj_bezt->h1 = adj_bezt->h2 = HD_FREE;
 
-    int displacement[2];
-    sub_v2_v2v2_int(displacement, event->xy, event->prev_xy);
+    blender::int2 displacement = blender::int2(event->xy) - blender::int2(event->prev_xy);
     const float disp_fl[2] = {float(displacement[0]), float(displacement[1])};
     move_bezt_handle_or_vertex_by_displacement(
         vc, adj_bezt, bezt_idx, disp_fl, 0.0f, false, false);
@@ -1554,7 +1553,7 @@ wmKeyMap *curve_pen_modal_keymap(wmKeyConfig *keyconf)
   return keymap;
 }
 
-static int curve_pen_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus curve_pen_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   Object *obedit = CTX_data_edit_object(C);
@@ -1572,7 +1571,7 @@ static int curve_pen_modal(bContext *C, wmOperator *op, const wmEvent *event)
   params.sel_op = SEL_OP_SET;
   params.deselect_all = false;
 
-  int ret = OPERATOR_RUNNING_MODAL;
+  wmOperatorStatus ret = OPERATOR_RUNNING_MODAL;
 
   /* Distance threshold for mouse clicks to affect the spline or its points */
   const float mval_fl[2] = {float(event->mval[0]), float(event->mval[1])};
@@ -1744,7 +1743,7 @@ static int curve_pen_modal(bContext *C, wmOperator *op, const wmEvent *event)
   return ret;
 }
 
-static int curve_pen_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus curve_pen_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   ViewContext vc = ED_view3d_viewcontext_init(C, depsgraph);

@@ -6,7 +6,6 @@
  * \ingroup RNA
  */
 
-#include <cstdio>
 #include <cstdlib>
 
 #include "RNA_define.hh"
@@ -14,8 +13,6 @@
 #include "DNA_customdata_types.h"
 
 #include "BLI_math_base.h"
-#include "BLI_sys_types.h"
-#include "BLI_utildefines.h"
 
 #include "rna_internal.hh" /* own include */
 
@@ -79,7 +76,7 @@ static void rna_Mesh_calc_tangents(Mesh *mesh, ReportList *reports, const char *
 
 static void rna_Mesh_free_tangents(Mesh *mesh)
 {
-  CustomData_free_layers(&mesh->corner_data, CD_MLOOPTANGENT, mesh->corners_num);
+  CustomData_free_layers(&mesh->corner_data, CD_MLOOPTANGENT);
 }
 
 static void rna_Mesh_calc_corner_tri(Mesh *mesh)
@@ -87,21 +84,37 @@ static void rna_Mesh_calc_corner_tri(Mesh *mesh)
   mesh->corner_tris();
 }
 
-static void rna_Mesh_calc_smooth_groups(
-    Mesh *mesh, bool use_bitflags, int **r_poly_group, int *r_poly_group_num, int *r_group_total)
+static void rna_Mesh_calc_smooth_groups(Mesh *mesh,
+                                        bool use_bitflags,
+                                        bool use_boundary_vertices_for_bitflags,
+                                        int **r_poly_group,
+                                        int *r_poly_group_num,
+                                        int *r_group_total)
 {
   using namespace blender;
   *r_poly_group_num = mesh->faces_num;
   const bke::AttributeAccessor attributes = mesh->attributes();
   const VArraySpan sharp_edges = *attributes.lookup<bool>("sharp_edge", bke::AttrDomain::Edge);
   const VArraySpan sharp_faces = *attributes.lookup<bool>("sharp_face", bke::AttrDomain::Face);
-  *r_poly_group = BKE_mesh_calc_smoothgroups(mesh->edges_num,
-                                             mesh->faces(),
-                                             mesh->corner_edges(),
-                                             sharp_edges,
-                                             sharp_faces,
-                                             r_group_total,
-                                             use_bitflags);
+  if (use_bitflags) {
+    *r_poly_group = BKE_mesh_calc_smoothgroups_bitflags(mesh->edges_num,
+                                                        mesh->verts_num,
+                                                        mesh->faces(),
+                                                        mesh->corner_edges(),
+                                                        mesh->corner_verts(),
+                                                        sharp_edges,
+                                                        sharp_faces,
+                                                        use_boundary_vertices_for_bitflags,
+                                                        r_group_total);
+  }
+  else {
+    *r_poly_group = BKE_mesh_calc_smoothgroups(mesh->edges_num,
+                                               mesh->faces(),
+                                               mesh->corner_edges(),
+                                               sharp_edges,
+                                               sharp_faces,
+                                               r_group_total);
+  }
 }
 
 static void rna_Mesh_normals_split_custom_set(Mesh *mesh,
@@ -109,7 +122,8 @@ static void rna_Mesh_normals_split_custom_set(Mesh *mesh,
                                               const float *normals,
                                               int normals_num)
 {
-  float(*corner_normals)[3] = (float(*)[3])normals;
+  using namespace blender;
+  float3 *corner_normals = (float3 *)normals;
   const int numloops = mesh->corners_num;
   if (normals_num != numloops * 3) {
     BKE_reportf(reports,
@@ -120,7 +134,7 @@ static void rna_Mesh_normals_split_custom_set(Mesh *mesh,
     return;
   }
 
-  BKE_mesh_set_custom_normals(mesh, corner_normals);
+  bke::mesh_set_custom_normals(*mesh, {corner_normals, numloops});
 
   DEG_id_tag_update(&mesh->id, 0);
 }
@@ -130,7 +144,8 @@ static void rna_Mesh_normals_split_custom_set_from_vertices(Mesh *mesh,
                                                             const float *normals,
                                                             int normals_num)
 {
-  float(*vert_normals)[3] = (float(*)[3])normals;
+  using namespace blender;
+  float3 *vert_normals = (float3 *)normals;
   const int numverts = mesh->verts_num;
   if (normals_num != numverts * 3) {
     BKE_reportf(reports,
@@ -141,7 +156,7 @@ static void rna_Mesh_normals_split_custom_set_from_vertices(Mesh *mesh,
     return;
   }
 
-  BKE_mesh_set_custom_normals_from_verts(mesh, vert_normals);
+  bke::mesh_set_custom_normals_from_verts(*mesh, {vert_normals, numverts});
 
   DEG_id_tag_update(&mesh->id, 0);
 }
@@ -270,6 +285,15 @@ void RNA_api_mesh(StructRNA *srna)
   RNA_def_function_ui_description(func, "Calculate smooth groups from sharp edges");
   RNA_def_boolean(
       func, "use_bitflags", false, "", "Produce bitflags groups instead of simple numeric values");
+  RNA_def_boolean(
+      func,
+      "use_boundary_vertices_for_bitflags",
+      false,
+      "",
+      "Also consider different smoothgroups sharing only vertices (but without any common edge) "
+      "as neighbors, preventing them from sharing the same bitflag value. Only effective when "
+      "`use_bitflags` is set. WARNING: Will overflow (run out of available bits) easily with some "
+      "types of topology, e.g. large fans of sharp edges");
   /* return values */
   parm = RNA_def_int_array(func, "poly_groups", 1, nullptr, 0, 0, "", "Smooth Groups", 0, 0);
   RNA_def_parameter_flags(parm, PROP_DYNAMIC, PARM_OUTPUT);

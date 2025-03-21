@@ -17,6 +17,7 @@
 
 #include "BLI_listbase.h"
 #include "BLI_math_color.h"
+#include "BLI_math_vector.h"
 #include "BLI_rect.h"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
@@ -41,7 +42,6 @@
 #include "GPU_immediate.hh"
 #include "GPU_immediate_util.hh"
 #include "GPU_matrix.hh"
-#include "GPU_platform.hh"
 #include "GPU_state.hh"
 
 #ifdef WITH_INPUT_IME
@@ -158,8 +158,8 @@ static void color_blend_v4_v4v4(uchar r_col[4],
 static void color_ensure_contrast_v3(uchar cp[3], const uchar cp_other[3], int contrast)
 {
   BLI_assert(contrast > 0);
-  const int item_value = rgb_to_grayscale_byte(cp);
-  const int inner_value = rgb_to_grayscale_byte(cp_other);
+  const int item_value = srgb_to_grayscale_byte(cp);
+  const int inner_value = srgb_to_grayscale_byte(cp_other);
   const int delta = item_value - inner_value;
   if (delta >= 0) {
     if (contrast > delta) {
@@ -1226,24 +1226,6 @@ static float widget_alpha_factor(const uiWidgetStateInfo *state)
   return 1.0f;
 }
 
-static void widget_draw_preview(BIFIconID icon, float alpha, const rcti *rect)
-{
-  if (icon == ICON_NONE) {
-    return;
-  }
-
-  const int w = BLI_rcti_size_x(rect);
-  const int h = BLI_rcti_size_y(rect);
-  const int size = std::min(w, h) - PREVIEW_PAD * 2;
-
-  if (size > 0) {
-    const int x = rect->xmin + w / 2 - size / 2;
-    const int y = rect->ymin + h / 2 - size / 2;
-
-    UI_icon_draw_preview(x, y, icon, 1.0f, alpha, size);
-  }
-}
-
 static void widget_draw_icon_centered(const BIFIconID icon,
                                       const float aspect,
                                       const float alpha,
@@ -1271,6 +1253,39 @@ static void widget_draw_icon_centered(const BIFIconID icon,
   }
 }
 
+/**
+ * \param aspect: The inverse zoom factor (typically #uiBlock.aspect), with DPI applied (i.e. not
+ * multiplied by #UI_INV_SCALE_FAC).
+ * \param mono_color: Only for drawing monochrome icons.
+ */
+static void widget_draw_preview_icon(BIFIconID icon,
+                                     float alpha,
+                                     float aspect,
+                                     const bool add_padding,
+                                     const rcti *rect,
+                                     const uchar mono_color[4])
+{
+  if (icon == ICON_NONE) {
+    return;
+  }
+
+  if (icon < BIFICONID_LAST_STATIC) {
+    widget_draw_icon_centered(icon, aspect, alpha, rect, mono_color);
+    return;
+  }
+
+  const int w = BLI_rcti_size_x(rect);
+  const int h = BLI_rcti_size_y(rect);
+  const int size = std::min(w, h) - (add_padding ? (PREVIEW_PAD * 2) : 0);
+
+  if (size > 0) {
+    const int x = rect->xmin + w / 2 - size / 2;
+    const int y = rect->ymin + h / 2 - size / 2;
+
+    UI_icon_draw_preview(x, y, icon, 1.0f, alpha, size);
+  }
+}
+
 static int ui_but_draw_menu_icon(const uiBut *but)
 {
   return (but->flag & UI_BUT_ICON_SUBMENU) && (but->emboss == UI_EMBOSS_PULLDOWN);
@@ -1283,7 +1298,12 @@ static void widget_draw_icon(
 {
   if (but->flag & UI_BUT_ICON_PREVIEW) {
     GPU_blend(GPU_BLEND_ALPHA);
-    widget_draw_preview(icon, alpha, rect);
+    widget_draw_preview_icon(icon,
+                             alpha,
+                             but->block->aspect,
+                             !(but->drawflag & UI_BUT_NO_PREVIEW_PADDING),
+                             rect,
+                             mono_color);
     GPU_blend(GPU_BLEND_NONE);
     return;
   }
@@ -1354,7 +1374,8 @@ static void widget_draw_icon(
     /* Get theme color. */
     uchar color[4] = {mono_color[0], mono_color[1], mono_color[2], mono_color[3]};
     const bTheme *btheme = UI_GetTheme();
-    const bool has_theme = UI_icon_get_theme_color(int(icon), color);
+    /* Only use theme colors if the button doesn't override the color. */
+    const bool has_theme = !but->col[3] && UI_icon_get_theme_color(int(icon), color);
     const bool outline = btheme->tui.icon_border_intensity > 0.0f && has_theme;
 
     /* to indicate draggable */
@@ -1549,6 +1570,9 @@ float UI_text_clip_middle_ex(const uiFontStyle *fstyle,
         /* -1 to remove trailing '\0'! */
         final_lpart_len = size_t(l_end + sep_len + r_len - 1);
 
+/* Seems like this was only needed because of an error in #BLF_width_to_rstrlen(), not because of
+ * integer imprecision. See PR #135239. */
+#if 0
         while (BLF_width(fstyle->uifont_id, str, max_len) > okwidth) {
           /* This will happen because a lot of string width processing is done in integer pixels,
            * which can introduce a rather high error in the end (about 2 pixels or so).
@@ -1558,6 +1582,7 @@ float UI_text_clip_middle_ex(const uiFontStyle *fstyle,
           char *c = str + l_end + sep_len;
           memmove(c, c + 1, r_len);
         }
+#endif
       }
     }
 
@@ -1592,7 +1617,7 @@ static void ui_text_clip_middle(const uiFontStyle *fstyle, uiBut *but, const rct
                          0 :
                          int(UI_TEXT_CLIP_MARGIN + 0.5f);
   const float okwidth = float(max_ii(BLI_rcti_size_x(rect) - border, 0));
-  const float minwidth = float(UI_ICON_SIZE) / but->block->aspect * 2.0f;
+  const float minwidth = UI_ICON_SIZE / but->block->aspect * 2.0f;
 
   but->ofs = 0;
   char new_drawstr[UI_MAX_DRAW_STR];
@@ -1618,7 +1643,7 @@ static void ui_text_clip_middle_protect_right(const uiFontStyle *fstyle,
                          0 :
                          int(UI_TEXT_CLIP_MARGIN + 0.5f);
   const float okwidth = float(max_ii(BLI_rcti_size_x(rect) - border, 0));
-  const float minwidth = float(UI_ICON_SIZE) / but->block->aspect * 2.0f;
+  const float minwidth = UI_ICON_SIZE / but->block->aspect * 2.0f;
 
   but->ofs = 0;
   char new_drawstr[UI_MAX_DRAW_STR];
@@ -1642,9 +1667,7 @@ static void ui_text_clip_cursor(const uiFontStyle *fstyle, uiBut *but, const rct
   UI_fontstyle_set(fstyle);
 
   /* define ofs dynamically */
-  if (but->ofs > but->pos) {
-    but->ofs = but->pos;
-  }
+  but->ofs = std::min(but->ofs, but->pos);
 
   if (BLF_width(fstyle->uifont_id, but->editstr, INT_MAX) <= okwidth) {
     but->ofs = 0;
@@ -2254,6 +2277,8 @@ static void widget_draw_text_icon(const uiFontStyle *fstyle,
     widget_draw_node_link_socket(wcol, &temp, but, alpha);
   }
 
+  const uchar *icon_color = (but->col[3] != 0) ? but->col : wcol->text;
+
   /* If there's an icon too (made with uiDefIconTextBut) then draw the icon
    * and offset the text label to accommodate it */
 
@@ -2273,7 +2298,12 @@ static void widget_draw_text_icon(const uiFontStyle *fstyle,
     /* draw icon in rect above the space reserved for the label */
     rect->ymin += text_size;
     GPU_blend(GPU_BLEND_ALPHA);
-    widget_draw_preview(icon, alpha, rect);
+    widget_draw_preview_icon(icon,
+                             alpha,
+                             but->block->aspect,
+                             !(but->drawflag & UI_BUT_NO_PREVIEW_PADDING),
+                             rect,
+                             icon_color);
     GPU_blend(GPU_BLEND_NONE);
 
     /* offset rect to draw label in */
@@ -2325,7 +2355,7 @@ static void widget_draw_text_icon(const uiFontStyle *fstyle,
     }
 
     /* By default icon is the color of text, but can optionally override with but->col. */
-    widget_draw_icon(but, icon, alpha, rect, (but->col[3] != 0) ? but->col : wcol->text);
+    widget_draw_icon(but, icon, alpha, rect, icon_color);
 
     if (show_menu_icon) {
       BLI_assert(but->block->content_hints & UI_BLOCK_CONTAINS_SUBMENU_BUT);
@@ -2440,7 +2470,7 @@ static void ui_widget_color_disabled(uiWidgetType *wt, const uiWidgetStateInfo *
 
 static void widget_active_color(uiWidgetColors *wcol)
 {
-  const bool dark = (rgb_to_grayscale_byte(wcol->text) > rgb_to_grayscale_byte(wcol->inner));
+  const bool dark = (srgb_to_grayscale_byte(wcol->text) > srgb_to_grayscale_byte(wcol->inner));
   color_mul_hsl_v3(wcol->inner, 1.0f, 1.15f, dark ? 1.2f : 1.1f);
   color_mul_hsl_v3(wcol->outline, 1.0f, 1.15f, 1.15f);
   color_mul_hsl_v3(wcol->text, 1.0f, 1.15f, dark ? 1.25f : 0.8f);
@@ -2521,12 +2551,14 @@ static void widget_state(uiWidgetType *wt, const uiWidgetStateInfo *state, eUIEm
   }
 
   if (state->but_flag & UI_BUT_REDALERT) {
-    const uchar red[4] = {255, 0, 0};
     if (wt->draw && emboss != UI_EMBOSS_NONE) {
-      color_blend_v3_v3(wt->wcol.inner, red, 0.4f);
+      UI_GetThemeColor3ubv(TH_REDALERT, wt->wcol.inner);
     }
     else {
-      color_blend_v3_v3(wt->wcol.text, red, 0.4f);
+      uchar red[4];
+      UI_GetThemeColor3ubv(TH_REDALERT, red);
+      color_mul_hsl_v3(red, 1.0f, 1.5f, 1.5f);
+      color_blend_v3_v3(wt->wcol.text, red, 0.5f);
     }
   }
 
@@ -2578,10 +2610,10 @@ static bool draw_emboss(const uiBut *but)
   if (but->drawflag & UI_BUT_ALIGN_DOWN) {
     return false;
   }
-
+  uiBut *but_next = but->block->next_but(but);
   if (but->type == UI_BTYPE_TAB &&
       (BLI_rctf_size_y(&but->block->rect) > BLI_rctf_size_x(&but->block->rect)) &&
-      !(but->next == nullptr || but->next->type == UI_BTYPE_SEPR))
+      !(but_next == nullptr || but_next->type == UI_BTYPE_SEPR))
   {
     /* Vertical tabs, emboss at end and before separators. */
     return false;
@@ -2611,7 +2643,7 @@ static void widget_state_numslider(uiWidgetType *wt,
     /* Set the slider 'item' so that it reflects state settings too.
      * De-saturate so the color of the slider doesn't conflict with the blend color,
      * which can make the color hard to see when the slider is set to full (see #66102). */
-    wt->wcol.item[0] = wt->wcol.item[1] = wt->wcol.item[2] = rgb_to_grayscale_byte(wt->wcol.item);
+    wt->wcol.item[0] = wt->wcol.item[1] = wt->wcol.item[2] = srgb_to_grayscale_byte(wt->wcol.item);
     color_blend_v3_v3(wt->wcol.item, color_blend, wcol_state->blend);
     color_ensure_contrast_v3(wt->wcol.item, wt->wcol.inner, 30);
   }
@@ -2733,6 +2765,12 @@ static void widget_state_menu_item(uiWidgetType *wt,
     copy_v3_v3_uchar(wt->wcol.text, wt->wcol.text_sel);
     wt->wcol.inner[3] = 255;
     wt->wcol.text[3] = 255;
+  }
+  /* Subtle background for larger preview buttons, so text and icons feel connected (esp. for while
+   * previews are loading still and a loading icon is displayed). */
+  else if (state->but_flag & UI_BUT_ICON_PREVIEW) {
+    copy_v3_v3_uchar(wt->wcol.inner, wt->wcol.text);
+    wt->wcol.inner[3] = 11;
   }
 }
 
@@ -3940,7 +3978,7 @@ static void widget_swatch(uiBut *but,
   if (but->rnaprop) {
     BLI_assert(but->rnaindex == -1);
 
-    if (RNA_property_array_length(&but->rnapoin, but->rnaprop) == 4) {
+    if (RNA_property_array_length(&but->rnapoin, but->rnaprop) >= 4) {
       col[3] = RNA_property_float_get_index(&but->rnapoin, but->rnaprop, 3);
     }
   }
@@ -3995,7 +4033,7 @@ static void widget_swatch(uiBut *but,
     const float width = rect->xmax - rect->xmin;
     const float height = rect->ymax - rect->ymin;
     /* find color luminance and change it slightly */
-    float bw = rgb_to_grayscale(col);
+    float bw = srgb_to_grayscale(col);
 
     bw += (bw < 0.5f) ? 0.5f : -0.5f;
 
@@ -4111,7 +4149,6 @@ static void widget_pulldownbut(uiWidgetColors *wcol,
     if (state->but_flag & UI_HOVER) {
       copy_v4_v4_uchar(wcol->inner, wcol->inner_sel);
       copy_v3_v3_uchar(wcol->text, wcol->text_sel);
-      copy_v3_v3_uchar(wcol->outline, wcol->inner);
     }
     else {
       wcol->inner[3] *= 1.0f - back[3];
@@ -4245,17 +4282,14 @@ static void widget_preview_tile(uiBut *but,
     widget_list_itembut(but, wcol, rect, state, roundboxalign, zoom);
   }
 
-  /* When the button is not tagged as having a preview icon, do regular icon drawing with the
-   * standard icon size. */
-  const bool draw_as_icon = !(but->flag & UI_BUT_ICON_PREVIEW);
-
+  const BIFIconID icon = ui_but_icon(but);
   ui_draw_preview_item_stateless(&UI_style_get()->widget,
                                  rect,
                                  but->drawstr,
-                                 but->icon,
+                                 icon,
                                  wcol->text,
                                  UI_STYLE_TEXT_CENTER,
-                                 draw_as_icon);
+                                 !(but->drawflag & UI_BUT_NO_PREVIEW_PADDING));
 }
 
 static void widget_optionbut(uiWidgetColors *wcol,
@@ -4339,8 +4373,10 @@ static void widget_state_label(uiWidgetType *wt,
   }
 
   if (state->but_flag & UI_BUT_REDALERT) {
-    const uchar red[4] = {255, 0, 0};
-    color_blend_v3_v3(wt->wcol.text, red, 0.4f);
+    uchar red[4];
+    UI_GetThemeColor3ubv(TH_REDALERT, red);
+    color_mul_hsl_v3(red, 1.0f, 1.5f, 1.5f);
+    color_blend_v3_v3(wt->wcol.text, red, 0.5f);
   }
 }
 
@@ -4386,6 +4422,11 @@ static void widget_box(uiBut *but,
   widgetbase_draw(&wtb, wcol);
 
   copy_v3_v3_uchar(wcol->inner, old_col);
+
+  /* Flush the cache so that we don't draw over contents. #125035 */
+  GPU_blend(GPU_BLEND_ALPHA);
+  UI_widgetbase_draw_cache_flush();
+  GPU_blend(GPU_BLEND_NONE);
 }
 
 static void widget_but(uiWidgetColors *wcol,
@@ -5565,7 +5606,7 @@ void ui_draw_menu_item(const uiFontStyle *fstyle,
     char drawstr[UI_MAX_DRAW_STR];
     const float okwidth = float(BLI_rcti_size_x(rect));
     const size_t max_len = sizeof(drawstr);
-    const float minwidth = float(UI_ICON_SIZE);
+    const float minwidth = UI_ICON_SIZE;
 
     STRNCPY(drawstr, name);
     if (drawstr[0]) {
@@ -5614,7 +5655,7 @@ void ui_draw_menu_item(const uiFontStyle *fstyle,
       char hint_drawstr[UI_MAX_DRAW_STR];
       {
         const size_t max_len = sizeof(hint_drawstr);
-        const float minwidth = float(UI_ICON_SIZE);
+        const float minwidth = UI_ICON_SIZE;
 
         STRNCPY(hint_drawstr, cpoin + 1);
         if (hint_drawstr[0] && (max_hint_width < INT_MAX)) {
@@ -5637,7 +5678,7 @@ void ui_draw_preview_item_stateless(const uiFontStyle *fstyle,
                                     int iconid,
                                     const uchar text_col[4],
                                     eFontStyle_Align text_align,
-                                    bool draw_as_icon)
+                                    const bool add_padding)
 {
   rcti trect = *rect;
   const float text_size = UI_UNIT_Y;
@@ -5645,27 +5686,12 @@ void ui_draw_preview_item_stateless(const uiFontStyle *fstyle,
 
   float alpha = 1.0f;
 
-  {
-    /* Special handling: Previews often want to show a loading icon while the preview is being
-     * loaded. Draw this with reduced opacity. */
-    const bool is_loading_icon = iconid == ICON_TEMP;
-    if (is_loading_icon) {
-      alpha *= 0.5f;
-      draw_as_icon = true;
-    }
-  }
-
   if (has_text) {
     /* draw icon in rect above the space reserved for the label */
     rect->ymin += text_size;
   }
   GPU_blend(GPU_BLEND_ALPHA);
-  if (draw_as_icon) {
-    widget_draw_icon_centered(iconid, 1.0f, alpha, rect, text_col);
-  }
-  else {
-    widget_draw_preview(iconid, alpha, rect);
-  }
+  widget_draw_preview_icon(iconid, alpha, 1.0f, add_padding, rect, text_col);
   GPU_blend(GPU_BLEND_NONE);
 
   if (!has_text) {
@@ -5674,15 +5700,17 @@ void ui_draw_preview_item_stateless(const uiFontStyle *fstyle,
 
   /* text rect */
   trect.ymax = trect.ymin + text_size;
-  trect.ymin += PREVIEW_PAD;
-  trect.xmin += PREVIEW_PAD;
-  trect.xmax -= PREVIEW_PAD;
+  if (add_padding) {
+    trect.ymin += PREVIEW_PAD;
+    trect.xmin += PREVIEW_PAD;
+    trect.xmax -= PREVIEW_PAD;
+  }
 
   {
     char drawstr[UI_MAX_DRAW_STR];
     const float okwidth = float(BLI_rcti_size_x(&trect));
     const size_t max_len = sizeof(drawstr);
-    const float minwidth = float(UI_ICON_SIZE);
+    const float minwidth = UI_ICON_SIZE;
 
     memcpy(drawstr, name.data(), name.size());
     drawstr[name.size()] = '\0';
@@ -5710,7 +5738,7 @@ void ui_draw_preview_item(const uiFontStyle *fstyle,
   wt->state(wt, &state, UI_EMBOSS_UNDEFINED);
   wt->draw(&wt->wcol, rect, &STATE_INFO_NULL, 0, 1.0f);
 
-  ui_draw_preview_item_stateless(fstyle, rect, name, iconid, wt->wcol.text, text_align);
+  ui_draw_preview_item_stateless(fstyle, rect, name, iconid, wt->wcol.text, text_align, true);
 }
 
 /** \} */

@@ -6,27 +6,21 @@
  * \ingroup RNA
  */
 
-#include <climits>
 #include <cstdlib>
-
-#include "MEM_guardedalloc.h"
 
 #include "DNA_movieclip_types.h"
 #include "DNA_scene_types.h"
 
-#include "RNA_access.hh"
 #include "RNA_define.hh"
 
 #include "rna_internal.hh"
 
 #include "BKE_movieclip.h"
-#include "BKE_tracking.h"
 
 #include "WM_types.hh"
 
-#include "IMB_imbuf.hh"
-#include "IMB_imbuf_types.hh"
-#include "IMB_metadata.hh"
+#include "MOV_enums.hh"
+#include "MOV_read.hh"
 
 #ifdef RNA_RUNTIME
 
@@ -36,6 +30,8 @@
 
 #  include "DNA_screen_types.h"
 #  include "DNA_space_types.h"
+
+#  include "BKE_scene.hh"
 
 #  include "SEQ_relations.hh"
 
@@ -64,7 +60,7 @@ static void rna_MovieClip_use_proxy_update(Main *bmain, Scene * /*scene*/, Point
 {
   MovieClip *clip = (MovieClip *)ptr->owner_id;
   BKE_movieclip_clear_cache(clip);
-  SEQ_relations_invalidate_movieclip_strips(bmain, clip);
+  blender::seq::relations_invalidate_movieclip_strips(bmain, clip);
 }
 
 static void rna_MovieClipUser_proxy_render_settings_update(Main *bmain,
@@ -93,7 +89,7 @@ static void rna_MovieClipUser_proxy_render_settings_update(Main *bmain,
 
             if (clip && (clip->flag & MCLIP_USE_PROXY)) {
               BKE_movieclip_clear_cache(clip);
-              SEQ_relations_invalidate_movieclip_strips(bmain, clip);
+              blender::seq::relations_invalidate_movieclip_strips(bmain, clip);
             }
 
             break;
@@ -110,12 +106,12 @@ static PointerRNA rna_MovieClip_metadata_get(MovieClip *clip)
     return PointerRNA_NULL;
   }
 
-  IDProperty *metadata = IMB_anim_load_metadata(clip->anim);
+  IDProperty *metadata = MOV_load_metadata(clip->anim);
   if (metadata == nullptr) {
     return PointerRNA_NULL;
   }
 
-  PointerRNA ptr = RNA_pointer_create(nullptr, &RNA_IDPropertyWrapPtr, metadata);
+  PointerRNA ptr = RNA_pointer_create_discrete(nullptr, &RNA_IDPropertyWrapPtr, metadata);
   return ptr;
 }
 

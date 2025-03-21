@@ -7,7 +7,6 @@
  */
 
 #include <cstring>
-#include <limits>
 
 #include "BLI_math_vector.hh"
 #include "BLI_string.h"
@@ -209,16 +208,18 @@ static void modify_geometry_set(ModifierData *md,
           pointcloud->bounds_min_max(), pointcloud->mat, pointcloud->totcol);
     }
 
-    *geometry_set = bke::GeometrySet::from_mesh(bbox, bke::GeometryOwnershipType::Editable);
+    *geometry_set = bke::GeometrySet::from_mesh(bbox);
     return;
   }
 
   /* Time (in frames or seconds) between two velocity samples. Automatically computed to
    * scale the velocity vectors at render time for generating proper motion blur data. */
+#  ifdef WITH_ALEMBIC
   float velocity_scale = mcmd->velocity_scale;
   if (mcmd->cache_file->velocity_unit == CACHEFILE_VELOCITY_UNIT_FRAME) {
     velocity_scale *= FPS;
   }
+#  endif
 
   switch (cache_file->type) {
     case CACHEFILE_TYPE_ALEMBIC: {
@@ -380,12 +381,12 @@ static void panel_draw(const bContext *C, Panel *panel)
 
   if (has_cache_file) {
     uiItemPointerR(
-        layout, ptr, "object_path", &cache_file_ptr, "object_paths", nullptr, ICON_NONE);
+        layout, ptr, "object_path", &cache_file_ptr, "object_paths", std::nullopt, ICON_NONE);
   }
 
   if (RNA_enum_get(&ob_ptr, "type") == OB_MESH) {
-    uiItemR(layout, ptr, "read_data", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
-    uiItemR(layout, ptr, "use_vertex_interpolation", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, ptr, "read_data", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
+    uiItemR(layout, ptr, "use_vertex_interpolation", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
   modifier_panel_end(layout, ptr);
@@ -405,7 +406,7 @@ static void velocity_panel_draw(const bContext * /*C*/, Panel *panel)
 
   uiLayoutSetPropSep(layout, true);
   uiTemplateCacheFileVelocity(layout, &fileptr);
-  uiItemR(layout, ptr, "velocity_scale", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "velocity_scale", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void time_panel_draw(const bContext * /*C*/, Panel *panel)
@@ -492,7 +493,7 @@ ModifierTypeInfo modifierType_MeshSequenceCache = {
     /*srna*/ &RNA_MeshSequenceCacheModifier,
     /*type*/ ModifierTypeType::Constructive,
     /*flags*/
-    static_cast<ModifierTypeFlag>(eModifierTypeFlag_AcceptsMesh | eModifierTypeFlag_AcceptsCVs),
+    (eModifierTypeFlag_AcceptsMesh | eModifierTypeFlag_AcceptsCVs),
     /*icon*/ ICON_MOD_MESHDEFORM, /* TODO: Use correct icon. */
 
     /*copy_data*/ copy_data,

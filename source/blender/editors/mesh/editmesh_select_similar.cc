@@ -23,7 +23,7 @@
 #include "BKE_deform.hh"
 #include "BKE_editmesh.hh"
 #include "BKE_layer.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_object_types.hh"
 #include "BKE_report.hh"
 
@@ -149,7 +149,7 @@ static void face_to_plane(const Object *ob, BMFace *face, float r_plane[4])
  *  -SIMFACE_AREA
  *  -SIMFACE_PERIMETER
  */
-static int similar_face_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus similar_face_select_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -556,7 +556,7 @@ static bool edge_data_value_set(BMEdge *edge, const int hflag, int *r_value)
 /* TODO(dfelinto): `types` that should technically be compared in world space but are not:
  *  -SIMEDGE_FACE_ANGLE
  */
-static int similar_edge_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus similar_edge_select_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -943,7 +943,7 @@ static int similar_edge_select_exec(bContext *C, wmOperator *op)
 /** \name Select Similar Vert
  * \{ */
 
-static int similar_vert_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus similar_vert_select_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -1261,7 +1261,7 @@ static int similar_vert_select_exec(bContext *C, wmOperator *op)
 /** \name Select Similar Operator
  * \{ */
 
-static int edbm_select_similar_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus edbm_select_similar_exec(bContext *C, wmOperator *op)
 {
   ToolSettings *ts = CTX_data_tool_settings(C);
   PropertyRNA *prop = RNA_struct_find_property(op->ptr, "threshold");
@@ -1316,7 +1316,7 @@ static const EnumPropertyItem *select_similar_type_itemf(bContext *C,
 #ifdef WITH_FREESTYLE
       const int a_end = SIMFACE_FREESTYLE;
 #else
-      const int a_end = SIMFACE_MATERIAL;
+      const int a_end = SIMFACE_SMOOTH;
 #endif
       for (a = SIMFACE_MATERIAL; a <= a_end; a++) {
         RNA_enum_items_add_value(&item, &totitem, prop_similar_types, a);
@@ -1391,7 +1391,7 @@ void MESH_OT_select_similar(wmOperatorType *ot)
 
   RNA_def_enum(ot->srna, "compare", prop_similar_compare_types, SIM_CMP_EQ, "Compare", "");
 
-  prop = RNA_def_float(ot->srna, "threshold", 0.0f, 0.0f, 1.0f, "Threshold", "", 0.0f, 1.0f);
+  prop = RNA_def_float(ot->srna, "threshold", 0.0f, 0.0f, 100000.0f, "Threshold", "", 0.0f, 1.0f);
   /* Very small values are needed sometimes, similar area of small faces for e.g: see #87823 */
   RNA_def_property_ui_range(prop, 0.0, 1.0, 0.01, 5);
 }

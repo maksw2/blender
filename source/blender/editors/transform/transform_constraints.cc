@@ -7,32 +7,29 @@
  */
 
 #include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-#include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
+#include "DNA_userdef_types.h"
 #include "DNA_view3d_types.h"
 
 #include "GPU_immediate.hh"
 #include "GPU_matrix.hh"
 #include "GPU_state.hh"
 
+#include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 #include "BLI_rect.h"
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
 
-#include "ED_view3d.hh"
-
 #include "BLT_translation.hh"
 
 #include "UI_resources.hh"
-#include "UI_view2d.hh"
 
 #include "transform.hh"
 #include "transform_gizmo.hh"
@@ -42,7 +39,7 @@
 /* Own include. */
 #include "transform_constraints.hh"
 
-using namespace blender;
+namespace blender::ed::transform {
 
 static void drawObjectConstraint(TransInfo *t);
 
@@ -1109,7 +1106,7 @@ static void setNearestAxis2d(TransInfo *t)
   t->con.mode &= ~(CON_AXIS0 | CON_AXIS1 | CON_AXIS2);
 
   /* No correction needed... just use whichever one is lower. */
-  blender::float2 dvec = t->mval - t->mouse.imval;
+  float2 dvec = t->mval - t->mouse.imval;
   if (abs(dvec.x) < abs(dvec.y)) {
     t->con.mode |= CON_AXIS1;
     STRNCPY(t->con.text, IFACE_(" along Y axis"));
@@ -1290,3 +1287,5 @@ int getConstraintSpaceDimension(const TransInfo *t)
 }
 
 /** \} */
+
+}  // namespace blender::ed::transform

@@ -6,73 +6,12 @@
  * \ingroup overlay
  */
 
+#include "GPU_batch_utils.hh"
+#include "draw_cache.hh"
+
 #include "overlay_next_private.hh"
 
 namespace blender::draw::overlay {
-
-/* Matches Vertex Format. */
-struct Vertex {
-  float3 pos;
-  int vclass;
-};
-
-struct VertShaded {
-  float3 pos;
-  int v_class;
-  float3 nor;
-};
-
-/* TODO(fclem): Might be good to remove for simplicity. */
-struct VertexTriple {
-  float2 pos0;
-  float2 pos1;
-  float2 pos2;
-};
-
-/* Caller gets ownership of the #gpu::VertBuf. */
-static gpu::VertBuf *vbo_from_vector(const Vector<Vertex> &vector)
-{
-  static GPUVertFormat format = {0};
-  if (format.attr_len == 0) {
-    GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
-    GPU_vertformat_attr_add(&format, "vclass", GPU_COMP_I32, 1, GPU_FETCH_INT);
-  }
-
-  gpu::VertBuf *vbo = GPU_vertbuf_create_with_format(format);
-  GPU_vertbuf_data_alloc(*vbo, vector.size());
-  vbo->data<Vertex>().copy_from(vector);
-  return vbo;
-}
-
-static gpu::VertBuf *vbo_from_vector(Vector<VertShaded> &vector)
-{
-  static GPUVertFormat format = {0};
-  if (format.attr_len == 0) {
-    GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
-    GPU_vertformat_attr_add(&format, "vclass", GPU_COMP_I32, 1, GPU_FETCH_INT);
-    GPU_vertformat_attr_add(&format, "nor", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
-  }
-
-  gpu::VertBuf *vbo = GPU_vertbuf_create_with_format(format);
-  GPU_vertbuf_data_alloc(*vbo, vector.size());
-  vbo->data<VertShaded>().copy_from(vector);
-  return vbo;
-}
-
-static gpu::VertBuf *vbo_from_vector(Vector<VertexTriple> &vector)
-{
-  static GPUVertFormat format = {0};
-  if (format.attr_len == 0) {
-    GPU_vertformat_attr_add(&format, "pos0", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
-    GPU_vertformat_attr_add(&format, "pos1", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
-    GPU_vertformat_attr_add(&format, "pos2", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
-  }
-
-  gpu::VertBuf *vbo = GPU_vertbuf_create_with_format(format);
-  GPU_vertbuf_data_alloc(*vbo, vector.size());
-  vbo->data<VertexTriple>().copy_from(vector);
-  return vbo;
-}
 
 enum VertexClass {
   VCLASS_NONE = 0,
@@ -710,6 +649,10 @@ ShapeCache::ShapeCache()
     cube = BatchPtr(
         GPU_batch_create_ex(GPU_PRIM_LINES, vbo_from_vector(verts), nullptr, GPU_BATCH_OWNS_VBO));
   }
+  /* cube_solid */
+  {
+    cube_solid = BatchPtr(GPU_batch_unit_cube());
+  }
   /* circle */
   {
     constexpr int resolution = 64;
@@ -726,7 +669,7 @@ ShapeCache::ShapeCache()
     circle = BatchPtr(
         GPU_batch_create_ex(GPU_PRIM_LINES, vbo_from_vector(verts), nullptr, GPU_BATCH_OWNS_VBO));
   }
-  /* empty_spehere */
+  /* empty_sphere */
   {
     Vector<Vertex> verts = sphere_axes_circles(1.0f, VCLASS_EMPTY_SCALED, 32);
 
@@ -865,20 +808,23 @@ ShapeCache::ShapeCache()
        * Fractional part of Z is a positive offset at axis unit position. */
       int flag = VCLASS_EMPTY_AXES | VCLASS_SCREENALIGNED;
       /* Center to axis line. */
+      /* NOTE: overlay_armature_shape_wire_vert.glsl expects the axis verts at the origin to be the
+       * only ones with this coordinates (it derives the VCLASS from it). */
+      float pos_on_axis = float(axis) + 1e-8f;
       verts.append({{0.0f, 0.0f, 0.0f}, 0});
-      verts.append({{0.0f, 0.0f, float(axis)}, flag});
+      verts.append({{0.0f, 0.0f, pos_on_axis}, flag});
       /* Axis end marker. */
       constexpr int marker_fill_layer = 6;
       for (int j = 1; j < marker_fill_layer + 1; j++) {
         for (float2 axis_marker_vert : axis_marker) {
-          verts.append({{axis_marker_vert * ((4.0f * j) / marker_fill_layer), float(axis)}, flag});
+          verts.append({{axis_marker_vert * ((4.0f * j) / marker_fill_layer), pos_on_axis}, flag});
         }
       }
       /* Axis name. */
       const Vector<float2> *axis_names[3] = {&x_axis_name, &y_axis_name, &z_axis_name};
       for (float2 axis_name_vert : *(axis_names[axis])) {
         int flag = VCLASS_EMPTY_AXES | VCLASS_EMPTY_AXES_NAME | VCLASS_SCREENALIGNED;
-        verts.append({{axis_name_vert * 4.0f, axis + 0.25f}, flag});
+        verts.append({{axis_name_vert * 4.0f, pos_on_axis + 0.25f}, flag});
       }
     }
     arrows = BatchPtr(
@@ -983,7 +929,7 @@ ShapeCache::ShapeCache()
   {
     Vector<Vertex> verts;
     for (const uint3 &tri : bone_box_solid_tris) {
-      for (const int i : IndexRange(tri.type_length)) {
+      for (const int i : IndexRange(uint3::type_length)) {
         const int v = tri[i];
         const float x = bone_box_verts[v][2];
         const float y = bone_box_verts[v][0];
@@ -1401,6 +1347,46 @@ ShapeCache::ShapeCache()
     }
     grid = BatchPtr(
         GPU_batch_create_ex(GPU_PRIM_TRIS, vbo_from_vector(verts), nullptr, GPU_BATCH_OWNS_VBO));
+  }
+  /* cursor circle */
+  {
+    const int segments = 16;
+
+    const float red[3] = {1.0f, 0.0f, 0.0f};
+    const float white[3] = {1.0f, 1.0f, 1.0f};
+
+    Vector<VertexWithColor> verts;
+
+    for (int i = 0; i < segments + 1; i++) {
+      float angle = float(2 * M_PI) * (float(i) / float(segments));
+      verts.append({0.5f * float3(cosf(angle), sinf(angle), 0.0f), (i % 2 == 0) ? red : white});
+    }
+
+    cursor_circle = BatchPtr(GPU_batch_create_ex(
+        GPU_PRIM_LINE_STRIP, vbo_from_vector(verts), nullptr, GPU_BATCH_OWNS_VBO));
+  }
+  /* cursor lines */
+  {
+    const float f5 = 0.25f;
+    const float f20 = 1.0f;
+
+    float crosshair_color[3];
+    UI_GetThemeColor3fv(TH_VIEW_OVERLAY, crosshair_color);
+
+    Vector<VertexWithColor> verts;
+
+    for (int i = 0; i < 3; i++) {
+      float3 axis(0.0f);
+      axis[i] = 1.0f;
+      verts.append({f5 * axis, crosshair_color});
+      verts.append({f20 * axis, crosshair_color});
+      axis[i] = -1.0f;
+      verts.append({f5 * axis, crosshair_color});
+      verts.append({f20 * axis, crosshair_color});
+    }
+
+    cursor_lines = BatchPtr(
+        GPU_batch_create_ex(GPU_PRIM_LINES, vbo_from_vector(verts), nullptr, GPU_BATCH_OWNS_VBO));
   }
 }
 

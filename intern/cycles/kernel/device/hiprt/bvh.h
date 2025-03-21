@@ -8,13 +8,13 @@
 
 CCL_NAMESPACE_BEGIN
 
-ccl_device_inline bool scene_intersect_valid(ccl_private const Ray *ray)
+ccl_device_inline bool scene_intersect_valid(const ccl_private Ray *ray)
 {
   return isfinite_safe(ray->P.x) && isfinite_safe(ray->D.x) && len_squared(ray->D) != 0.0f;
 }
 
 ccl_device_intersect bool scene_intersect(KernelGlobals kg,
-                                          ccl_private const Ray *ray,
+                                          const ccl_private Ray *ray,
                                           const uint visibility,
                                           ccl_private Intersection *isect)
 {
@@ -29,6 +29,9 @@ ccl_device_intersect bool scene_intersect(KernelGlobals kg,
     isect->type = PRIMITIVE_NONE;
     return false;
   }
+
+  if (kernel_data.device_bvh == 0)
+    return false;
 
   hiprtRay ray_hip;
 
@@ -65,7 +68,7 @@ ccl_device_intersect bool scene_intersect(KernelGlobals kg,
 }
 
 ccl_device_intersect bool scene_intersect_shadow(KernelGlobals kg,
-                                                 ccl_private const Ray *ray,
+                                                 const ccl_private Ray *ray,
                                                  const uint visibility)
 {
   Intersection isect;
@@ -75,16 +78,25 @@ ccl_device_intersect bool scene_intersect_shadow(KernelGlobals kg,
 #ifdef __BVH_LOCAL__
 template<bool single_hit = false>
 ccl_device_intersect bool scene_intersect_local(KernelGlobals kg,
-                                                ccl_private const Ray *ray,
+                                                const ccl_private Ray *ray,
                                                 ccl_private LocalIntersection *local_isect,
-                                                int local_object,
+                                                const int local_object,
                                                 ccl_private uint *lcg_state,
-                                                int max_hits)
+                                                const int max_hits)
 {
+  if (local_isect != nullptr) {
+    local_isect->num_hits = 0;
+  }
+
   if (!scene_intersect_valid(ray)) {
-    if (local_isect) {
-      local_isect->num_hits = 0;
-    }
+    return false;
+  }
+
+  const int primitive_type = kernel_data_fetch(objects, local_object).primitive_type;
+  if (!(primitive_type & PRIMITIVE_TRIANGLE)) {
+    /* Local intersection functions are only considering triangle and motion triangle primitives.
+     * If the local intersection is requested from other primitives (curve or point cloud) perform
+     * an early return to avoid tree traversal with no primitive intersection. */
     return false;
   }
 
@@ -92,13 +104,8 @@ ccl_device_intersect bool scene_intersect_local(KernelGlobals kg,
   float3 dir = bvh_clamp_direction(ray->D);
   float3 idir = bvh_inverse_direction(dir);
 
-  if (local_isect != NULL) {
-    local_isect->num_hits = 0;
-  }
-
   const int object_flag = kernel_data_fetch(object_flag, local_object);
   if (!(object_flag & SD_OBJECT_TRANSFORM_APPLIED)) {
-
 #  if BVH_FEATURE(BVH_MOTION)
     bvh_instance_motion_push(kg, local_object, ray, &P, &dir, &idir);
 #  else
@@ -115,6 +122,7 @@ ccl_device_intersect bool scene_intersect_local(KernelGlobals kg,
   LocalPayload payload = {0};
   payload.kg = kg;
   payload.self = ray->self;
+  payload.ray_time = ray->time;
   payload.local_object = local_object;
   payload.max_hits = max_hits;
   payload.lcg_state = lcg_state;
@@ -123,20 +131,30 @@ ccl_device_intersect bool scene_intersect_local(KernelGlobals kg,
   GET_TRAVERSAL_STACK()
 
   void *local_geom = (void *)(kernel_data_fetch(blas_ptr, local_object));
-  // we don't need custom intersection functions for SSR
-#  ifdef HIPRT_SHARED_STACK
-  hiprtGeomTraversalAnyHitCustomStack<Stack> traversal((hiprtGeometry)local_geom,
-                                                       ray_hip,
-                                                       stack,
-                                                       hiprtTraversalHintDefault,
-                                                       &payload,
-                                                       kernel_params.table_local_intersect,
-                                                       2);
-#  else
-  hiprtGeomTraversalAnyHit traversal(
-      local_geom, ray_hip, table, hiprtTraversalHintDefault, &payload);
-#  endif
-  hiprtHit hit = traversal.getNextHit();
+
+  hiprtHit hit;
+  if (primitive_type == PRIMITIVE_MOTION_TRIANGLE) {
+    /* Motion triangle BVH uses custom primitives which requires custom traversal. */
+    hiprtGeomCustomTraversalAnyHitCustomStack<Stack> traversal((hiprtGeometry)local_geom,
+                                                               ray_hip,
+                                                               stack,
+                                                               hiprtTraversalHintDefault,
+                                                               &payload,
+                                                               kernel_params.table_local_intersect,
+                                                               2);
+    hit = traversal.getNextHit();
+  }
+  else {
+    hiprtGeomTraversalAnyHitCustomStack<Stack> traversal((hiprtGeometry)local_geom,
+                                                         ray_hip,
+                                                         stack,
+                                                         hiprtTraversalHintDefault,
+                                                         &payload,
+                                                         kernel_params.table_local_intersect,
+                                                         2);
+    hit = traversal.getNextHit();
+  }
+
   return hit.hasHit();
 }
 #endif  //__BVH_LOCAL__
@@ -144,9 +162,9 @@ ccl_device_intersect bool scene_intersect_local(KernelGlobals kg,
 #ifdef __SHADOW_RECORD_ALL__
 ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals kg,
                                                      IntegratorShadowState state,
-                                                     ccl_private const Ray *ray,
-                                                     uint visibility,
-                                                     uint max_hits,
+                                                     const ccl_private Ray *ray,
+                                                     const uint visibility,
+                                                     const uint max_hits,
                                                      ccl_private uint *num_recorded_hits,
                                                      ccl_private float *throughput)
 {
@@ -182,7 +200,7 @@ ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals kg,
 
 #ifdef __VOLUME__
 ccl_device_intersect bool scene_intersect_volume(KernelGlobals kg,
-                                                 ccl_private const Ray *ray,
+                                                 const ccl_private Ray *ray,
                                                  ccl_private Intersection *isect,
                                                  const uint visibility)
 {

@@ -11,13 +11,11 @@
 #include "DNA_anim_types.h"
 #include "DNA_armature_types.h"
 #include "DNA_constraint_types.h"
-#include "DNA_gpencil_modifier_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "MEM_guardedalloc.h"
-
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
+#include "BLI_string.h"
 
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
@@ -295,7 +293,7 @@ void ED_armature_pose_select_in_wpaint_mode(const Scene *scene,
   ModifierData *md = BKE_modifiers_get_virtual_modifierlist(ob_active, &virtual_modifier_data);
   for (; md; md = md->next) {
     if (md->type == eModifierType_Armature) {
-      ArmatureModifierData *amd = (ArmatureModifierData *)md;
+      ArmatureModifierData *amd = reinterpret_cast<ArmatureModifierData *>(md);
       Object *ob_arm = amd->object;
       if (ob_arm != nullptr) {
         Base *base_arm = BKE_view_layer_base_find(view_layer, ob_arm);
@@ -422,12 +420,14 @@ static void selectconnected_posebonechildren(Object *ob, Bone *bone, int extend)
 
 /* within active object context */
 /* previously known as "selectconnected_posearmature" */
-static int pose_select_connected_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus pose_select_connected_invoke(bContext *C,
+                                                     wmOperator *op,
+                                                     const wmEvent *event)
 {
   Bone *bone, *curBone, *next = nullptr;
   const bool extend = RNA_boolean_get(op->ptr, "extend");
 
-  view3d_operator_needs_opengl(C);
+  view3d_operator_needs_gpu(C);
 
   Base *base = nullptr;
   bone = ED_armature_pick_bone(C, event->mval, !extend, &base);
@@ -502,7 +502,7 @@ void POSE_OT_select_linked_pick(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
-static int pose_select_linked_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus pose_select_linked_exec(bContext *C, wmOperator * /*op*/)
 {
   Bone *curBone, *next = nullptr;
 
@@ -560,7 +560,7 @@ void POSE_OT_select_linked(wmOperatorType *ot)
 
 /* -------------------------------------- */
 
-static int pose_de_select_all_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus pose_de_select_all_exec(bContext *C, wmOperator *op)
 {
   int action = RNA_enum_get(op->ptr, "action");
 
@@ -616,10 +616,10 @@ void POSE_OT_select_all(wmOperatorType *ot)
 
 /* -------------------------------------- */
 
-static int pose_select_parent_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus pose_select_parent_exec(bContext *C, wmOperator * /*op*/)
 {
   Object *ob = BKE_object_pose_armature_get(CTX_data_active_object(C));
-  bArmature *arm = (bArmature *)ob->data;
+  bArmature *arm = static_cast<bArmature *>(ob->data);
   bPoseChannel *pchan, *parent;
 
   /* Determine if there is an active bone */
@@ -661,7 +661,7 @@ void POSE_OT_select_parent(wmOperatorType *ot)
 
 /* -------------------------------------- */
 
-static int pose_select_constraint_target_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus pose_select_constraint_target_exec(bContext *C, wmOperator * /*op*/)
 {
   int found = 0;
 
@@ -721,7 +721,7 @@ void POSE_OT_select_constraint_target(wmOperatorType *ot)
 
 /* No need to convert to multi-objects. Just like we keep the non-active bones
  * selected we then keep the non-active objects untouched (selected/unselected). */
-static int pose_select_hierarchy_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus pose_select_hierarchy_exec(bContext *C, wmOperator *op)
 {
   Object *ob = BKE_object_pose_armature_get(CTX_data_active_object(C));
   bArmature *arm = static_cast<bArmature *>(ob->data);
@@ -1025,7 +1025,7 @@ static bool pose_select_same_keyingset(bContext *C, ReportList *reports, bool ex
   return changed_multi;
 }
 
-static int pose_select_grouped_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus pose_select_grouped_exec(bContext *C, wmOperator *op)
 {
   Object *ob = BKE_object_pose_armature_get(CTX_data_active_object(C));
   const ePose_SelectSame_Mode type = ePose_SelectSame_Mode(RNA_enum_get(op->ptr, "type"));
@@ -1109,7 +1109,7 @@ void POSE_OT_select_grouped(wmOperatorType *ot)
 /**
  * \note clone of #armature_select_mirror_exec keep in sync
  */
-static int pose_select_mirror_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus pose_select_mirror_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);

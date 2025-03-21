@@ -14,17 +14,16 @@
  * \note It is currently work in progress and should replace the old global draw manager.
  */
 
+#include "BLI_listbase.h"
 #include "BLI_map.hh"
 #include "BLI_sys_types.h"
 
 #include "GPU_material.hh"
 
 #include "draw_resource.hh"
-#include "draw_sculpt.hh"
 #include "draw_view.hh"
 
 #include <atomic>
-#include <string>
 
 namespace blender::draw {
 
@@ -85,11 +84,6 @@ class Manager {
    * This is because attribute list is arbitrary.
    */
   ObjectAttributeBuf attributes_buf;
-  /**
-   * TODO(@fclem): Remove once we get rid of old EEVEE code-base.
-   * Only here to satisfy bindings.
-   */
-  ObjectAttributeLegacyBuf attributes_buf_legacy;
 
   /**
    * Table of all View Layer attributes required by shaders, used to populate the buffer below.
@@ -233,6 +227,10 @@ class Manager {
    * Avoids just in time computation of visibility.
    */
   void compute_visibility(View &view);
+  /**
+   * Same as compute_visibility but only do it if needed.
+   */
+  void ensure_visibility(View &view);
   /**
    * Generate commands for #ResourceHandle for the given #View and #PassMain.
    * The commands needs to be regenerated for any change inside the #Manager, the #PassMain or in
@@ -461,4 +459,3 @@ inline void Manager::register_layer_attributes(GPUMaterial *material)
 /* TODO(@fclem): This is for testing. The manager should be passed to the engine through the
  * callbacks. */
 blender::draw::Manager *DRW_manager_get();
-blender::draw::ObjectRef DRW_object_ref_get(Object *object);

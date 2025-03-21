@@ -15,8 +15,6 @@
 #include "BKE_geometry_set_instances.hh"
 #include "BKE_instances.hh"
 
-#include "BLT_translation.hh"
-
 namespace blender::bke {
 
 InstanceReference::InstanceReference(GeometrySet geometry_set)
@@ -173,7 +171,7 @@ Instances::Instances(const Instances &other)
 
 Instances::~Instances()
 {
-  CustomData_free(&attributes_, instances_num_);
+  CustomData_free(&attributes_);
 }
 
 Instances &Instances::operator=(const Instances &other)

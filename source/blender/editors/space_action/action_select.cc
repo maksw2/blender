@@ -13,8 +13,8 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
 #include "BLI_lasso_2d.hh"
+#include "BLI_listbase.h"
 #include "BLI_utildefines.h"
 
 #include "DNA_anim_types.h"
@@ -28,7 +28,6 @@
 
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
-#include "BKE_gpencil_legacy.h"
 #include "BKE_grease_pencil.hh"
 #include "BKE_nla.hh"
 
@@ -112,8 +111,19 @@ static void actkeys_list_element_to_keylist(bAnimContext *ac,
         break;
       }
       case ALE_ACTION_LAYERED: {
-        bAction *action = (bAction *)ale->key_data;
-        action_to_keylist(ale->adt, action, keylist, 0, range);
+        /* This is only called for action summaries in the Dope-sheet, *not* the
+         * Action Editor. Therefore despite the name `ALE_ACTION_LAYERED`, this
+         * is only used to show a *single slot* of the action: the slot used by
+         * the ID the action is listed under.
+         *
+         * Thus we use the same function as the `ALE_ACTION_SLOT` case below
+         * because in practice the only distinction between these cases is where
+         * they get the slot from. In this case, we get it from `elem`'s ADT. */
+        animrig::Action *action = static_cast<animrig::Action *>(ale->key_data);
+        BLI_assert(action);
+        BLI_assert(ale->adt);
+        action_slot_summary_to_keylist(
+            ac, ale->id, *action, ale->adt->slot_handle, keylist, 0, range);
         break;
       }
       case ALE_ACTION_SLOT: {
@@ -121,10 +131,11 @@ static void actkeys_list_element_to_keylist(bAnimContext *ac,
         animrig::Slot *slot = static_cast<animrig::Slot *>(ale->data);
         BLI_assert(action);
         BLI_assert(slot);
-        action_slot_to_keylist(ale->adt, *action, slot->handle, keylist, 0, range);
+        action_slot_summary_to_keylist(ac, ale->id, *action, slot->handle, keylist, 0, range);
         break;
       }
       case ALE_ACT: {
+        /* Legacy action. */
         bAction *act = (bAction *)ale->key_data;
         action_to_keylist(ale->adt, act, keylist, 0, range);
         break;
@@ -147,7 +158,7 @@ static void actkeys_list_element_to_keylist(bAnimContext *ac,
     }
   }
   else if (ale->type == ANIMTYPE_SUMMARY) {
-    /* dopesheet summary covers everything */
+    /* Dope-sheet summary covers everything. */
     summary_to_keylist(ac, keylist, 0, range);
   }
   else if (ale->type == ANIMTYPE_GROUP) {
@@ -203,7 +214,7 @@ static void actkeys_find_key_in_list_element(bAnimContext *ac,
   /* half-size (for either side), but rounded up to nearest int (for easier targeting) */
   key_hsize = roundf(key_hsize / 2.0f);
 
-  const Range2f range = {
+  const Bounds<float> range = {
       UI_view2d_region_to_view_x(v2d, region_x - int(key_hsize)),
       UI_view2d_region_to_view_x(v2d, region_x + int(key_hsize)),
   };
@@ -360,7 +371,7 @@ static void deselect_action_keys(bAnimContext *ac, short test, eEditKeyframes_Se
 
 /* ------------------- */
 
-static int actkeys_deselectall_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus actkeys_deselectall_exec(bContext *C, wmOperator *op)
 {
   bAnimContext ac;
 
@@ -449,17 +460,6 @@ static void box_select_elem(
   bAnimContext *ac = sel_data->ac;
 
   switch (ale->type) {
-#if 0 /* XXX: Keyframes are not currently shown here */
-    case ANIMTYPE_GPDATABLOCK: {
-      bGPdata *gpd = ale->data;
-      bGPDlayer *gpl;
-      for (gpl = gpd->layers.first; gpl; gpl = gpl->next) {
-        ED_gpencil_layer_frames_select_box(gpl, xmin, xmax, data->selectmode);
-      }
-      ale->update |= ANIM_UPDATE_DEPS;
-      break;
-    }
-#endif
     case ANIMTYPE_GREASE_PENCIL_DATABLOCK: {
       GreasePencil *grease_pencil = static_cast<GreasePencil *>(ale->data);
       for (blender::bke::greasepencil::Layer *layer : grease_pencil->layers_for_write()) {
@@ -601,7 +601,9 @@ static void box_select_action(bAnimContext *ac,
 
 /* ------------------- */
 
-static int actkeys_box_select_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus actkeys_box_select_invoke(bContext *C,
+                                                  wmOperator *op,
+                                                  const wmEvent *event)
 {
   bAnimContext ac;
   if (ANIM_animdata_get_context(C, &ac) == 0) {
@@ -620,7 +622,7 @@ static int actkeys_box_select_invoke(bContext *C, wmOperator *op, const wmEvent 
   return WM_gesture_box_invoke(C, op, event);
 }
 
-static int actkeys_box_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus actkeys_box_select_exec(bContext *C, wmOperator *op)
 {
   bAnimContext ac;
   rcti rect;
@@ -725,17 +727,6 @@ static void region_select_elem(RegionSelectData *sel_data, bAnimListElem *ale, b
   bAnimContext *ac = sel_data->ac;
 
   switch (ale->type) {
-#if 0 /* XXX: Keyframes are not currently shown here */
-    case ANIMTYPE_GPDATABLOCK: {
-      bGPdata *gpd = ale->data;
-      bGPDlayer *gpl;
-      for (gpl = gpd->layers.first; gpl; gpl = gpl->next) {
-        ED_gpencil_layer_frames_select_region(
-            &rdata->ked, ale->data, rdata->mode, rdata->selectmode);
-      }
-      break;
-    }
-#endif
     case ANIMTYPE_GPLAYER: {
       ED_gpencil_layer_frames_select_region(&sel_data->ked,
                                             static_cast<bGPDlayer *>(ale->data),
@@ -910,7 +901,7 @@ static void region_select_action_keys(bAnimContext *ac,
 
 /* ----------------------------------- */
 
-static int actkeys_lassoselect_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus actkeys_lassoselect_exec(bContext *C, wmOperator *op)
 {
   bAnimContext ac;
 
@@ -974,7 +965,7 @@ void ACTION_OT_select_lasso(wmOperatorType *ot)
 
 /* ------------------- */
 
-static int action_circle_select_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus action_circle_select_exec(bContext *C, wmOperator *op)
 {
   bAnimContext ac;
 
@@ -1184,7 +1175,7 @@ static void columnselect_action_keys(bAnimContext *ac, short mode)
 
     case ACTKEYS_COLUMNSEL_CFRA: /* current frame */
       /* make a single CfraElem for storing this */
-      ce = MEM_cnew<CfraElem>("cfraElem");
+      ce = MEM_callocN<CfraElem>("cfraElem");
       BLI_addtail(&ked.list, ce);
 
       ce->cfra = float(scene->r.cfra);
@@ -1245,7 +1236,7 @@ static void columnselect_action_keys(bAnimContext *ac, short mode)
 
 /* ------------------- */
 
-static int actkeys_columnselect_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus actkeys_columnselect_exec(bContext *C, wmOperator *op)
 {
   bAnimContext ac;
   short mode;
@@ -1298,7 +1289,7 @@ void ACTION_OT_select_column(wmOperatorType *ot)
 /** \name Select Linked Operator
  * \{ */
 
-static int actkeys_select_linked_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus actkeys_select_linked_exec(bContext *C, wmOperator * /*op*/)
 {
   bAnimContext ac;
 
@@ -1408,7 +1399,7 @@ static void select_moreless_action_keys(bAnimContext *ac, short mode)
 
 /* ----------------- */
 
-static int actkeys_select_more_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus actkeys_select_more_exec(bContext *C, wmOperator * /*op*/)
 {
   bAnimContext ac;
 
@@ -1445,7 +1436,7 @@ void ACTION_OT_select_more(wmOperatorType *ot)
 
 /* ----------------- */
 
-static int actkeys_select_less_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus actkeys_select_less_exec(bContext *C, wmOperator * /*op*/)
 {
   bAnimContext ac;
 
@@ -1597,7 +1588,7 @@ static void actkeys_select_leftright(bAnimContext *ac,
 
 /* ----------------- */
 
-static int actkeys_select_leftright_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus actkeys_select_leftright_exec(bContext *C, wmOperator *op)
 {
   bAnimContext ac;
   short leftright = RNA_enum_get(op->ptr, "mode");
@@ -1631,7 +1622,9 @@ static int actkeys_select_leftright_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int actkeys_select_leftright_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus actkeys_select_leftright_invoke(bContext *C,
+                                                        wmOperator *op,
+                                                        const wmEvent *event)
 {
   bAnimContext ac;
   short leftright = RNA_enum_get(op->ptr, "mode");
@@ -1899,13 +1892,13 @@ static void actkeys_mselect_channel_only(bAnimContext *ac,
 
 /* ------------------- */
 
-static int mouse_action_keys(bAnimContext *ac,
-                             const int mval[2],
-                             eEditKeyframes_Select select_mode,
-                             const bool deselect_all,
-                             const bool column,
-                             const bool same_channel,
-                             bool wait_to_deselect_others)
+static wmOperatorStatus mouse_action_keys(bAnimContext *ac,
+                                          const int mval[2],
+                                          eEditKeyframes_Select select_mode,
+                                          const bool deselect_all,
+                                          const bool column,
+                                          const bool same_channel,
+                                          bool wait_to_deselect_others)
 {
   /* NOTE: keep this functionality in sync with #MARKER_OT_select.
    * The logic here closely matches its internals.
@@ -1919,7 +1912,7 @@ static int mouse_action_keys(bAnimContext *ac,
   bool is_selected = false;
   float frame = 0.0f; /* frame of keyframe under mouse - NLA corrections not applied/included */
   float selx = 0.0f;  /* frame of keyframe under mouse */
-  int ret_value = OPERATOR_FINISHED;
+  wmOperatorStatus ret_value = OPERATOR_FINISHED;
 
   actkeys_find_key_at_position(
       ac, filter, mval[0], mval[1], &ale, &selx, &frame, &found, &is_selected);
@@ -2052,10 +2045,10 @@ static int mouse_action_keys(bAnimContext *ac,
 }
 
 /* handle clicking */
-static int actkeys_clickselect_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus actkeys_clickselect_exec(bContext *C, wmOperator *op)
 {
   bAnimContext ac;
-  int ret_value;
+  wmOperatorStatus ret_value;
 
   /* get editor data */
   if (ANIM_animdata_get_context(C, &ac) == 0) {

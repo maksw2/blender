@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "BLI_compiler_attrs.h"
 
 struct KDTree_1d;
@@ -29,7 +31,7 @@ enum WalkSelectDirection {
 };
 
 /** See #WM_operator_properties_select_operation */
-enum eSelectOp {
+enum eSelectOp : int8_t {
   SEL_OP_ADD = 1,
   SEL_OP_SUB,
   SEL_OP_SET,

@@ -2,9 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "DNA_userdef_types.h"
+
 #include "BKE_type_conversions.hh"
 #include "BKE_volume_grid.hh"
-#include "BKE_volume_openvdb.hh"
 
 #include "NOD_rna_define.hh"
 #include "NOD_socket_search_link.hh"
@@ -61,7 +62,7 @@ static std::optional<eNodeSocketDatatype> node_type_for_socket_type(const bNodeS
 
 static void node_gather_link_search_ops(GatherLinkSearchOpParams &params)
 {
-  if (!U.experimental.use_new_volume_nodes) {
+  if (!USER_EXPERIMENTAL_TEST(&U, use_new_volume_nodes)) {
     return;
   }
   const std::optional<eNodeSocketDatatype> node_type = node_type_for_socket_type(
@@ -283,14 +284,17 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_SAMPLE_GRID, "Sample Grid", NODE_CLASS_CONVERTER);
+  geo_node_type_base(&ntype, "GeometryNodeSampleGrid", GEO_NODE_SAMPLE_GRID);
+  ntype.ui_name = "Sample Grid";
+  ntype.enum_name_legacy = "SAMPLE_GRID";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.initfunc = node_init;
   ntype.declare = node_declare;
   ntype.gather_link_search_ops = node_gather_link_search_ops;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.geometry_node_execute = node_geo_exec;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

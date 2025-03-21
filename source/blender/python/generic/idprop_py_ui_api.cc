@@ -29,8 +29,6 @@
 #endif
 #include "py_capi_rna.hh"
 
-#include "python_utildefines.hh"
-
 /* -------------------------------------------------------------------- */
 /** \name UI Data Update
  * \{ */
@@ -140,7 +138,7 @@ static IDPropertyUIDataEnumItem *idprop_enum_items_from_py(PyObject *seq_fast, i
   PyObject **seq_fast_items = PySequence_Fast_ITEMS(seq_fast);
   int i;
 
-  items = MEM_cnew_array<IDPropertyUIDataEnumItem>(seq_len, __func__);
+  items = MEM_calloc_arrayN<IDPropertyUIDataEnumItem>(seq_len, __func__);
   r_items_num = seq_len;
 
   for (i = 0; i < seq_len; i++) {
@@ -180,7 +178,7 @@ static bool idprop_ui_data_update_int_default(IDProperty *idprop,
     }
 
     Py_ssize_t len = PySequence_Size(default_value);
-    int *new_default_array = (int *)MEM_malloc_arrayN(len, sizeof(int), __func__);
+    int *new_default_array = MEM_malloc_arrayN<int>(size_t(len), __func__);
     if (PyC_AsArray(
             new_default_array, sizeof(int), default_value, len, &PyLong_Type, "ui_data_update") ==
         -1)
@@ -340,7 +338,7 @@ static bool idprop_ui_data_update_bool_default(IDProperty *idprop,
     }
 
     Py_ssize_t len = PySequence_Size(default_value);
-    int8_t *new_default_array = (int8_t *)MEM_malloc_arrayN(len, sizeof(int8_t), __func__);
+    int8_t *new_default_array = MEM_malloc_arrayN<int8_t>(size_t(len), __func__);
     if (PyC_AsArray(new_default_array,
                     sizeof(int8_t),
                     default_value,
@@ -430,7 +428,7 @@ static bool idprop_ui_data_update_float_default(IDProperty *idprop,
     }
 
     Py_ssize_t len = PySequence_Size(default_value);
-    double *new_default_array = (double *)MEM_malloc_arrayN(len, sizeof(double), __func__);
+    double *new_default_array = MEM_malloc_arrayN<double>(size_t(len), __func__);
     if (PyC_AsArray(new_default_array,
                     sizeof(double),
                     default_value,

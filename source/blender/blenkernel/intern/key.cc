@@ -6,6 +6,7 @@
  * \ingroup bke
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -13,10 +14,12 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
 #include "BLI_endian_switch.h"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
+#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
 
@@ -25,17 +28,16 @@
 /* Allow using deprecated functionality for .blend file I/O. */
 #define DNA_DEPRECATED_ALLOW
 
-#include "BKE_attribute.hh"
 #include "DNA_ID.h"
-#include "DNA_anim_types.h"
+#include "DNA_curve_types.h"
 #include "DNA_key_types.h"
 #include "DNA_lattice_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 
 #include "BKE_anim_data.hh"
+#include "BKE_attribute.hh"
 #include "BKE_curve.hh"
 #include "BKE_customdata.hh"
 #include "BKE_deform.hh"
@@ -54,6 +56,11 @@
 #include "RNA_prototypes.hh"
 
 #include "BLO_read_write.hh"
+
+using blender::float3;
+using blender::float4x4;
+using blender::MutableSpan;
+using blender::Span;
 
 static void shapekey_copy_data(Main * /*bmain*/,
                                std::optional<Library *> /*owner_library*/,
@@ -633,8 +640,8 @@ static char *key_block_get_data(Key *key, KeyBlock *actkb, KeyBlock *kb, char **
 
       if (mesh->runtime->edit_mesh && mesh->runtime->edit_mesh->bm->totvert == kb->totelem) {
         a = 0;
-        co = static_cast<float(*)[3]>(MEM_mallocN(
-            sizeof(float[3]) * mesh->runtime->edit_mesh->bm->totvert, "key_block_get_data"));
+        co = MEM_malloc_arrayN<float[3]>(size_t(mesh->runtime->edit_mesh->bm->totvert),
+                                         "key_block_get_data");
 
         BM_ITER_MESH (eve, &iter, mesh->runtime->edit_mesh->bm, BM_VERTS_OF_MESH) {
           copy_v3_v3(co[a], eve->co);
@@ -711,9 +718,7 @@ static void cp_key(const int start,
     return;
   }
 
-  if (end > tot) {
-    end = tot;
-  }
+  end = std::min(end, tot);
 
   if (tot != kb->totelem) {
     ktot = 0.0;
@@ -887,9 +892,7 @@ static void key_evaluate_relative(const int start,
     return;
   }
 
-  if (end > tot) {
-    end = tot;
-  }
+  end = std::min(end, tot);
 
   /* In case of Bezier-triple. */
   elemstr[0] = 1; /* Number of IPO-floats. */
@@ -1024,9 +1027,7 @@ static void do_key(const int start,
     return;
   }
 
-  if (end > tot) {
-    end = tot;
-  }
+  end = std::min(end, tot);
 
   k1 = key_block_get_data(key, actkb, k[0], &freek1);
   k2 = key_block_get_data(key, actkb, k[1], &freek2);
@@ -1267,7 +1268,7 @@ static void do_key(const int start,
   }
 }
 
-static float *get_weights_array(Object *ob, char *vgroup, WeightsArrayCache *cache)
+static float *get_weights_array(Object *ob, const char *vgroup, WeightsArrayCache *cache)
 {
   const MDeformVert *dvert = nullptr;
   BMEditMesh *em = nullptr;
@@ -1308,8 +1309,8 @@ static float *get_weights_array(Object *ob, char *vgroup, WeightsArrayCache *cac
     if (cache) {
       if (cache->defgroup_weights == nullptr) {
         int num_defgroup = BKE_object_defgroup_count(ob);
-        cache->defgroup_weights = static_cast<float **>(MEM_callocN(
-            sizeof(*cache->defgroup_weights) * num_defgroup, "cached defgroup weights"));
+        cache->defgroup_weights = MEM_calloc_arrayN<float *>(size_t(num_defgroup),
+                                                             "cached defgroup weights");
         cache->num_defgroup_weights = num_defgroup;
       }
 
@@ -1318,7 +1319,7 @@ static float *get_weights_array(Object *ob, char *vgroup, WeightsArrayCache *cac
       }
     }
 
-    weights = static_cast<float *>(MEM_mallocN(totvert * sizeof(float), "weights"));
+    weights = MEM_malloc_arrayN<float>(size_t(totvert), "weights");
 
     if (em) {
       int i;
@@ -1349,8 +1350,7 @@ static float **keyblock_get_per_block_weights(Object *ob, Key *key, WeightsArray
   float **per_keyblock_weights;
   int keyblock_index;
 
-  per_keyblock_weights = static_cast<float **>(
-      MEM_mallocN(sizeof(*per_keyblock_weights) * key->totkey, "per keyblock weights"));
+  per_keyblock_weights = MEM_malloc_arrayN<float *>(size_t(key->totkey), "per keyblock weights");
 
   for (keyblock = static_cast<KeyBlock *>(key->block.first), keyblock_index = 0; keyblock;
        keyblock = keyblock->next, keyblock_index++)
@@ -1399,8 +1399,7 @@ static void do_mesh_key(Object *ob, Key *key, char *out, const int tot)
     WeightsArrayCache cache = {0, nullptr};
     float **per_keyblock_weights;
     per_keyblock_weights = keyblock_get_per_block_weights(ob, key, &cache);
-    key_evaluate_relative(
-        0, tot, tot, (char *)out, key, actkb, per_keyblock_weights, KEY_MODE_DUMMY);
+    key_evaluate_relative(0, tot, tot, out, key, actkb, per_keyblock_weights, KEY_MODE_DUMMY);
     keyblock_free_per_block_weights(key, per_keyblock_weights, &cache);
   }
   else {
@@ -1409,10 +1408,10 @@ static void do_mesh_key(Object *ob, Key *key, char *out, const int tot)
     flag = setkeys(ctime_scaled, &key->block, k, t, 0);
 
     if (flag == 0) {
-      do_key(0, tot, tot, (char *)out, key, actkb, k, t, KEY_MODE_DUMMY);
+      do_key(0, tot, tot, out, key, actkb, k, t, KEY_MODE_DUMMY);
     }
     else {
-      cp_key(0, tot, tot, (char *)out, key, actkb, k[2], nullptr, KEY_MODE_DUMMY);
+      cp_key(0, tot, tot, out, key, actkb, k[2], nullptr, KEY_MODE_DUMMY);
     }
   }
 }
@@ -1492,8 +1491,7 @@ static void do_latt_key(Object *ob, Key *key, char *out, const int tot)
   if (key->type == KEY_RELATIVE) {
     float **per_keyblock_weights;
     per_keyblock_weights = keyblock_get_per_block_weights(ob, key, nullptr);
-    key_evaluate_relative(
-        0, tot, tot, (char *)out, key, actkb, per_keyblock_weights, KEY_MODE_DUMMY);
+    key_evaluate_relative(0, tot, tot, out, key, actkb, per_keyblock_weights, KEY_MODE_DUMMY);
     keyblock_free_per_block_weights(key, per_keyblock_weights, nullptr);
   }
   else {
@@ -1502,10 +1500,10 @@ static void do_latt_key(Object *ob, Key *key, char *out, const int tot)
     flag = setkeys(ctime_scaled, &key->block, k, t, 0);
 
     if (flag == 0) {
-      do_key(0, tot, tot, (char *)out, key, actkb, k, t, KEY_MODE_DUMMY);
+      do_key(0, tot, tot, out, key, actkb, k, t, KEY_MODE_DUMMY);
     }
     else {
-      cp_key(0, tot, tot, (char *)out, key, actkb, k[2], nullptr, KEY_MODE_DUMMY);
+      cp_key(0, tot, tot, out, key, actkb, k[2], nullptr, KEY_MODE_DUMMY);
     }
   }
 
@@ -1683,9 +1681,11 @@ size_t BKE_keyblock_element_calc_size(const Key *key)
  * use #BKE_keyblock_element_calc_size to allocate the size of the data needed.
  * \{ */
 
-void BKE_keyblock_data_get_from_shape(const Key *key, float (*arr)[3], const int shape_index)
+void BKE_keyblock_data_get_from_shape(const Key *key,
+                                      MutableSpan<float3> arr,
+                                      const int shape_index)
 {
-  uint8_t *elements = (uint8_t *)arr;
+  uint8_t *elements = (uint8_t *)arr.data();
   int index = 0;
   for (const KeyBlock *kb = static_cast<const KeyBlock *>(key->block.first); kb;
        kb = kb->next, index++)
@@ -1698,22 +1698,22 @@ void BKE_keyblock_data_get_from_shape(const Key *key, float (*arr)[3], const int
   }
 }
 
-void BKE_keyblock_data_get(const Key *key, float (*arr)[3])
+void BKE_keyblock_data_get(const Key *key, MutableSpan<float3> arr)
 {
   BKE_keyblock_data_get_from_shape(key, arr, -1);
 }
 
 void BKE_keyblock_data_set_with_mat4(Key *key,
                                      const int shape_index,
-                                     const float (*coords)[3],
-                                     const float mat[4][4])
+                                     const Span<float3> coords,
+                                     const float4x4 &transform)
 {
   if (key->elemsize != sizeof(float[3])) {
     BLI_assert_msg(0, "Invalid elemsize");
     return;
   }
 
-  const float(*elements)[3] = coords;
+  const float3 *elements = coords.data();
 
   int index = 0;
   for (KeyBlock *kb = static_cast<KeyBlock *>(key->block.first); kb; kb = kb->next, index++) {
@@ -1723,15 +1723,18 @@ void BKE_keyblock_data_set_with_mat4(Key *key,
       for (int data_offset = 0; data_offset < block_elem_len; ++data_offset) {
         const float *src_data = (const float *)(elements + data_offset);
         float *dst_data = (float *)(block_data + data_offset);
-        mul_v3_m4v3(dst_data, mat, src_data);
+        mul_v3_m4v3(dst_data, transform.ptr(), src_data);
       }
       elements += block_elem_len;
     }
   }
 }
 
-void BKE_keyblock_curve_data_set_with_mat4(
-    Key *key, const ListBase *nurb, const int shape_index, const void *data, const float mat[4][4])
+void BKE_keyblock_curve_data_set_with_mat4(Key *key,
+                                           const ListBase *nurb,
+                                           const int shape_index,
+                                           const void *data,
+                                           const float4x4 &transform)
 {
   const uint8_t *elements = static_cast<const uint8_t *>(data);
 
@@ -1739,7 +1742,7 @@ void BKE_keyblock_curve_data_set_with_mat4(
   for (KeyBlock *kb = static_cast<KeyBlock *>(key->block.first); kb; kb = kb->next, index++) {
     if (ELEM(shape_index, -1, index)) {
       const int block_elem_size = kb->totelem * key->elemsize;
-      BKE_keyblock_curve_data_transform(nurb, mat, elements, kb->data);
+      BKE_keyblock_curve_data_transform(nurb, transform.ptr(), elements, kb->data);
       elements += block_elem_size;
     }
   }
@@ -1839,7 +1842,7 @@ KeyBlock *BKE_keyblock_add(Key *key, const char *name)
     curpos = kb->pos;
   }
 
-  kb = MEM_cnew<KeyBlock>("Keyblock");
+  kb = MEM_callocN<KeyBlock>("Keyblock");
   BLI_addtail(&key->block, kb);
   kb->type = KEY_LINEAR;
 
@@ -1960,7 +1963,7 @@ std::optional<std::string> BKE_keyblock_curval_rnapath_get(const Key *key, const
   if (ELEM(nullptr, key, kb)) {
     return std::nullopt;
   }
-  PointerRNA ptr = RNA_pointer_create((ID *)&key->id, &RNA_ShapeKey, (KeyBlock *)kb);
+  PointerRNA ptr = RNA_pointer_create_discrete((ID *)&key->id, &RNA_ShapeKey, (KeyBlock *)kb);
   PropertyRNA *prop = RNA_struct_find_property(&ptr, "value");
   return RNA_path_from_ID_to_property(&ptr, prop);
 }
@@ -2000,7 +2003,7 @@ void BKE_keyblock_convert_from_lattice(const Lattice *lt, KeyBlock *kb)
 
   MEM_SAFE_FREE(kb->data);
 
-  kb->data = MEM_mallocN(lt->key->elemsize * tot, __func__);
+  kb->data = MEM_malloc_arrayN(size_t(tot), size_t(lt->key->elemsize), __func__);
   kb->totelem = tot;
 
   BKE_keyblock_update_from_lattice(lt, kb);
@@ -2126,7 +2129,7 @@ void BKE_keyblock_convert_from_curve(const Curve *cu, KeyBlock *kb, const ListBa
 
   MEM_SAFE_FREE(kb->data);
 
-  kb->data = MEM_mallocN(cu->key->elemsize * tot, __func__);
+  kb->data = MEM_malloc_arrayN(size_t(tot), size_t(cu->key->elemsize), __func__);
   kb->totelem = tot;
 
   BKE_keyblock_update_from_curve(cu, kb, nurb);
@@ -2228,7 +2231,7 @@ void BKE_keyblock_mesh_calc_normals(const KeyBlock *kb,
   const blender::Span<int> corner_edges = mesh->corner_edges();
 
   const bool loop_normals_needed = r_loop_normals != nullptr;
-  const bool vert_normals_needed = r_vert_normals != nullptr || loop_normals_needed;
+  const bool vert_normals_needed = r_vert_normals != nullptr;
   const bool face_normals_needed = r_face_normals != nullptr || vert_normals_needed ||
                                    loop_normals_needed;
 
@@ -2237,13 +2240,11 @@ void BKE_keyblock_mesh_calc_normals(const KeyBlock *kb,
   bool free_vert_normals = false;
   bool free_face_normals = false;
   if (vert_normals_needed && r_vert_normals == nullptr) {
-    vert_normals = static_cast<float(*)[3]>(
-        MEM_malloc_arrayN(mesh->verts_num, sizeof(float[3]), __func__));
+    vert_normals = MEM_malloc_arrayN<float[3]>(size_t(mesh->verts_num), __func__);
     free_vert_normals = true;
   }
   if (face_normals_needed && r_face_normals == nullptr) {
-    face_normals = static_cast<float(*)[3]>(
-        MEM_malloc_arrayN(mesh->faces_num, sizeof(float[3]), __func__));
+    face_normals = MEM_malloc_arrayN<float[3]>(size_t(mesh->faces_num), __func__);
     free_face_normals = true;
   }
 
@@ -2275,7 +2276,6 @@ void BKE_keyblock_mesh_calc_normals(const KeyBlock *kb,
         corner_verts,
         corner_edges,
         mesh->corner_to_face_map(),
-        {reinterpret_cast<blender::float3 *>(vert_normals), mesh->verts_num},
         {reinterpret_cast<blender::float3 *>(face_normals), faces.size()},
         sharp_edges,
         sharp_faces,

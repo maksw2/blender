@@ -19,8 +19,6 @@
 
 #include "GPU_material.hh"
 
-#include "COM_shader_node.hh"
-
 #include "node_composite_util.hh"
 
 /* ******************* Color Spill Suppression ********************************* */
@@ -45,7 +43,7 @@ static void cmp_node_color_spill_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_color_spill(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeColorspill *ncs = MEM_cnew<NodeColorspill>(__func__);
+  NodeColorspill *ncs = MEM_callocN<NodeColorspill>(__func__);
   node->storage = ncs;
   node->custom2 = CMP_NODE_COLOR_SPILL_LIMIT_ALGORITHM_SINGLE;
   node->custom1 = 2;    /* green channel */
@@ -60,10 +58,11 @@ static void node_composit_buts_color_spill(uiLayout *layout, bContext * /*C*/, P
 
   uiItemL(layout, IFACE_("Despill Channel:"), ICON_NONE);
   row = uiLayoutRow(layout, false);
-  uiItemR(row, ptr, "channel", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(
+      row, ptr, "channel", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "limit_method", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "limit_method", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   if (RNA_enum_get(ptr, "limit_method") == 0) {
     uiItemL(col, IFACE_("Limiting Channel:"), ICON_NONE);
@@ -72,35 +71,36 @@ static void node_composit_buts_color_spill(uiLayout *layout, bContext * /*C*/, P
             ptr,
             "limit_channel",
             UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_EXPAND,
-            nullptr,
+            std::nullopt,
             ICON_NONE);
   }
 
-  uiItemR(col, ptr, "ratio", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "use_unspill", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(
+      col, ptr, "ratio", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "use_unspill", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   if (RNA_boolean_get(ptr, "use_unspill") == true) {
     uiItemR(col,
             ptr,
             "unspill_red",
             UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-            nullptr,
+            std::nullopt,
             ICON_NONE);
     uiItemR(col,
             ptr,
             "unspill_green",
             UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-            nullptr,
+            std::nullopt,
             ICON_NONE);
     uiItemR(col,
             ptr,
             "unspill_blue",
             UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-            nullptr,
+            std::nullopt,
             ICON_NONE);
   }
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 /* Get the index of the channel used for spilling. */
 static int get_spill_channel(const bNode &node)
@@ -165,35 +165,26 @@ static float get_limit_scale(const bNode &node)
   return node_storage(node).limscale;
 }
 
-class ColorSpillShaderNode : public ShaderNode {
- public:
-  using ShaderNode::ShaderNode;
-
-  void compile(GPUMaterial *material) override
-  {
-    GPUNodeStack *inputs = get_inputs_array();
-    GPUNodeStack *outputs = get_outputs_array();
-
-    const float spill_channel = get_spill_channel(bnode());
-    const float3 spill_scale = get_spill_scale(bnode());
-    const float2 limit_channels = float2(get_limit_channels(bnode()));
-    const float limit_scale = get_limit_scale(bnode());
-
-    GPU_stack_link(material,
-                   &bnode(),
-                   "node_composite_color_spill",
-                   inputs,
-                   outputs,
-                   GPU_constant(&spill_channel),
-                   GPU_uniform(spill_scale),
-                   GPU_constant(limit_channels),
-                   GPU_uniform(&limit_scale));
-  }
-};
-
-static ShaderNode *get_compositor_shader_node(DNode node)
+static int node_gpu_material(GPUMaterial *material,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *inputs,
+                             GPUNodeStack *outputs)
 {
-  return new ColorSpillShaderNode(node);
+  const float spill_channel = get_spill_channel(*node);
+  const float3 spill_scale = get_spill_scale(*node);
+  const float2 limit_channels = float2(get_limit_channels(*node));
+  const float limit_scale = get_limit_scale(*node);
+
+  return GPU_stack_link(material,
+                        node,
+                        "node_composite_color_spill",
+                        inputs,
+                        outputs,
+                        GPU_constant(&spill_channel),
+                        GPU_uniform(spill_scale),
+                        GPU_constant(limit_channels),
+                        GPU_uniform(&limit_scale));
 }
 
 static void node_build_multi_function(blender::nodes::NodeMultiFunctionBuilder &builder)
@@ -223,14 +214,20 @@ void register_node_type_cmp_color_spill()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_COLOR_SPILL, "Color Spill", NODE_CLASS_MATTE);
+  cmp_node_type_base(&ntype, "CompositorNodeColorSpill", CMP_NODE_COLOR_SPILL);
+  ntype.ui_name = "Color Spill";
+  ntype.ui_description =
+      "Remove colors from a blue or green screen, by reducing one RGB channel compared to the "
+      "others";
+  ntype.enum_name_legacy = "COLOR_SPILL";
+  ntype.nclass = NODE_CLASS_MATTE;
   ntype.declare = file_ns::cmp_node_color_spill_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_color_spill;
   ntype.initfunc = file_ns::node_composit_init_color_spill;
   blender::bke::node_type_storage(
-      &ntype, "NodeColorspill", node_free_standard_storage, node_copy_standard_storage);
-  ntype.get_compositor_shader_node = file_ns::get_compositor_shader_node;
+      ntype, "NodeColorspill", node_free_standard_storage, node_copy_standard_storage);
+  ntype.gpu_fn = file_ns::node_gpu_material;
   ntype.build_multi_function = file_ns::node_build_multi_function;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

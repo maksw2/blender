@@ -29,11 +29,10 @@
 #include "DNA_volume_types.h"
 #include "DNA_world_types.h"
 
-#include "BLI_blenlib.h"
-#include "BLI_ghash.h"
-#include "BLI_linklist.h"
+#include "BLI_listbase.h"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 #include "BLI_vector.hh"
 
@@ -52,7 +51,9 @@
 #include "BKE_lib_override.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_lib_remap.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
+#include "BKE_main_invariants.hh"
 #include "BKE_object.hh"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
@@ -82,6 +83,8 @@
 #include "RNA_access.hh"
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
+
+#include "ANIM_action_legacy.hh"
 
 #include "SEQ_relations.hh"
 #include "SEQ_sequencer.hh"
@@ -724,7 +727,7 @@ static bool scene_fn(bContext *C,
   return true;
 }
 
-static int outliner_scene_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_scene_operation_exec(bContext *C, wmOperator *op)
 {
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
   const eOutliner_PropSceneOps event = (eOutliner_PropSceneOps)RNA_enum_get(op->ptr, "type");
@@ -875,7 +878,7 @@ static uiBlock *merged_element_search_menu(bContext *C, ARegion *region, void *d
            nullptr,
            0,
            0,
-           nullptr);
+           std::nullopt);
 
   /* Center the menu on the cursor */
   const int offset[2] = {-(menu_width / 2), 0};
@@ -888,7 +891,7 @@ void merged_element_search_menu_invoke(bContext *C,
                                        TreeElement *parent_te,
                                        TreeElement *activate_te)
 {
-  MergedSearchData *select_data = MEM_cnew<MergedSearchData>("merge_search_data");
+  MergedSearchData *select_data = MEM_callocN<MergedSearchData>("merge_search_data");
   select_data->parent_element = parent_te;
   select_data->select_element = activate_te;
 
@@ -1646,7 +1649,7 @@ static void singleuser_action_fn(bContext *C,
     IdAdtTemplate *iat = (IdAdtTemplate *)tsep->id;
     PropertyRNA *prop;
 
-    PointerRNA ptr = RNA_pointer_create(&iat->id, &RNA_AnimData, iat->adt);
+    PointerRNA ptr = RNA_pointer_create_discrete(&iat->id, &RNA_AnimData, iat->adt);
     prop = RNA_struct_find_property(&ptr, "action");
 
     id_single_user(C, id, &ptr, prop);
@@ -1844,7 +1847,7 @@ static bool outliner_liboverride_operation_poll(bContext *C)
   return true;
 }
 
-static int outliner_liboverride_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_liboverride_operation_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
@@ -2149,27 +2152,27 @@ static void ebone_fn(int event, TreeElement *te, TreeStoreElem * /*tselem*/, voi
 
 static void sequence_fn(int event, TreeElement *te, TreeStoreElem * /*tselem*/, void *scene_ptr)
 {
-  TreeElementSequence *te_seq = tree_element_cast<TreeElementSequence>(te);
-  Sequence *seq = &te_seq->get_sequence();
+  TreeElementStrip *te_strip = tree_element_cast<TreeElementStrip>(te);
+  Strip *strip = &te_strip->get_strip();
   Scene *scene = (Scene *)scene_ptr;
-  Editing *ed = SEQ_editing_get(scene);
-  if (BLI_findindex(ed->seqbasep, seq) != -1) {
+  Editing *ed = seq::editing_get(scene);
+  if (BLI_findindex(ed->seqbasep, strip) != -1) {
     if (event == OL_DOP_SELECT) {
-      ED_sequencer_select_sequence_single(scene, seq, true);
+      vse::select_sequence_single(scene, strip, true);
     }
     else if (event == OL_DOP_DESELECT) {
-      seq->flag &= ~SELECT;
+      strip->flag &= ~SELECT;
     }
     else if (event == OL_DOP_HIDE) {
-      if (!(seq->flag & SEQ_MUTE)) {
-        seq->flag |= SEQ_MUTE;
-        SEQ_relations_invalidate_dependent(scene, seq);
+      if (!(strip->flag & SEQ_MUTE)) {
+        strip->flag |= SEQ_MUTE;
+        seq::relations_invalidate_dependent(scene, strip);
       }
     }
     else if (event == OL_DOP_UNHIDE) {
-      if (seq->flag & SEQ_MUTE) {
-        seq->flag &= ~SEQ_MUTE;
-        SEQ_relations_invalidate_dependent(scene, seq);
+      if (strip->flag & SEQ_MUTE) {
+        strip->flag &= ~SEQ_MUTE;
+        seq::relations_invalidate_dependent(scene, strip);
       }
     }
   }
@@ -2487,7 +2490,7 @@ static const EnumPropertyItem prop_object_op_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int outliner_object_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_object_operation_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
@@ -2660,7 +2663,7 @@ static TreeTraversalAction outliner_collect_objects_to_delete(TreeElement *te, v
   return TRAVERSE_CONTINUE;
 }
 
-static int outliner_delete_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_delete_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
@@ -2722,7 +2725,7 @@ static int outliner_delete_exec(bContext *C, wmOperator *op)
     WM_msg_publish_rna_prop(mbus, &scene->id, view_layer, LayerObjects, active);
   }
 
-  ED_node_tree_propagate_change(C, bmain, nullptr);
+  BKE_main_ensure_invariants(*bmain);
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SELECT);
   WM_event_add_notifier(C, NC_SCENE | ND_OB_SELECT, scene);
@@ -2856,7 +2859,7 @@ static const EnumPropertyItem *outliner_id_operation_itemf(bContext *C,
   return items;
 }
 
-static int outliner_id_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_id_operation_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   wmWindowManager *wm = CTX_wm_manager(C);
@@ -3021,7 +3024,7 @@ static int outliner_id_operation_exec(bContext *C, wmOperator *op)
       break;
   }
 
-  ED_node_tree_propagate_change(C, bmain, nullptr);
+  BKE_main_ensure_invariants(*bmain);
 
   /* wrong notifier still... */
   WM_event_add_notifier(C, NC_ID | NA_EDITED, nullptr);
@@ -3075,7 +3078,7 @@ static const EnumPropertyItem outliner_lib_op_type_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int outliner_lib_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_lib_operation_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
@@ -3112,7 +3115,7 @@ static int outliner_lib_operation_exec(bContext *C, wmOperator *op)
       break;
   }
 
-  ED_node_tree_propagate_change(C, bmain, nullptr);
+  BKE_main_ensure_invariants(*bmain);
 
   /* wrong notifier still... */
   WM_event_add_notifier(C, NC_ID | NA_EDITED, nullptr);
@@ -3182,7 +3185,7 @@ static void actionset_id_fn(TreeElement * /*te*/,
   /* TODO: other cases not supported yet. */
 }
 
-static int outliner_action_set_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_action_set_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
@@ -3199,7 +3202,7 @@ static int outliner_action_set_exec(bContext *C, wmOperator *op)
     BKE_report(op->reports, RPT_ERROR, "No valid action to add");
     return OPERATOR_CANCELLED;
   }
-  if (act->idroot == 0) {
+  if (act->idroot == 0 && blender::animrig::legacy::action_treat_as_legacy(*act)) {
     /* Hopefully in this case (i.e. library of userless actions),
      * the user knows what they're doing. */
     BKE_reportf(op->reports,
@@ -3286,7 +3289,7 @@ static const EnumPropertyItem prop_animdata_op_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int outliner_animdata_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_animdata_operation_exec(bContext *C, wmOperator *op)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
@@ -3381,7 +3384,7 @@ static const EnumPropertyItem prop_constraint_op_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int outliner_constraint_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_constraint_operation_exec(bContext *C, wmOperator *op)
 {
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
   eOutliner_PropConstraintOps event = (eOutliner_PropConstraintOps)RNA_enum_get(op->ptr, "type");
@@ -3429,7 +3432,7 @@ static const EnumPropertyItem prop_modifier_op_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int outliner_modifier_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_modifier_operation_exec(bContext *C, wmOperator *op)
 {
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
   eOutliner_PropModifierOps event = (eOutliner_PropModifierOps)RNA_enum_get(op->ptr, "type");
@@ -3485,16 +3488,11 @@ static bool outliner_data_operation_poll(bContext *C)
 
   int scenelevel = 0, objectlevel = 0, idlevel = 0, datalevel = 0;
   get_element_operation_type(te, &scenelevel, &objectlevel, &idlevel, &datalevel);
-  return ELEM(datalevel,
-              TSE_POSE_CHANNEL,
-              TSE_BONE,
-              TSE_EBONE,
-              TSE_SEQUENCE,
-              TSE_GP_LAYER,
-              TSE_RNA_STRUCT);
+  return ELEM(
+      datalevel, TSE_POSE_CHANNEL, TSE_BONE, TSE_EBONE, TSE_STRIP, TSE_GP_LAYER, TSE_RNA_STRUCT);
 }
 
-static int outliner_data_operation_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus outliner_data_operation_exec(bContext *C, wmOperator *op)
 {
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);
   int scenelevel = 0, objectlevel = 0, idlevel = 0, datalevel = 0;
@@ -3524,7 +3522,7 @@ static int outliner_data_operation_exec(bContext *C, wmOperator *op)
 
       break;
     }
-    case TSE_SEQUENCE: {
+    case TSE_STRIP: {
       Scene *scene = CTX_data_scene(C);
       outliner_do_data_operation(space_outliner, datalevel, event, sequence_fn, scene);
       WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER | NA_SELECTED, scene);
@@ -3624,7 +3622,7 @@ void OUTLINER_OT_data_operation(wmOperatorType *ot)
 /** \name Context Menu Operator
  * \{ */
 
-static int outliner_operator_menu(bContext *C, const char *opname)
+static wmOperatorStatus outliner_operator_menu(bContext *C, const char *opname)
 {
   wmOperatorType *ot = WM_operatortype_find(opname, false);
   uiPopupMenu *pup = UI_popup_menu_begin(C, WM_operatortype_name(ot, nullptr).c_str(), ICON_NONE);
@@ -3646,10 +3644,10 @@ static int outliner_operator_menu(bContext *C, const char *opname)
   return OPERATOR_INTERFACE;
 }
 
-static int do_outliner_operation_event(bContext *C,
-                                       ARegion *region,
-                                       SpaceOutliner *space_outliner,
-                                       TreeElement *te)
+static wmOperatorStatus do_outliner_operation_event(bContext *C,
+                                                    ARegion *region,
+                                                    SpaceOutliner *space_outliner,
+                                                    TreeElement *te)
 {
   int scenelevel = 0, objectlevel = 0, idlevel = 0, datalevel = 0;
   TreeStoreElem *tselem = TREESTORE(te);
@@ -3721,7 +3719,9 @@ static int do_outliner_operation_event(bContext *C,
   return OPERATOR_CANCELLED;
 }
 
-static int outliner_operation_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus outliner_operation_invoke(bContext *C,
+                                                  wmOperator * /*op*/,
+                                                  const wmEvent *event)
 {
   ARegion *region = CTX_wm_region(C);
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);

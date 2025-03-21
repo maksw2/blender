@@ -3,11 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
-#include "BLI_utildefines.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stddef.h>
 
 /** \file
  * \ingroup bke
@@ -21,7 +17,7 @@ extern "C" {
  */
 
 /** Blender major and minor version. */
-#define BLENDER_VERSION 404
+#define BLENDER_VERSION 405
 /** Blender patch version for bug-fix releases. */
 #define BLENDER_VERSION_PATCH 0
 /** Blender release cycle stage: alpha/beta/rc/release. */
@@ -69,7 +65,3 @@ void BKE_blender_version_blendfile_string_from_values(char *str_buff,
                                                       const size_t str_buff_maxncpy,
                                                       const short file_version,
                                                       const short file_subversion);
-
-#ifdef __cplusplus
-}
-#endif

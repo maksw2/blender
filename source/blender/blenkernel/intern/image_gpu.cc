@@ -12,6 +12,7 @@
 #include "BLI_linklist.h"
 #include "BLI_listbase.h"
 #include "BLI_math_base.hh"
+#include "BLI_rect.h"
 #include "BLI_threads.h"
 #include "BLI_time.h"
 
@@ -93,7 +94,7 @@ static GPUTexture *gpu_texture_create_tile_mapping(Image *ima, const int multivi
 
   /* create image */
   int width = max_tile + 1;
-  float *data = (float *)MEM_callocN(width * 8 * sizeof(float), __func__);
+  float *data = MEM_calloc_arrayN<float>(size_t(width) * 8, __func__);
   for (int i = 0; i < width; i++) {
     data[4 * i] = -1.0f;
   }
@@ -146,7 +147,7 @@ static GPUTexture *gpu_texture_create_tile_array(Image *ima, ImBuf *main_ibuf)
     ImBuf *ibuf = BKE_image_acquire_ibuf(ima, &iuser, nullptr);
 
     if (ibuf) {
-      PackTile *packtile = MEM_cnew<PackTile>(__func__);
+      PackTile *packtile = MEM_callocN<PackTile>(__func__);
       packtile->tile = tile;
       packtile->boxpack.w = ibuf->x;
       packtile->boxpack.h = ibuf->y;
@@ -334,7 +335,7 @@ static void image_gpu_texture_try_partial_update(Image *image, ImageUser *iuser)
   }
 }
 
-void BKE_image_ensure_gpu_texture(Image *image, ImageUser *image_user)
+void BKE_image_ensure_gpu_texture(Image *image, ImageUser *iuser)
 {
   if (!image) {
     return;
@@ -342,8 +343,9 @@ void BKE_image_ensure_gpu_texture(Image *image, ImageUser *image_user)
 
   /* Note that the image can cache both stereo views, so we only invalidate the cache if the view
    * index is more than 2. */
-  if (image->gpu_pass != image_user->pass || image->gpu_layer != image_user->layer ||
-      (image->gpu_view != image_user->multi_index && image_user->multi_index >= 2))
+  if (!ELEM(image->gpu_pass, IMAGE_GPU_PASS_NONE, iuser->pass) ||
+      !ELEM(image->gpu_layer, IMAGE_GPU_LAYER_NONE, iuser->layer) ||
+      (!ELEM(image->gpu_view, IMAGE_GPU_VIEW_NONE, iuser->multi_index) && iuser->multi_index >= 2))
   {
     BKE_image_partial_update_mark_full_update(image);
   }
@@ -765,7 +767,7 @@ static void gpu_texture_update_from_ibuf(
      * convention, no colorspace conversion needed. But we do require 4 channels
      * currently. */
     if (ibuf->channels != 4 || scaled || !store_premultiplied) {
-      rect_float = (float *)MEM_mallocN(sizeof(float[4]) * w * h, __func__);
+      rect_float = MEM_malloc_arrayN<float>(4 * size_t(w) * size_t(h), __func__);
       if (rect_float == nullptr) {
         return;
       }
@@ -788,7 +790,7 @@ static void gpu_texture_update_from_ibuf(
     {
       /* sRGB or scene linear or scaled down non-color data, store as byte texture that the GPU
        * can decode directly. */
-      rect = (uchar *)MEM_mallocN(sizeof(uchar[4]) * w * h, __func__);
+      rect = MEM_malloc_arrayN<uchar>(4 * size_t(w) * size_t(h), __func__);
       if (rect == nullptr) {
         return;
       }
@@ -802,7 +804,7 @@ static void gpu_texture_update_from_ibuf(
     }
     else {
       /* Other colorspace, store as float texture to avoid precision loss. */
-      rect_float = (float *)MEM_mallocN(sizeof(float[4]) * w * h, __func__);
+      rect_float = MEM_malloc_arrayN<float>(4 * size_t(w) * size_t(h), __func__);
       if (rect_float == nullptr) {
         return;
       }

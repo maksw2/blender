@@ -7,32 +7,20 @@
  */
 
 #include "DNA_material_types.h"
-#include "DNA_object_types.h"
 #include "DNA_world_types.h"
 
-#include "BLI_dynstr.h"
-#include "BLI_listbase.h"
-#include "BLI_map.hh"
-#include "BLI_string_utils.hh"
 #include "BLI_threads.h"
 #include "BLI_time.h"
-
-#include "BKE_context.hh"
-#include "BKE_global.hh"
-#include "BKE_main.hh"
 
 #include "DEG_depsgraph_query.hh"
 
 #include "GPU_capabilities.hh"
 #include "GPU_material.hh"
-#include "GPU_shader.hh"
+#include "GPU_state.hh"
 
 #include "WM_api.hh"
-#include "WM_types.hh"
 
-#include "wm_window.hh"
-
-#include "draw_manager_c.hh"
+#include "draw_context_private.hh"
 
 #include <atomic>
 #include <condition_variable>
@@ -82,7 +70,7 @@ static DRWShaderCompiler &compiler_data()
   return compiler_data_;
 }
 
-static void *drw_deferred_shader_compilation_exec(void *)
+static void *drw_deferred_shader_compilation_exec(void * /*unused*/)
 {
   using namespace blender;
 
@@ -205,9 +193,10 @@ void DRW_shader_init()
   compiler_data().system_gpu_context = WM_system_gpu_context_create();
   compiler_data().blender_gpu_context = GPU_context_create(nullptr,
                                                            compiler_data().system_gpu_context);
+
+  /* Some part of the code assumes no context is left bound. */
   GPU_context_active_set(nullptr);
-  WM_system_gpu_context_activate(DST.system_gpu_context);
-  GPU_context_active_set(DST.blender_gpu_context);
+  WM_system_gpu_context_release(compiler_data().system_gpu_context);
 
   BLI_threadpool_init(&compilation_threadpool(), drw_deferred_shader_compilation_exec, 1);
   BLI_threadpool_insert(&compilation_threadpool(), nullptr);
@@ -297,42 +286,6 @@ static void drw_deferred_shader_add(GPUMaterial *mat, bool deferred)
   drw_deferred_queue_append(mat, false);
 }
 
-static void drw_register_shader_vlattrs(GPUMaterial *mat)
-{
-  const ListBase *attrs = GPU_material_layer_attributes(mat);
-
-  if (!attrs) {
-    return;
-  }
-
-  GHash *hash = DST.vmempool->vlattrs_name_cache;
-  ListBase *list = &DST.vmempool->vlattrs_name_list;
-
-  LISTBASE_FOREACH (GPULayerAttr *, attr, attrs) {
-    GPULayerAttr **p_val;
-
-    /* Add to the table and list if newly seen. */
-    if (!BLI_ghash_ensure_p(hash, POINTER_FROM_UINT(attr->hash_code), (void ***)&p_val)) {
-      DST.vmempool->vlattrs_ubo_ready = false;
-
-      GPULayerAttr *new_link = *p_val = static_cast<GPULayerAttr *>(MEM_dupallocN(attr));
-
-      /* Insert into the list ensuring sorted order. */
-      GPULayerAttr *link = static_cast<GPULayerAttr *>(list->first);
-
-      while (link && link->hash_code <= attr->hash_code) {
-        link = link->next;
-      }
-
-      new_link->prev = new_link->next = nullptr;
-      BLI_insertlinkbefore(list, link, new_link);
-    }
-
-    /* Reset the unused frames counter. */
-    (*p_val)->users = 0;
-  }
-}
-
 void DRW_deferred_shader_remove(GPUMaterial *mat)
 {
   if (GPU_use_main_context_workaround()) {
@@ -386,7 +339,7 @@ GPUMaterial *DRW_shader_from_world(World *wo,
                                    GPUCodegenCallbackFn callback,
                                    void *thunk)
 {
-  Scene *scene = (Scene *)DEG_get_original_id(&DST.draw_ctx.scene->id);
+  Scene *scene = (Scene *)DEG_get_original_id(&drw_get().scene->id);
   GPUMaterial *mat = GPU_material_from_nodetree(scene,
                                                 nullptr,
                                                 ntree,
@@ -399,9 +352,7 @@ GPUMaterial *DRW_shader_from_world(World *wo,
                                                 callback,
                                                 thunk);
 
-  drw_register_shader_vlattrs(mat);
-
-  if (DRW_state_is_image_render()) {
+  if (DRW_context_get()->is_image_render()) {
     /* Do not deferred if doing render. */
     deferred = false;
   }
@@ -421,7 +372,7 @@ GPUMaterial *DRW_shader_from_material(Material *ma,
                                       void *thunk,
                                       GPUMaterialPassReplacementCallbackFn pass_replacement_cb)
 {
-  Scene *scene = (Scene *)DEG_get_original_id(&DST.draw_ctx.scene->id);
+  Scene *scene = (Scene *)DEG_get_original_id(&drw_get().scene->id);
   GPUMaterial *mat = GPU_material_from_nodetree(scene,
                                                 ma,
                                                 ntree,
@@ -435,8 +386,6 @@ GPUMaterial *DRW_shader_from_material(Material *ma,
                                                 thunk,
                                                 pass_replacement_cb);
 
-  drw_register_shader_vlattrs(mat);
-
   drw_deferred_shader_add(mat, deferred);
   DRW_shader_queue_optimize_material(mat);
   return mat;
@@ -446,7 +395,7 @@ void DRW_shader_queue_optimize_material(GPUMaterial *mat)
 {
   /* Do not perform deferred optimization if performing render.
    * De-queue any queued optimization jobs. */
-  if (DRW_state_is_image_render()) {
+  if (DRW_context_get()->is_image_render()) {
     if (GPU_material_optimization_status(mat) == GPU_MAT_OPTIMIZATION_QUEUED) {
       /* Remove from pending optimization job queue. */
       DRW_deferred_shader_optimize_remove(mat);
@@ -483,11 +432,6 @@ void DRW_shader_queue_optimize_material(GPUMaterial *mat)
 
   /* Add deferred shader compilation to queue. */
   drw_deferred_queue_append(mat, true);
-}
-
-void DRW_shader_free(GPUShader *shader)
-{
-  GPU_shader_free(shader);
 }
 
 /** \} */

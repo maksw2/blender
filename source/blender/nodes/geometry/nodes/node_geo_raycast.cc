@@ -4,7 +4,6 @@
 
 #include "DNA_mesh_types.h"
 
-#include "BKE_attribute_math.hh"
 #include "BKE_bvhutils.hh"
 #include "BKE_mesh_sample.hh"
 
@@ -15,6 +14,8 @@
 #include "UI_resources.hh"
 
 #include "RNA_enum_types.hh"
+
+#include "FN_multi_function_builder.hh"
 
 #include "node_geometry_util.hh"
 
@@ -64,7 +65,7 @@ static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryRaycast *data = MEM_cnew<NodeGeometryRaycast>(__func__);
+  NodeGeometryRaycast *data = MEM_callocN<NodeGeometryRaycast>(__func__);
   data->mapping = GEO_NODE_RAYCAST_INTERPOLATED;
   data->data_type = CD_PROP_FLOAT;
   node->storage = data;
@@ -99,7 +100,7 @@ static void raycast_to_mesh(const IndexMask &mask,
                             const MutableSpan<float3> r_hit_normals,
                             const MutableSpan<float> r_hit_distances)
 {
-  BVHTreeFromMesh tree_data = mesh.bvh_corner_tris();
+  bke::BVHTreeFromMesh tree_data = mesh.bvh_corner_tris();
   if (tree_data.tree == nullptr) {
     return;
   }
@@ -302,16 +303,22 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_RAYCAST, "Raycast", NODE_CLASS_GEOMETRY);
-  bke::node_type_size_preset(&ntype, bke::eNodeSizePreset::Middle);
+  geo_node_type_base(&ntype, "GeometryNodeRaycast", GEO_NODE_RAYCAST);
+  ntype.ui_name = "Raycast";
+  ntype.ui_description =
+      "Cast rays from the context geometry onto a target geometry, and retrieve information from "
+      "each hit point";
+  ntype.enum_name_legacy = "RAYCAST";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
+  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
   ntype.initfunc = node_init;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryRaycast", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryRaycast", node_free_standard_storage, node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

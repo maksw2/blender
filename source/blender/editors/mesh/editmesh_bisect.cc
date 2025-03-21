@@ -48,7 +48,7 @@
 
 using blender::Vector;
 
-static int mesh_bisect_exec(bContext *C, wmOperator *op);
+static wmOperatorStatus mesh_bisect_exec(bContext *C, wmOperator *op);
 
 /* -------------------------------------------------------------------- */
 /* Model Helpers */
@@ -106,7 +106,7 @@ static void mesh_bisect_interactive_calc(bContext *C,
   ED_view3d_win_to_3d(v3d, region, co_ref, co_a_ss, plane_co);
 }
 
-static int mesh_bisect_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus mesh_bisect_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -136,7 +136,7 @@ static int mesh_bisect_invoke(bContext *C, wmOperator *op, const wmEvent *event)
   }
 
   /* Support flipping if side matters. */
-  int ret;
+  wmOperatorStatus ret;
   const bool clear_inner = RNA_boolean_get(op->ptr, "clear_inner");
   const bool clear_outer = RNA_boolean_get(op->ptr, "clear_outer");
   const bool use_fill = RNA_boolean_get(op->ptr, "use_fill");
@@ -173,7 +173,9 @@ static int mesh_bisect_invoke(bContext *C, wmOperator *op, const wmEvent *event)
     G.moving = G_TRANSFORM_EDIT;
 
     /* Initialize modal callout. */
-    ED_workspace_status_text(C, IFACE_("LMB: Click and drag to draw cut line"));
+    WorkspaceStatus status(C);
+    status.item(IFACE_("Cancel"), ICON_EVENT_ESC);
+    status.item(IFACE_("Draw Cut Line"), ICON_MOUSE_LMB_DRAG);
   }
   return ret;
 }
@@ -190,12 +192,12 @@ static void edbm_bisect_exit(BisectData *opdata)
   MEM_freeN(opdata->backup);
 }
 
-static int mesh_bisect_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus mesh_bisect_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   wmGesture *gesture = static_cast<wmGesture *>(op->customdata);
   BisectData *opdata = static_cast<BisectData *>(gesture->user_data.data);
   BisectData opdata_back = *opdata; /* annoyance, WM_gesture_straightline_modal, frees */
-  int ret;
+  wmOperatorStatus ret;
 
   ret = WM_gesture_straightline_modal(C, op, event);
 
@@ -226,14 +228,14 @@ static int mesh_bisect_modal(bContext *C, wmOperator *op, const wmEvent *event)
 /* End Model Helpers */
 /* -------------------------------------------------------------------- */
 
-static int mesh_bisect_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mesh_bisect_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
 
   /* both can be nullptr, fallbacks values are used */
   RegionView3D *rv3d = ED_view3d_context_rv3d(C);
 
-  int ret = OPERATOR_CANCELLED;
+  wmOperatorStatus ret = OPERATOR_CANCELLED;
 
   float plane_co[3];
   float plane_no[3];
@@ -499,8 +501,8 @@ struct GizmoGroup {
 static void gizmo_bisect_exec(GizmoGroup *ggd)
 {
   wmOperator *op = ggd->data.op;
-  if (op == WM_operator_last_redo((bContext *)ggd->data.context)) {
-    ED_undo_operator_repeat((bContext *)ggd->data.context, op);
+  if (op == WM_operator_last_redo(ggd->data.context)) {
+    ED_undo_operator_repeat(ggd->data.context, op);
   }
 }
 
@@ -749,7 +751,7 @@ static void gizmo_mesh_bisect_draw_prepare(const bContext * /*C*/, wmGizmoGroup 
 {
   GizmoGroup *ggd = static_cast<GizmoGroup *>(gzgroup->customdata);
   if (ggd->data.op->next) {
-    ggd->data.op = WM_operator_last_redo((bContext *)ggd->data.context);
+    ggd->data.op = WM_operator_last_redo(ggd->data.context);
   }
   gizmo_mesh_bisect_update_from_op(ggd);
 }

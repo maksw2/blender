@@ -2,8 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_lib.glsl"
+#include "infos/overlay_wireframe_info.hh"
+
+FRAGMENT_SHADER_CREATE_INFO(overlay_wireframe_base)
+
 #include "gpu_shader_utildefines_lib.glsl"
+#include "overlay_common_lib.glsl"
 #include "select_lib.glsl"
 
 void main()
@@ -32,18 +36,9 @@ void main()
   fragColor = vec4(mix(final_front_col, rim_col, saturate(fac)), 1.0);
   fragColor *= fragColor;
 
-#elif !defined(SELECT_EDGES)
+#elif !defined(SELECT_ENABLE)
   lineOutput = pack_line_data(gl_FragCoord.xy, edgeStart, edgePos);
   fragColor = finalColor;
-
-#  ifndef CUSTOM_DEPTH_BIAS_CONST
-/* TODO(fclem): Cleanup after overlay next. */
-#    ifndef CUSTOM_DEPTH_BIAS
-  const bool use_custom_depth_bias = false;
-#    else
-  const bool use_custom_depth_bias = true;
-#    endif
-#  endif
 
 #  if !defined(CURVES)
   if (use_custom_depth_bias) {

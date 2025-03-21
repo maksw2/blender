@@ -6,6 +6,7 @@
  * \ingroup edmesh
  */
 
+#include <algorithm>
 #include <variant>
 
 #include "MEM_guardedalloc.h"
@@ -22,6 +23,7 @@
 #include "BLI_array_utils.h"
 #include "BLI_implicit_sharing.hh"
 #include "BLI_listbase.h"
+#include "BLI_math_base.h"
 #include "BLI_string.h"
 #include "BLI_task.hh"
 #include "BLI_vector.hh"
@@ -332,6 +334,7 @@ static void um_arraystore_cd_expand(const BArrayCustomData *bcd,
         if (state) {
           size_t state_len;
           layer->data = BLI_array_store_state_data_get_alloc(state, &state_len);
+          layer->sharing_info = implicit_sharing::info_for_mem_free(layer->data);
           BLI_assert(stride * data_len == state_len);
           UNUSED_VARS_NDEBUG(stride, data_len);
         }

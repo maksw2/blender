@@ -6,9 +6,13 @@
  * \ingroup draw
  */
 
+#include <algorithm>
+
 #include "MEM_guardedalloc.h"
 
 #include "BLI_jitter_2d.h"
+#include "BLI_map.hh"
+#include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 #include "BLI_ordered_edge.hh"
@@ -175,9 +179,7 @@ static void statvis_calc_thickness(const MeshRenderData &mr, MutableSpan<float> 
           angle_fac = angle_fac * angle_fac * angle_fac;
           angle_fac = 1.0f - angle_fac;
           dist /= angle_fac;
-          if (dist < face_dists[index]) {
-            face_dists[index] = dist;
-          }
+          face_dists[index] = std::min(dist, face_dists[index]);
         }
       }
     }
@@ -195,7 +197,7 @@ static void statvis_calc_thickness(const MeshRenderData &mr, MutableSpan<float> 
     }
   }
   else {
-    BVHTreeFromMesh treeData = mr.mesh->bvh_corner_tris();
+    bke::BVHTreeFromMesh treeData = mr.mesh->bvh_corner_tris();
     const BVHTree *tree = treeData.tree;
     if (tree == nullptr) {
       return;
@@ -229,9 +231,7 @@ static void statvis_calc_thickness(const MeshRenderData &mr, MutableSpan<float> 
           angle_fac = angle_fac * angle_fac * angle_fac;
           angle_fac = 1.0f - angle_fac;
           hit.dist /= angle_fac;
-          if (hit.dist < face_dists[index]) {
-            face_dists[index] = hit.dist;
-          }
+          face_dists[index] = std::min(hit.dist, face_dists[index]);
         }
       }
     }
@@ -326,7 +326,7 @@ static void statvis_calc_intersect(const MeshRenderData &mr, MutableSpan<float> 
   }
   else {
     uint overlap_len;
-    BVHTreeFromMesh treeData = mr.mesh->bvh_corner_tris();
+    bke::BVHTreeFromMesh treeData = mr.mesh->bvh_corner_tris();
     const BVHTree *tree = treeData.tree;
     if (tree == nullptr) {
       return;
@@ -571,10 +571,9 @@ void extract_mesh_analysis(const MeshRenderData &mr, gpu::VertBuf &vbo)
 {
   BLI_assert(mr.edit_bmesh);
 
-  static GPUVertFormat format = {0};
-  if (format.attr_len == 0) {
-    GPU_vertformat_attr_add(&format, "weight", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
-  }
+  static const GPUVertFormat format = GPU_vertformat_from_attribute(
+      "weight", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
+
   GPU_vertbuf_init_with_format(vbo, format);
   GPU_vertbuf_data_alloc(vbo, mr.corners_num);
   MutableSpan<float> vbo_data = vbo.data<float>();

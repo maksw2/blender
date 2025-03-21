@@ -8,7 +8,12 @@
 
 #pragma once
 
+#include "BLI_time.h"
+
 #include "BKE_paint.hh"
+
+#include "draw_cache.hh"
+#include "draw_sculpt.hh"
 
 #include "overlay_next_base.hh"
 
@@ -48,8 +53,9 @@ class ModeTransfer : Overlay {
     ps_.init();
     ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_WRITE_DEPTH,
                   state.clipping_plane_count);
-    ps_.shader_set(res.shaders.uniform_color.get());
+    ps_.shader_set(res.shaders->uniform_color.get());
     ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+    ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
 
     any_animated_ = false;
   }

@@ -24,7 +24,6 @@
 #include "GPU_index_buffer.hh"
 #include "GPU_shader.hh"
 #include "GPU_storage_buffer.hh"
-#include "GPU_uniform_buffer.hh"
 #include "GPU_vertex_buffer.hh"
 
 struct GPUShader;
@@ -430,6 +429,40 @@ blender::IndexRange GPU_batch_draw_expanded_parameter_get(GPUPrimType input_prim
                                                           int vertex_count,
                                                           int vertex_first,
                                                           int output_primitive_cout);
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Procedural drawing
+ *
+ * A drawcall always need a batch to be issued.
+ * These are dummy batches that contains no vertex data and can be used to render geometry
+ * without per vertex inputs.
+ * \{ */
+
+/**
+ * Batch with no attributes, suited for rendering procedural geometry.
+ * IMPORTANT: The returned batch is only valid for the current context.
+ */
+blender::gpu::Batch *GPU_batch_procedural_points_get();
+
+/**
+ * Batch with no attributes, suited for rendering procedural geometry.
+ * IMPORTANT: The returned batch is only valid for the current context.
+ */
+blender::gpu::Batch *GPU_batch_procedural_lines_get();
+
+/**
+ * Batch with no attributes, suited for rendering procedural geometry.
+ * IMPORTANT: The returned batch is only valid for the current context.
+ */
+blender::gpu::Batch *GPU_batch_procedural_triangles_get();
+
+/**
+ * Batch with no attributes, suited for rendering procedural geometry.
+ * IMPORTANT: The returned batch is only valid for the current context.
+ */
+blender::gpu::Batch *GPU_batch_procedural_triangle_strips_get();
 
 /** \} */
 

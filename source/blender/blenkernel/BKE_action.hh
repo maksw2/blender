@@ -7,14 +7,10 @@
  * \ingroup bke
  * \brief Blender kernel action and pose functionality.
  */
-#ifndef __cplusplus
-#  error This is a C++ only header.
-#endif
 
 #include "BLI_compiler_attrs.h"
 #include "BLI_function_ref.hh"
-
-#include "DNA_listBase.h"
+#include "BLI_span.hh"
 
 struct BlendDataReader;
 struct BlendLibReader;
@@ -367,7 +363,11 @@ void BKE_pose_blend_read_after_liblink(BlendLibReader *reader, Object *ob, bPose
 
 /* `action_mirror.cc` */
 
-void BKE_action_flip_with_pose(bAction *act, Object *ob_arm) ATTR_NONNULL(1, 2);
+/**
+ * Flip the action so it can be applied as a mirror. Only data of slots that are related to the
+ * given objects is mirrored.
+ */
+void BKE_action_flip_with_pose(bAction *act, blender::Span<Object *> objects) ATTR_NONNULL(1);
 
 namespace blender::bke {
 
@@ -376,14 +376,15 @@ using FoundFCurveCallbackConst =
     blender::FunctionRef<void(const FCurve *fcurve, const char *bone_name)>;
 
 /**
- * Calls `callback` for every fcurve in `action` that targets any bone.
+ * Calls `callback` for every fcurve in an action slot that targets any bone.
  *
- * For layered actions this is currently limited to fcurves in the first slot of
- * the action. This is because these functions are intended for use by pose
- * library code, which currently (as of writing this) only use the first slot in
- * layered actions.
+ * \param slot_handle: only FCurves from the given action slot are visited.
  */
-void BKE_action_find_fcurves_with_bones(bAction *action, FoundFCurveCallback callback);
-void BKE_action_find_fcurves_with_bones(const bAction *action, FoundFCurveCallbackConst callback);
+void BKE_action_find_fcurves_with_bones(bAction *action,
+                                        blender::animrig::slot_handle_t slot_handle,
+                                        FoundFCurveCallback callback);
+void BKE_action_find_fcurves_with_bones(const bAction *action,
+                                        blender::animrig::slot_handle_t slot_handle,
+                                        FoundFCurveCallbackConst callback);
 
 };  // namespace blender::bke

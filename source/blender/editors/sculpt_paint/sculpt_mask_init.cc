@@ -6,11 +6,8 @@
  * \ingroup edsculpt
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_hash.h"
-#include "BLI_task.h"
 #include "BLI_time.h"
 
 #include "DNA_object_types.h"
@@ -107,7 +104,7 @@ static void init_mask_grids(
   BKE_subdiv_ccg_average_grids(subdiv_ccg);
 }
 
-static int sculpt_mask_init_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus sculpt_mask_init_exec(bContext *C, wmOperator *op)
 {
   const View3D *v3d = CTX_wm_view3d(C);
   const Base *base = CTX_data_active_base(C);

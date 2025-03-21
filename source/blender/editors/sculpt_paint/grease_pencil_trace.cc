@@ -10,7 +10,7 @@
 #include "BKE_image.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_object.hh"
 #include "BKE_report.hh"
 
@@ -42,6 +42,10 @@
 #include "RNA_define.hh"
 
 #include "grease_pencil_trace_util.hh"
+
+#ifdef WITH_POTRACE
+#  include "potracelib.h"
+#endif
 
 namespace blender::ed::sculpt_paint::greasepencil {
 
@@ -179,9 +183,11 @@ static int ensure_background_material(Main *bmain, Object *ob, const StringRefNu
 
 static bke::CurvesGeometry grease_pencil_trace_image(TraceJob &trace_job, const ImBuf &ibuf)
 {
-  /* Trace the image. */
+  /* Trace the image.
+   * Note: Colors above threshold are interpreted as "background". This works well for images with
+   * black-on-white drawings, but is quite arbitrary. */
   potrace_bitmap_t *bm = image_trace::image_to_bitmap(ibuf, [&](const ColorGeometry4f &color) {
-    return math::average(float3(color.r, color.g, color.b)) * color.a > trace_job.threshold;
+    return math::average(float3(color.r, color.g, color.b)) * color.a <= trace_job.threshold;
   });
 
   image_trace::TraceParams params;
@@ -254,6 +260,9 @@ static void trace_start_job(void *customdata, wmJobWorkerStatus *worker_status)
       BKE_image_release_ibuf(trace_job.image, ibuf, lock);
       *(trace_job.progress) = 1.0f;
     }
+    /* If source type is not sequence, override `trace_job.mode` to single because we need the
+     * correct mode for finalization. */
+    trace_job.mode = TraceMode::Single;
   }
   /* Image sequence. */
   else if (trace_job.image->type == IMA_TYPE_IMAGE) {
@@ -368,7 +377,7 @@ static bool grease_pencil_trace_image_poll(bContext *C)
   return true;
 }
 
-static int grease_pencil_trace_image_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus grease_pencil_trace_image_exec(bContext *C, wmOperator *op)
 {
   TraceJob *job = MEM_new<TraceJob>("TraceJob");
   job->C = C;
@@ -439,7 +448,9 @@ static int grease_pencil_trace_image_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int grease_pencil_trace_image_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus grease_pencil_trace_image_invoke(bContext *C,
+                                                         wmOperator *op,
+                                                         const wmEvent * /*event*/)
 {
   /* Show popup dialog to allow editing. */
   /* FIXME: hard-coded dimensions here are just arbitrary. */

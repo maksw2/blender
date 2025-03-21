@@ -21,9 +21,10 @@
 
 #include "BLT_translation.hh"
 
-#include "BLI_bitmap.h"
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_math_color.h"
+#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 
 #include "BIF_glutil.hh"
 
@@ -33,21 +34,21 @@
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
+#include "BKE_preview_image.hh"
 #include "BKE_screen.hh"
-
-#include "GHOST_C-api.h"
 
 #include "BLO_readfile.hh"
 
-#include "ED_asset.hh"
 #include "ED_fileselect.hh"
 #include "ED_screen.hh"
 
-#include "GPU_shader.hh"
+#include "GPU_shader_builtin.hh"
 #include "GPU_state.hh"
-#include "GPU_viewport.hh"
 
+#include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
+
+#include "GHOST_Types.h"
 
 #include "UI_interface.hh"
 #include "UI_interface_icons.hh"
@@ -96,7 +97,7 @@ ListBase *WM_dropboxmap_find(const char *idname, int spaceid, int regionid)
     }
   }
 
-  wmDropBoxMap *dm = MEM_cnew<wmDropBoxMap>(__func__);
+  wmDropBoxMap *dm = MEM_callocN<wmDropBoxMap>(__func__);
   STRNCPY_UTF8(dm->idname, idname);
   dm->spaceid = spaceid;
   dm->regionid = regionid;
@@ -118,7 +119,7 @@ wmDropBox *WM_dropbox_add(ListBase *lb,
     return nullptr;
   }
 
-  wmDropBox *drop = MEM_cnew<wmDropBox>(__func__);
+  wmDropBox *drop = MEM_callocN<wmDropBox>(__func__);
   drop->poll = poll;
   drop->copy = copy;
   drop->cancel = cancel;
@@ -325,7 +326,7 @@ void wm_drags_exit(wmWindowManager *wm, wmWindow *win)
     WM_cursor_modal_restore(win);
   }
 
-  /* Active area should always redraw, even if cancelled. */
+  /* Active area should always redraw, even if canceled. */
   int event_xy_target[2];
   wmWindow *target_win = WM_window_find_under_cursor(win, win->eventstate->xy, event_xy_target);
   if (target_win) {
@@ -357,6 +358,12 @@ void WM_event_drag_image(wmDrag *drag, const ImBuf *imb, float scale)
 {
   drag->imb = imb;
   drag->imbuf_scale = scale;
+}
+
+void WM_event_drag_preview_icon(wmDrag *drag, int icon_id)
+{
+  BLI_assert_msg(!drag->imb, "Drag image and preview are mutually exclusive");
+  drag->preview_icon_id = icon_id;
 }
 
 void WM_drag_data_free(eWM_DragDataType dragtype, void *poin)
@@ -610,7 +617,7 @@ void WM_drag_add_local_ID(wmDrag *drag, ID *id, ID *from_parent)
   }
 
   /* Add to list. */
-  wmDragID *drag_id = MEM_cnew<wmDragID>(__func__);
+  wmDragID *drag_id = MEM_callocN<wmDragID>(__func__);
   drag_id->id = id;
   drag_id->from_parent = from_parent;
   BLI_addtail(&drag->ids, drag_id);
@@ -647,12 +654,12 @@ bool WM_drag_is_ID_type(const wmDrag *drag, int idcode)
 }
 
 wmDragAsset *WM_drag_create_asset_data(const blender::asset_system::AssetRepresentation *asset,
-                                       int import_method)
+                                       const AssetImportSettings &import_settings)
 {
   wmDragAsset *asset_drag = MEM_new<wmDragAsset>(__func__);
 
   asset_drag->asset = asset;
-  asset_drag->import_method = import_method;
+  asset_drag->import_settings = import_settings;
 
   return asset_drag;
 }
@@ -695,13 +702,17 @@ ID *WM_drag_asset_id_import(const bContext *C, wmDragAsset *asset_drag, const in
 {
   /* Only support passing in limited flags. */
   BLI_assert(flag_extra == (flag_extra & FILE_AUTOSELECT));
-  eFileSel_Params_Flag flag = static_cast<eFileSel_Params_Flag>(flag_extra) |
-                              FILE_ACTIVE_COLLECTION;
+  /* #eFileSel_Params_Flag + #eBLOLibLinkFlags */
+  int flag = flag_extra | FILE_ACTIVE_COLLECTION;
 
   const char *name = asset_drag->asset->get_name().c_str();
   const std::string blend_path = asset_drag->asset->full_library_path();
   const ID_Type idtype = asset_drag->asset->get_id_type();
   const bool use_relative_path = asset_drag->asset->get_use_relative_path();
+
+  if (asset_drag->import_settings.use_instance_collections) {
+    flag |= BLO_LIBLINK_COLLECTION_INSTANCE;
+  }
 
   /* FIXME: Link/Append should happens in the operator called at the end of drop process, not from
    * here. */
@@ -711,7 +722,7 @@ ID *WM_drag_asset_id_import(const bContext *C, wmDragAsset *asset_drag, const in
   ViewLayer *view_layer = CTX_data_view_layer(C);
   View3D *view3d = CTX_wm_view3d(C);
 
-  switch (eAssetImportMethod(asset_drag->import_method)) {
+  switch (eAssetImportMethod(asset_drag->import_settings.method)) {
     case ASSET_IMPORT_LINK:
       return WM_file_link_datablock(bmain,
                                     scene,
@@ -755,7 +766,7 @@ bool WM_drag_asset_will_import_linked(const wmDrag *drag)
   }
 
   const wmDragAsset *asset_drag = WM_drag_get_asset_data(drag, 0);
-  return asset_drag->import_method == ASSET_IMPORT_LINK;
+  return asset_drag->import_settings.method == ASSET_IMPORT_LINK;
 }
 
 ID *WM_drag_get_local_ID_or_import_from_asset(const bContext *C, const wmDrag *drag, int idcode)
@@ -819,7 +830,7 @@ void WM_drag_add_asset_list_item(wmDrag *drag,
   /* No guarantee that the same asset isn't added twice. */
 
   /* Add to list. */
-  wmDragAssetListItem *drag_asset = MEM_cnew<wmDragAssetListItem>(__func__);
+  wmDragAssetListItem *drag_asset = MEM_callocN<wmDragAssetListItem>(__func__);
   ID *local_id = asset->local_id();
   if (local_id) {
     drag_asset->is_external = false;
@@ -827,7 +838,12 @@ void WM_drag_add_asset_list_item(wmDrag *drag,
   }
   else {
     drag_asset->is_external = true;
-    drag_asset->asset_data.external_info = WM_drag_create_asset_data(asset, ASSET_IMPORT_APPEND);
+
+    AssetImportSettings import_settings{};
+    import_settings.method = ASSET_IMPORT_APPEND;
+    import_settings.use_instance_collections = false;
+
+    drag_asset->asset_data.external_info = WM_drag_create_asset_data(asset, import_settings);
   }
   BLI_addtail(&drag->asset_items, drag_asset);
 }
@@ -848,8 +864,9 @@ wmDragPath *WM_drag_create_path_data(blender::Span<const char *> paths)
 
   for (const char *path : paths) {
     path_data->paths.append(path);
-    path_data->file_types_bit_flag |= ED_path_extension_type(path);
-    path_data->file_types.append(ED_path_extension_type(path));
+    const int type_flag = ED_path_extension_type(path);
+    path_data->file_types_bit_flag |= type_flag;
+    path_data->file_types.append(type_flag);
   }
 
   path_data->tooltip = path_data->paths[0];
@@ -1016,6 +1033,11 @@ static int wm_drag_imbuf_icon_height_get(const wmDrag *drag)
   return round_fl_to_int(drag->imb->y * drag->imbuf_scale);
 }
 
+static int wm_drag_preview_icon_size_get()
+{
+  return UI_preview_tile_size_x();
+}
+
 static void wm_drag_draw_icon(bContext * /*C*/, wmWindow * /*win*/, wmDrag *drag, const int xy[2])
 {
   int x, y;
@@ -1044,6 +1066,13 @@ static void wm_drag_draw_icon(bContext * /*C*/, wmWindow * /*win*/, wmDrag *drag
                                   1.0f,
                                   1.0f,
                                   col);
+  }
+  else if (drag->preview_icon_id) {
+    const int size = wm_drag_preview_icon_size_get();
+    x = xy[0] - (size / 2);
+    y = xy[1] - (size / 2);
+
+    UI_icon_draw_preview(x, y, drag->preview_icon_id, UI_INV_SCALE_FAC, 0.8, size);
   }
   else {
     int padding = 4 * UI_SCALE_FAC;
@@ -1103,6 +1132,18 @@ static void wm_drag_draw_tooltip(bContext *C, wmWindow *win, wmDrag *drag, const
       y = xy[1] - (icon_height / 2) - padding - iconsize - padding - iconsize;
     }
   }
+  if (drag->preview_icon_id) {
+    const int size = wm_drag_preview_icon_size_get();
+
+    x = xy[0] - (size / 2);
+
+    if (xy[1] + (size / 2) + padding + iconsize < winsize_y) {
+      y = xy[1] + (size / 2) + padding;
+    }
+    else {
+      y = xy[1] - (size / 2) - padding - iconsize - padding - iconsize;
+    }
+  }
   else {
     x = xy[0] - 2 * padding;
 
@@ -1134,6 +1175,12 @@ static void wm_drag_draw_default(bContext *C, wmWindow *win, wmDrag *drag, const
     int iconsize = UI_ICON_SIZE;
     xy_tmp[0] = xy[0] - (wm_drag_imbuf_icon_width_get(drag) / 2);
     xy_tmp[1] = xy[1] - (wm_drag_imbuf_icon_height_get(drag) / 2) - iconsize;
+  }
+  else if (drag->preview_icon_id) {
+    const int icon_size = UI_ICON_SIZE;
+    const int preview_size = wm_drag_preview_icon_size_get();
+    xy_tmp[0] = xy[0] - (preview_size / 2);
+    xy_tmp[1] = xy[1] - (preview_size / 2) - icon_size;
   }
   else {
     xy_tmp[0] = xy[0] + 10 * UI_SCALE_FAC;

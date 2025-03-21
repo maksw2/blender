@@ -10,9 +10,7 @@
 
 #pragma once
 
-#include <cstdint>
-
-#include "BLI_vector.hh"
+#include "BLI_function_ref.hh"
 #include "DNA_action_types.h"
 
 struct FCurve;
@@ -52,7 +50,7 @@ void foreach_fcurve_in_action_slot(Action &action,
  *   - NLA strips.
  *   - Action Constraints, both on Object and Pose Bone level.
  *
- * \param callback The function to call for each Action+Slot used. Even when there is no slot
+ * \param callback: The function to call for each Action+Slot used. Even when there is no slot
  * assigned, this function will be called (but then with slot_handle = Slot::unassigned). The
  * callback should return `true` to continue the foreach loop, or return `false` to stop it.
  *
@@ -77,10 +75,33 @@ bool foreach_action_slot_use(
  * \see blender::animrig::generic_assign_action_slot
  * \see blender::animrig::generic_assign_action_slot_handle
  */
-bool foreach_action_slot_use_with_references(ID &animated_id,
-                                             FunctionRef<bool(ID &animated_id,
-                                                              bAction *&action_ptr_ref,
-                                                              slot_handle_t &slot_handle_ref,
-                                                              char *slot_name)> callback);
+bool foreach_action_slot_use_with_references(
+    ID &animated_id,
+    FunctionRef<bool(ID &animated_id,
+                     bAction *&action_ptr_ref,
+                     slot_handle_t &slot_handle_ref,
+                     char *last_slot_identifier)> callback);
+
+/**
+ * Essentially the same as foreach_action_slot_use(), except that it provides
+ * the ID as well as the RNA properties via which the callback can modify which
+ * Action/slot is assigned.
+ *
+ * The ID passed to the callback is always the same `animated_id` as is passed
+ * to this function. The actions & slots passed to the callback are *not*
+ * necessarily the direct action & slot of that ID: they can also be the action
+ * & slot of an Action Constraint or NLA Strip owned by the ID.
+ *
+ * \note this function CANNOT be used to change which Action is assigned, as that makes the
+ * PointerRNA/PropertyRNA values invalid.
+ *
+ * \see foreach_action_slot_use_with_references
+ */
+bool foreach_action_slot_use_with_rna(ID &animated_id,
+                                      FunctionRef<bool(ID &animated_id,
+                                                       bAction *action,
+                                                       PointerRNA &action_slot_owner_ptr,
+                                                       PropertyRNA &action_slot_prop,
+                                                       char *last_slot_identifier)> callback);
 
 }  // namespace blender::animrig

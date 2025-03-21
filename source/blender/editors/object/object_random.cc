@@ -6,8 +6,6 @@
  * \ingroup edobj
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "DNA_layer_types.h"
 #include "DNA_object_types.h"
 
@@ -75,7 +73,7 @@ static bool object_rand_transverts(TransVertStore *tvs,
   return true;
 }
 
-static int object_rand_verts_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_rand_verts_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);

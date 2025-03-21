@@ -32,10 +32,10 @@ static void cmp_node_composite_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_buts_composite(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "use_alpha", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "use_alpha", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class CompositeOperation : public NodeOperation {
  public:
@@ -70,12 +70,12 @@ class CompositeOperation : public NodeOperation {
     const Result &image = get_input("Image");
     const Result &alpha = get_input("Alpha");
 
-    float4 color = image.get_color_value();
+    float4 color = image.get_single_value<float4>();
     if (ignore_alpha()) {
       color.w = 1.0f;
     }
     else if (node().input_by_identifier("Alpha")->is_logically_linked()) {
-      color.w = alpha.get_float_value();
+      color.w = alpha.get_single_value<float>();
     }
 
     const Domain domain = compute_domain();
@@ -135,7 +135,8 @@ class CompositeOperation : public NodeOperation {
       if (output_texel.x > bounds.max.x || output_texel.y > bounds.max.y) {
         return;
       }
-      output.store_pixel(texel + bounds.min, float4(image.load_pixel(texel).xyz(), 1.0f));
+      output.store_pixel(texel + bounds.min,
+                         float4(image.load_pixel<float4, true>(texel).xyz(), 1.0f));
     });
   }
 
@@ -187,7 +188,7 @@ class CompositeOperation : public NodeOperation {
       if (output_texel.x > bounds.max.x || output_texel.y > bounds.max.y) {
         return;
       }
-      output.store_pixel(texel + bounds.min, image.load_pixel(texel));
+      output.store_pixel(texel + bounds.min, image.load_pixel<float4>(texel));
     });
   }
 
@@ -244,7 +245,8 @@ class CompositeOperation : public NodeOperation {
         return;
       }
       output.store_pixel(texel + bounds.min,
-                         float4(image.load_pixel(texel).xyz(), alpha.load_pixel(texel).x));
+                         float4(image.load_pixel<float4, true>(texel).xyz(),
+                                alpha.load_pixel<float, true>(texel)));
     });
   }
 
@@ -286,11 +288,15 @@ void register_node_type_cmp_composite()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_COMPOSITE, "Composite", NODE_CLASS_OUTPUT);
+  cmp_node_type_base(&ntype, "CompositorNodeComposite", CMP_NODE_COMPOSITE);
+  ntype.ui_name = "Composite";
+  ntype.ui_description = "Final render output";
+  ntype.enum_name_legacy = "COMPOSITE";
+  ntype.nclass = NODE_CLASS_OUTPUT;
   ntype.declare = file_ns::cmp_node_composite_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_composite;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
   ntype.no_muting = true;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

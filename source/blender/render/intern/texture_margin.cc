@@ -29,7 +29,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <valarray>
 
 namespace blender::render::texturemargin {
 
@@ -88,14 +87,14 @@ class TextureMarginMap {
     zbuf_free_span(&zspan_);
   }
 
-  inline void set_pixel(int x, int y, uint32_t value)
+  void set_pixel(int x, int y, uint32_t value)
   {
     BLI_assert(x < w_);
     BLI_assert(x >= 0);
     pixel_data_[y * w_ + x] = value;
   }
 
-  inline uint32_t get_pixel(int x, int y) const
+  uint32_t get_pixel(int x, int y) const
   {
     if (x < 0 || y < 0 || x >= w_ || y >= h_) {
       return 0xFFFFFFFF;
@@ -521,7 +520,7 @@ static void generate_margin(ImBuf *ibuf,
     mask = (char *)MEM_dupallocN(mask);
   }
   else {
-    mask = (char *)MEM_callocN(sizeof(char) * ibuf->x * ibuf->y, __func__);
+    mask = MEM_calloc_arrayN<char>(size_t(ibuf->x) * size_t(ibuf->y), __func__);
     draw_new_mask = true;
   }
 

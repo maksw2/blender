@@ -6,7 +6,6 @@
 
 #include "NOD_geo_bake.hh"
 #include "NOD_node_extra_info.hh"
-#include "NOD_rna_define.hh"
 #include "NOD_socket_items_ops.hh"
 #include "NOD_socket_items_ui.hh"
 #include "NOD_socket_search_link.hh"
@@ -22,6 +21,7 @@
 #include "BKE_bake_items_socket.hh"
 #include "BKE_context.hh"
 #include "BKE_global.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_screen.hh"
 
@@ -85,9 +85,9 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryBake *data = MEM_cnew<NodeGeometryBake>(__func__);
+  NodeGeometryBake *data = MEM_callocN<NodeGeometryBake>(__func__);
 
-  data->items = MEM_cnew_array<NodeGeometryBakeItem>(1, __func__);
+  data->items = MEM_calloc_arrayN<NodeGeometryBakeItem>(1, __func__);
   data->items_num = 1;
 
   NodeGeometryBakeItem &item = data->items[0];
@@ -108,7 +108,7 @@ static void node_free_storage(bNode *node)
 static void node_copy_storage(bNodeTree * /*tree*/, bNode *dst_node, const bNode *src_node)
 {
   const NodeGeometryBake &src_storage = node_storage(*src_node);
-  auto *dst_storage = MEM_cnew<NodeGeometryBake>(__func__, src_storage);
+  auto *dst_storage = MEM_dupallocN<NodeGeometryBake>(__func__, src_storage);
   dst_node->storage = dst_storage;
 
   socket_items::copy_array<BakeItemsAccessor>(*src_node, *dst_node);
@@ -122,8 +122,7 @@ static bool node_insert_link(bNodeTree *ntree, bNode *node, bNodeLink *link)
 
 static const CPPType &get_item_cpp_type(const eNodeSocketDatatype socket_type)
 {
-  const StringRefNull socket_idname = *bke::node_static_socket_type(socket_type, 0);
-  const bke::bNodeSocketType *typeinfo = bke::node_socket_type_find(socket_idname);
+  const bke::bNodeSocketType *typeinfo = bke::node_socket_type_find_static(socket_type);
   BLI_assert(typeinfo);
   BLI_assert(typeinfo->geometry_nodes_cpp_type);
   return *typeinfo->geometry_nodes_cpp_type;
@@ -135,17 +134,17 @@ static void draw_bake_items(const bContext *C, uiLayout *layout, PointerRNA node
   bNode &node = *static_cast<bNode *>(node_ptr.data);
   NodeGeometryBake &storage = node_storage(node);
 
-  if (uiLayout *panel = uiLayoutPanel(C, layout, "bake_items", false, TIP_("Bake Items"))) {
+  if (uiLayout *panel = uiLayoutPanel(C, layout, "bake_items", false, IFACE_("Bake Items"))) {
     socket_items::ui::draw_items_list_with_operators<BakeItemsAccessor>(C, panel, tree, node);
     socket_items::ui::draw_active_item_props<BakeItemsAccessor>(
         tree, node, [&](PointerRNA *item_ptr) {
           const NodeGeometryBakeItem &active_item = storage.items[storage.active_index];
           uiLayoutSetPropSep(panel, true);
           uiLayoutSetPropDecorate(panel, false);
-          uiItemR(panel, item_ptr, "socket_type", UI_ITEM_NONE, nullptr, ICON_NONE);
+          uiItemR(panel, item_ptr, "socket_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
           if (socket_type_supports_fields(eNodeSocketDatatype(active_item.socket_type))) {
-            uiItemR(panel, item_ptr, "attribute_domain", UI_ITEM_NONE, nullptr, ICON_NONE);
-            uiItemR(panel, item_ptr, "is_attribute", UI_ITEM_NONE, nullptr, ICON_NONE);
+            uiItemR(panel, item_ptr, "attribute_domain", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+            uiItemR(panel, item_ptr, "is_attribute", UI_ITEM_NONE, std::nullopt, ICON_NONE);
           }
         });
   }
@@ -535,7 +534,7 @@ static void node_layout_ex(uiLayout *layout, bContext *C, PointerRNA *ptr)
     draw_bake_button_row(ctx, col, true);
     if (const std::optional<std::string> bake_state_str = get_bake_state_string(ctx)) {
       uiLayout *row = uiLayoutRow(col, true);
-      uiItemL(row, bake_state_str->c_str(), ICON_NONE);
+      uiItemL(row, *bake_state_str, ICON_NONE);
     }
   }
 
@@ -568,8 +567,11 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-
-  geo_node_type_base(&ntype, GEO_NODE_BAKE, "Bake", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeBake", GEO_NODE_BAKE);
+  ntype.ui_name = "Bake";
+  ntype.ui_description = "Cache the incoming data so that it can be used without recomputation";
+  ntype.enum_name_legacy = "BAKE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.declare = node_declare;
   ntype.draw_buttons = node_layout;
   ntype.initfunc = node_init;
@@ -578,9 +580,8 @@ static void node_register()
   ntype.get_extra_info = node_extra_info;
   ntype.register_operators = node_operators;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_type_storage(
-      &ntype, "NodeGeometryBake", node_free_storage, node_copy_storage);
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_type_storage(ntype, "NodeGeometryBake", node_free_storage, node_copy_storage);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 
@@ -590,7 +591,7 @@ namespace blender::nodes {
 
 bool get_bake_draw_context(const bContext *C, const bNode &node, BakeDrawContext &r_ctx)
 {
-  BLI_assert(ELEM(node.type, GEO_NODE_BAKE, GEO_NODE_SIMULATION_OUTPUT));
+  BLI_assert(ELEM(node.type_legacy, GEO_NODE_BAKE, GEO_NODE_SIMULATION_OUTPUT));
   r_ctx.node = &node;
   r_ctx.snode = CTX_wm_space_node(C);
   if (!r_ctx.snode) {
@@ -619,7 +620,7 @@ bool get_bake_draw_context(const bContext *C, const bNode &node, BakeDrawContext
     return false;
   }
 
-  r_ctx.bake_rna = RNA_pointer_create(
+  r_ctx.bake_rna = RNA_pointer_create_discrete(
       const_cast<ID *>(&r_ctx.object->id), &RNA_NodesModifierBake, (void *)r_ctx.bake);
   if (r_ctx.nmd->runtime->cache) {
     const bke::bake::ModifierCache &cache = *r_ctx.nmd->runtime->cache;
@@ -650,7 +651,7 @@ bool get_bake_draw_context(const bContext *C, const bNode &node, BakeDrawContext
   const Scene *scene = CTX_data_scene(C);
   r_ctx.frame_range = bke::bake::get_node_bake_frame_range(
       *scene, *r_ctx.object, *r_ctx.nmd, r_ctx.bake->id);
-  r_ctx.bake_still = node.type == GEO_NODE_BAKE &&
+  r_ctx.bake_still = node.type_legacy == GEO_NODE_BAKE &&
                      r_ctx.bake->bake_mode == NODES_MODIFIER_BAKE_MODE_STILL;
   r_ctx.is_baked = r_ctx.baked_range.has_value();
   r_ctx.bake_target = bke::bake::get_node_bake_target(*r_ctx.object, *r_ctx.nmd, r_ctx.bake->id);
@@ -790,7 +791,7 @@ void draw_common_bake_settings(bContext *C, BakeDrawContext &ctx, uiLayout *layo
   uiLayoutSetActive(settings_col, !ctx.is_baked);
   {
     uiLayout *col = uiLayoutColumn(settings_col, true);
-    uiItemR(col, &ctx.bake_rna, "bake_target", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, &ctx.bake_rna, "bake_target", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     uiLayout *subcol = uiLayoutColumn(col, true);
     uiLayoutSetActive(subcol, ctx.bake_target == NODES_MODIFIER_BAKE_TARGET_DISK);
     uiItemR(
@@ -859,24 +860,24 @@ static void draw_bake_data_block_list_item(uiList * /*ui_list*/,
     name = fmt::format("{} [{}]", data_block.id_name, data_block.lib_name);
   }
 
-  uiItemR(row, itemptr, "id", UI_ITEM_NONE, name.c_str(), ICON_NONE);
+  uiItemR(row, itemptr, "id", UI_ITEM_NONE, name, ICON_NONE);
 }
 
 void draw_data_blocks(const bContext *C, uiLayout *layout, PointerRNA &bake_rna)
 {
   static const uiListType *data_block_list = []() {
-    uiListType *list = MEM_cnew<uiListType>(__func__);
+    uiListType *list = MEM_callocN<uiListType>(__func__);
     STRNCPY(list->idname, "DATA_UL_nodes_modifier_data_blocks");
     list->draw_item = draw_bake_data_block_list_item;
     WM_uilisttype_add(list);
     return list;
   }();
 
-  PointerRNA data_blocks_ptr = RNA_pointer_create(
+  PointerRNA data_blocks_ptr = RNA_pointer_create_discrete(
       bake_rna.owner_id, &RNA_NodesModifierBakeDataBlocks, bake_rna.data);
 
   if (uiLayout *panel = uiLayoutPanel(
-          C, layout, "data_block_references", true, TIP_("Data-Block References")))
+          C, layout, "data_block_references", true, IFACE_("Data-Block References")))
   {
     uiTemplateList(panel,
                    C,
@@ -899,7 +900,7 @@ std::unique_ptr<LazyFunction> get_bake_lazy_function(
     const bNode &node, GeometryNodesLazyFunctionGraphInfo &lf_graph_info)
 {
   namespace file_ns = blender::nodes::node_geo_bake_cc;
-  BLI_assert(node.type == GEO_NODE_BAKE);
+  BLI_assert(node.type_legacy == GEO_NODE_BAKE);
   return std::make_unique<file_ns::LazyFunctionForBakeNode>(node, lf_graph_info);
 }
 

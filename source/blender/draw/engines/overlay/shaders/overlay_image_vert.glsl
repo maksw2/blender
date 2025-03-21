@@ -2,20 +2,26 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_extra_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_image_base)
+VERTEX_SHADER_CREATE_INFO(draw_modelmat)
+
+#include "draw_model_lib.glsl"
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
 #include "select_lib.glsl"
 
 void main()
 {
-  select_id_set(drw_CustomID);
-  vec3 world_pos = point_object_to_world(pos);
+  select_id_set(drw_custom_id());
+  vec3 world_pos = drw_point_object_to_world(pos);
   if (isCameraBackground) {
     /* Model matrix converts to view position to avoid jittering (see #91398). */
 #ifdef DEPTH_BIAS
     gl_Position = depth_bias_winmat * vec4(world_pos, 1.0);
 #else
-    gl_Position = point_view_to_ndc(world_pos);
+    gl_Position = drw_point_view_to_homogenous(world_pos);
 #endif
     /* Camera background images are not really part of the 3D space.
      * It makes no sense to apply clipping on them. */
@@ -23,9 +29,9 @@ void main()
   }
   else {
 #ifdef DEPTH_BIAS
-    gl_Position = depth_bias_winmat * (ViewMatrix * vec4(world_pos, 1.0));
+    gl_Position = depth_bias_winmat * (drw_view().viewmat * vec4(world_pos, 1.0));
 #else
-    gl_Position = point_world_to_ndc(world_pos);
+    gl_Position = drw_point_world_to_homogenous(world_pos);
 #endif
     view_clipping_distances(world_pos);
   }

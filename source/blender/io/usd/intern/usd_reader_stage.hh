@@ -14,8 +14,6 @@
 #include <pxr/usd/usdGeom/imageable.h>
 #include <pxr/usd/usdLux/domeLight.h>
 
-#include <string>
-
 struct Collection;
 struct ImportSettings;
 struct Main;
@@ -48,7 +46,7 @@ class USDStageReader {
 
   /* USD material prim paths encountered during stage
    * traversal, for importing unused materials. */
-  blender::Vector<std::string> material_paths_;
+  blender::Vector<pxr::SdfPath> material_paths_;
 
   /* Readers for scene-graph instance prototypes. */
   ProtoReaderMap proto_readers_;
@@ -59,7 +57,7 @@ class USDStageReader {
  public:
   USDStageReader(pxr::UsdStageRefPtr stage,
                  const USDImportParams &params,
-                 const ImportSettings &settings);
+                 const std::function<CacheFile *()> &get_cache_file_fn = {});
 
   ~USDStageReader();
 
@@ -86,6 +84,19 @@ class USDStageReader {
    * users. This is typically required when importing all
    * materials. */
   void fake_users_for_unused_materials();
+
+  /**
+   * Discover the USD materials that can be converted
+   * by material import hook add-ons.
+   */
+  void find_material_import_hook_sources();
+
+  /**
+   * Invoke USD hook add-ons to convert materials.  This function
+   * should be called from the main thread and not from a
+   * background job.
+   */
+  void call_material_import_hooks(struct Main *bmain) const;
 
   bool valid() const;
 

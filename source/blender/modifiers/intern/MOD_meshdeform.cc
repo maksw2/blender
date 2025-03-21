@@ -379,12 +379,12 @@ static void meshdeformModifier_do(ModifierData *md,
     BKE_modifier_set_error(ob, md, "Vertices changed from %d to %d", mmd->verts_num, verts_num);
     return;
   }
-  else if (mmd->cage_verts_num != cage_verts_num) {
+  if (mmd->cage_verts_num != cage_verts_num) {
     BKE_modifier_set_error(
         ob, md, "Cage vertices changed from %d to %d", mmd->cage_verts_num, cage_verts_num);
     return;
   }
-  else if (mmd->bindcagecos == nullptr) {
+  if (mmd->bindcagecos == nullptr) {
     BKE_modifier_set_error(ob, md, "Bind data missing");
     return;
   }
@@ -464,9 +464,8 @@ void BKE_modifier_mdef_compact_influences(ModifierData *md)
   }
 
   /* allocate bind influences */
-  mmd->bindinfluences = static_cast<MDefInfluence *>(
-      MEM_calloc_arrayN(mmd->influences_num, sizeof(MDefInfluence), __func__));
-  mmd->bindoffsets = static_cast<int *>(MEM_calloc_arrayN((verts_num + 1), sizeof(int), __func__));
+  mmd->bindinfluences = MEM_calloc_arrayN<MDefInfluence>(size_t(mmd->influences_num), __func__);
+  mmd->bindoffsets = MEM_calloc_arrayN<int>(size_t(verts_num) + 1, __func__);
 
   /* write influences */
   influences_num = 0;
@@ -517,14 +516,14 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   col = uiLayoutColumn(layout, true);
   uiLayoutSetEnabled(col, !is_bound);
-  uiItemR(col, ptr, "object", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "object", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", nullptr);
+  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", std::nullopt);
 
   col = uiLayoutColumn(layout, false);
   uiLayoutSetEnabled(col, !is_bound);
-  uiItemR(col, ptr, "precision", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "use_dynamic_bind", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "precision", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "use_dynamic_bind", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   uiItemO(layout,
           is_bound ? IFACE_("Unbind") : IFACE_("Bind"),

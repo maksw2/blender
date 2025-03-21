@@ -15,19 +15,17 @@
 
 #include "BLI_listbase.h"
 #include "BLI_math_vector_types.hh"
-#include "BLI_string.h"
 
 #include "BLT_translation.hh"
 
 #include "DNA_brush_types.h"
 #include "DNA_material_types.h"
-#include "DNA_space_types.h"
 
 #include "BKE_brush.hh"
 #include "BKE_context.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_lib_id.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_paint.hh"
 
 #include "UI_interface.hh"
@@ -63,17 +61,17 @@ enum class MaterialMode : int8_t {
 };
 
 struct EyedropperGreasePencil {
-  ColorManagedDisplay *display;
+  ColorManagedDisplay *display = nullptr;
 
-  bool accum_start; /* has mouse been pressed */
-  float3 accum_col;
-  int accum_tot;
-  float3 color;
+  bool accum_start = false; /* has mouse been pressed */
+  float3 accum_col = {};
+  int accum_tot = 0;
+  float3 color = {};
 
   /** Mode */
-  EyeMode mode;
+  EyeMode mode = EyeMode::Material;
   /** Material Mode */
-  MaterialMode mat_mode;
+  MaterialMode mat_mode = MaterialMode::Stroke;
 };
 
 /* Helper: Draw status message while the user is running the operator */
@@ -361,7 +359,9 @@ static void eyedropper_grease_pencil_cancel(bContext *C, wmOperator *op)
 }
 
 /* Main modal status check. */
-static int eyedropper_grease_pencil_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus eyedropper_grease_pencil_modal(bContext *C,
+                                                       wmOperator *op,
+                                                       const wmEvent *event)
 {
   eyedropper_grease_pencil_status_indicators(C, op, event);
   EyedropperGreasePencil *eye = static_cast<EyedropperGreasePencil *>(op->customdata);
@@ -416,7 +416,9 @@ static int eyedropper_grease_pencil_modal(bContext *C, wmOperator *op, const wmE
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int eyedropper_grease_pencil_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus eyedropper_grease_pencil_invoke(bContext *C,
+                                                        wmOperator *op,
+                                                        const wmEvent *event)
 {
   if (eyedropper_grease_pencil_init(C, op)) {
     /* Add modal temp handler. */
@@ -430,7 +432,7 @@ static int eyedropper_grease_pencil_invoke(bContext *C, wmOperator *op, const wm
 }
 
 /* Repeat operator */
-static int eyedropper_grease_pencil_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus eyedropper_grease_pencil_exec(bContext *C, wmOperator *op)
 {
   if (eyedropper_grease_pencil_init(C, op)) {
 

@@ -14,6 +14,7 @@
 #include "DNA_curve_types.h"
 #include "DNA_pointcloud_types.h"
 
+#include "draw_cache.hh"
 #include "draw_cache_impl.hh"
 #include "overlay_next_base.hh"
 
@@ -42,6 +43,7 @@ class AttributeViewer : Overlay {
       return;
     };
     ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+    ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
     ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_BLEND_ALPHA,
                   state.clipping_plane_count);
 
@@ -51,11 +53,11 @@ class AttributeViewer : Overlay {
       return &sub;
     };
 
-    mesh_sub_ = create_sub("mesh", res.shaders.attribute_viewer_mesh.get());
-    pointcloud_sub_ = create_sub("pointcloud", res.shaders.attribute_viewer_pointcloud.get());
-    curve_sub_ = create_sub("curve", res.shaders.attribute_viewer_curve.get());
-    curves_sub_ = create_sub("curves", res.shaders.attribute_viewer_curves.get());
-    instance_sub_ = create_sub("instance", res.shaders.uniform_color.get());
+    mesh_sub_ = create_sub("mesh", res.shaders->attribute_viewer_mesh.get());
+    pointcloud_sub_ = create_sub("pointcloud", res.shaders->attribute_viewer_pointcloud.get());
+    curve_sub_ = create_sub("curve", res.shaders->attribute_viewer_curve.get());
+    curves_sub_ = create_sub("curves", res.shaders->attribute_viewer_curves.get());
+    instance_sub_ = create_sub("instance", res.shaders->uniform_color.get());
   }
 
   void object_sync(Manager &manager,
@@ -63,7 +65,7 @@ class AttributeViewer : Overlay {
                    Resources & /*res*/,
                    const State &state) final
   {
-    const DupliObject *dupli_object = DRW_object_get_dupli(ob_ref.object);
+    const DupliObject *dupli_object = ob_ref.dupli_object;
     const bool is_preview = dupli_object != nullptr &&
                             dupli_object->preview_base_geometry != nullptr;
     if (!enabled_ || !is_preview) {
@@ -128,12 +130,12 @@ class AttributeViewer : Overlay {
         {
           gpu::Batch *batch = DRW_cache_mesh_surface_get(&object);
           auto &sub = *instance_sub_;
-          sub.push_constant("ucolor", color);
+          sub.push_constant("ucolor", float4(color));
           sub.draw(batch, res_handle);
         }
         if (gpu::Batch *batch = DRW_cache_mesh_loose_edges_get(&object)) {
           auto &sub = *instance_sub_;
-          sub.push_constant("ucolor", color);
+          sub.push_constant("ucolor", float4(color));
           sub.draw(batch, res_handle);
         }
 
@@ -141,15 +143,15 @@ class AttributeViewer : Overlay {
       }
       case OB_POINTCLOUD: {
         auto &sub = *pointcloud_sub_;
-        gpu::Batch *batch = point_cloud_sub_pass_setup(sub, &object, nullptr);
-        sub.push_constant("ucolor", color);
+        gpu::Batch *batch = pointcloud_sub_pass_setup(sub, &object, nullptr);
+        sub.push_constant("ucolor", float4(color));
         sub.draw(batch, manager.unique_handle(ob_ref));
         break;
       }
       case OB_CURVES_LEGACY: {
         gpu::Batch *batch = DRW_cache_curve_edge_wire_get(&object);
         auto &sub = *instance_sub_;
-        sub.push_constant("ucolor", color);
+        sub.push_constant("ucolor", float4(color));
         ResourceHandle res_handle = manager.resource_handle(object.object_to_world());
         sub.draw(batch, res_handle);
         break;
@@ -174,9 +176,9 @@ class AttributeViewer : Overlay {
     Object &object = *ob_ref.object;
     switch (object.type) {
       case OB_MESH: {
-        Mesh *mesh = static_cast<Mesh *>(object.data);
+        Mesh &mesh = DRW_object_get_data_for_drawing<Mesh>(object);
         if (const std::optional<bke::AttributeMetaData> meta_data =
-                mesh->attributes().lookup_meta_data(".viewer"))
+                mesh.attributes().lookup_meta_data(".viewer"))
         {
           if (attribute_type_supports_viewer_overlay(meta_data->data_type)) {
             gpu::Batch *batch = DRW_cache_mesh_surface_viewer_attribute_get(&object);
@@ -188,14 +190,14 @@ class AttributeViewer : Overlay {
         break;
       }
       case OB_POINTCLOUD: {
-        PointCloud *pointcloud = static_cast<PointCloud *>(object.data);
+        PointCloud &pointcloud = DRW_object_get_data_for_drawing<PointCloud>(object);
         if (const std::optional<bke::AttributeMetaData> meta_data =
-                pointcloud->attributes().lookup_meta_data(".viewer"))
+                pointcloud.attributes().lookup_meta_data(".viewer"))
         {
           if (attribute_type_supports_viewer_overlay(meta_data->data_type)) {
-            gpu::VertBuf **vertbuf = DRW_pointcloud_evaluated_attribute(pointcloud, ".viewer");
+            gpu::VertBuf **vertbuf = DRW_pointcloud_evaluated_attribute(&pointcloud, ".viewer");
             auto &sub = *pointcloud_sub_;
-            gpu::Batch *batch = point_cloud_sub_pass_setup(sub, &object, nullptr);
+            gpu::Batch *batch = pointcloud_sub_pass_setup(sub, &object, nullptr);
             sub.push_constant("opacity", opacity);
             sub.bind_texture("attribute_tx", vertbuf);
             sub.draw(batch, manager.unique_handle(ob_ref));
@@ -204,9 +206,9 @@ class AttributeViewer : Overlay {
         break;
       }
       case OB_CURVES_LEGACY: {
-        Curve *curve = static_cast<Curve *>(object.data);
-        if (curve->curve_eval) {
-          const bke::CurvesGeometry &curves = curve->curve_eval->geometry.wrap();
+        Curve &curve = DRW_object_get_data_for_drawing<Curve>(object);
+        if (curve.curve_eval) {
+          const bke::CurvesGeometry &curves = curve.curve_eval->geometry.wrap();
           if (const std::optional<bke::AttributeMetaData> meta_data =
                   curves.attributes().lookup_meta_data(".viewer"))
           {
@@ -222,15 +224,15 @@ class AttributeViewer : Overlay {
         break;
       }
       case OB_CURVES: {
-        ::Curves *curves_id = static_cast<::Curves *>(object.data);
-        const bke::CurvesGeometry &curves = curves_id->geometry.wrap();
+        ::Curves &curves_id = DRW_object_get_data_for_drawing<::Curves>(object);
+        const bke::CurvesGeometry &curves = curves_id.geometry.wrap();
         if (const std::optional<bke::AttributeMetaData> meta_data =
                 curves.attributes().lookup_meta_data(".viewer"))
         {
           if (attribute_type_supports_viewer_overlay(meta_data->data_type)) {
             bool is_point_domain;
             gpu::VertBuf **texture = DRW_curves_texture_for_evaluated_attribute(
-                curves_id, ".viewer", &is_point_domain);
+                &curves_id, ".viewer", &is_point_domain);
             auto &sub = *curves_sub_;
             gpu::Batch *batch = curves_sub_pass_setup(sub, state.scene, ob_ref.object);
             sub.push_constant("opacity", opacity);

@@ -48,7 +48,6 @@ static int to_potrace(const TurnPolicy turn_policy)
 
 Bitmap *create_bitmap(const int2 &size)
 {
-#  ifdef WITH_POTRACE
   constexpr int BM_WORDSIZE = int(sizeof(potrace_word));
   constexpr int BM_WORDBITS = 8 * BM_WORDSIZE;
 
@@ -66,22 +65,14 @@ Bitmap *create_bitmap(const int2 &size)
   bm->map = static_cast<potrace_word *>(MEM_mallocN(size.y * dy * sizeof(potrace_word), __func__));
 
   return bm;
-#  else
-  UNUSED_VARS(size);
-  return nullptr;
-#  endif
 }
 
 void free_bitmap(Bitmap *bm)
 {
-#  ifdef WITH_POTRACE
   if (bm != nullptr) {
     MEM_freeN(bm->map);
   }
   MEM_SAFE_FREE(bm);
-#  else
-  UNUSED_VARS(bm);
-#  endif
 }
 
 ImBuf *bitmap_to_image(const Bitmap &bm)
@@ -91,7 +82,7 @@ ImBuf *bitmap_to_image(const Bitmap &bm)
   constexpr potrace_word BM_HIBIT = potrace_word(1) << (BM_WORDBITS - 1);
 
   const int2 size = {bm.w, bm.h};
-  const uint imb_flag = IB_rect;
+  const uint imb_flag = IB_byte_data;
   ImBuf *ibuf = IMB_allocImBuf(size.x, size.y, 32, imb_flag);
   BLI_assert(ibuf->byte_buffer.data != nullptr);
 

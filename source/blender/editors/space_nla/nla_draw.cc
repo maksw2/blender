@@ -13,17 +13,16 @@
 #include <cstring>
 
 #include "DNA_anim_types.h"
-#include "DNA_node_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
 
-#include "BLI_blenlib.h"
-#include "BLI_range.h"
+#include "BLI_bounds_types.hh"
+#include "BLI_listbase.h"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "BLT_translation.hh"
 
-#include "BKE_action.hh"
 #include "BKE_fcurve.hh"
 #include "BKE_nla.hh"
 
@@ -59,7 +58,7 @@ void nla_action_get_color(AnimData *adt, bAction *act, float color[4])
   }
   else {
     if (act) {
-      /* reddish color - same as dopesheet summary */
+      /* reddish color - same as dope-sheet summary */
       UI_GetThemeColor4fv(TH_ANIM_ACTIVE, color);
     }
     else {
@@ -111,7 +110,7 @@ static void nla_action_draw_keyframes(
    *   that is slightly stumpier than the track background (hardcoded 2-units here)
    */
 
-  Range2f frame_range;
+  Bounds<float> frame_range;
   ED_keylist_all_keys_frame_range(keylist, &frame_range);
   immRectf(pos_id, frame_range.min, ymin + 2, frame_range.max, ymax - 2);
   immUnbindProgram();
@@ -948,7 +947,6 @@ void draw_nla_main_data(bAnimContext *ac, SpaceNla *snla, ARegion *region)
         case ANIMTYPE_DSPOINTCLOUD:
         case ANIMTYPE_DSVOLUME:
         case ANIMTYPE_SHAPEKEY:
-        case ANIMTYPE_GPDATABLOCK:
         case ANIMTYPE_GPLAYER:
         case ANIMTYPE_GREASE_PENCIL_DATABLOCK:
         case ANIMTYPE_GREASE_PENCIL_LAYER_GROUP:

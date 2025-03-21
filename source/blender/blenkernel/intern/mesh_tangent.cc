@@ -8,8 +8,6 @@
  * Functions to evaluate mesh tangents.
  */
 
-#include <climits>
-
 #include "MEM_guardedalloc.h"
 
 #include "BLI_math_geom.h"
@@ -26,7 +24,7 @@
 
 #include "mikktspace.hh"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 using blender::float2;
 using blender::float3;
@@ -475,7 +473,7 @@ void BKE_mesh_calc_loop_tangent_ex(const Span<float3> vert_positions,
       /* Over allocate, since we don't know how many ngon or quads we have. */
 
       /* Map fake face index to corner_tris. */
-      face_as_quad_map = static_cast<int *>(MEM_mallocN(sizeof(int) * corner_tris_len, __func__));
+      face_as_quad_map = MEM_malloc_arrayN<int>(corner_tris_len, __func__);
       int k, j;
       for (k = 0, j = 0; j < int(corner_tris_len); k++, j++) {
         face_as_quad_map[k] = j;

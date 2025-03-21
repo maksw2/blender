@@ -9,9 +9,7 @@
 #pragma once
 
 #include "BLI_compute_context.hh"
-#include "BLI_math_vector.hh"
 #include "BLI_vector.hh"
-#include "BLI_vector_set.hh"
 
 #include "BKE_node.hh"
 
@@ -180,9 +178,9 @@ Array<bNode *> tree_draw_order_calc_nodes_reversed(bNodeTree &ntree);
 
 void node_set_cursor(wmWindow &win, ARegion &region, SpaceNode &snode, const float2 &cursor);
 /* DPI scaled coords */
-float2 node_to_view(const bNode &node, const float2 &co);
+float2 node_to_view(const float2 &co);
 void node_to_updated_rect(const bNode &node, rctf &r_rect);
-float2 node_from_view(const bNode &node, const float2 &co);
+float2 node_from_view(const float2 &co);
 
 /* `node_ops.cc` */
 
@@ -299,11 +297,13 @@ void NODE_OT_add_collection(wmOperatorType *ot);
 void NODE_OT_add_file(wmOperatorType *ot);
 void NODE_OT_add_mask(wmOperatorType *ot);
 void NODE_OT_add_material(wmOperatorType *ot);
+void NODE_OT_add_color(wmOperatorType *ot);
+void NODE_OT_add_import_node(wmOperatorType *ot);
 void NODE_OT_new_node_tree(wmOperatorType *ot);
 
 /* `node_group.cc` */
 
-const char *node_group_idname(bContext *C);
+StringRef node_group_idname(bContext *C);
 void NODE_OT_group_make(wmOperatorType *ot);
 void NODE_OT_group_insert(wmOperatorType *ot);
 void NODE_OT_group_ungroup(wmOperatorType *ot);
@@ -335,6 +335,7 @@ void NODE_OT_link_viewer(wmOperatorType *ot);
 void NODE_OT_insert_offset(wmOperatorType *ot);
 
 wmKeyMap *node_link_modal_keymap(wmKeyConfig *keyconf);
+wmKeyMap *node_resize_modal_keymap(wmKeyConfig *keyconf);
 
 /* `node_edit.cc` */
 
@@ -351,7 +352,7 @@ bool composite_node_editable(bContext *C);
 bool node_has_hidden_sockets(bNode *node);
 void node_set_hidden_sockets(bNode *node, int set);
 bool node_is_previewable(const SpaceNode &snode, const bNodeTree &ntree, const bNode &node);
-int node_render_changed_exec(bContext *, wmOperator *);
+wmOperatorStatus node_render_changed_exec(bContext *, wmOperator *);
 bNodeSocket *node_find_indicated_socket(SpaceNode &snode,
                                         ARegion &region,
                                         const float2 &cursor,
@@ -373,6 +374,7 @@ void NODE_OT_preview_toggle(wmOperatorType *ot);
 void NODE_OT_options_toggle(wmOperatorType *ot);
 void NODE_OT_node_copy_color(wmOperatorType *ot);
 void NODE_OT_deactivate_viewer(wmOperatorType *ot);
+void NODE_OT_activate_viewer(wmOperatorType *ot);
 
 void NODE_OT_read_viewlayers(wmOperatorType *ot);
 void NODE_OT_render_changed(wmOperatorType *ot);

@@ -178,7 +178,7 @@ void relative_keyingset_add_source(blender::Vector<PointerRNA> &sources,
   if (ELEM(nullptr, srna, data, id)) {
     return;
   }
-  sources.append(RNA_pointer_create(id, srna, data));
+  sources.append(RNA_pointer_create_discrete(id, srna, data));
 }
 
 void relative_keyingset_add_source(blender::Vector<PointerRNA> &sources, ID *id)
@@ -388,7 +388,7 @@ static int insert_key_to_keying_set_path(bContext *C,
   switch (GS(keyingset_path->id->name)) {
     case ID_OB: /* Object (or Object-Related) Keyframes */
     {
-      Object *ob = (Object *)keyingset_path->id;
+      Object *ob = reinterpret_cast<Object *>(keyingset_path->id);
 
       /* XXX: only object transforms? */
       DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);

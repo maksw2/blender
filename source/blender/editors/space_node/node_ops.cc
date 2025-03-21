@@ -8,7 +8,7 @@
 
 #include "DNA_node_types.h"
 
-#include "ED_node.hh" /* own include */
+#include "ED_node_c.hh"
 #include "ED_screen.hh"
 
 #include "RNA_access.hh"
@@ -44,6 +44,7 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_hide_socket_toggle);
   WM_operatortype_append(NODE_OT_node_copy_color);
   WM_operatortype_append(NODE_OT_deactivate_viewer);
+  WM_operatortype_append(NODE_OT_activate_viewer);
 
   WM_operatortype_append(NODE_OT_duplicate);
   WM_operatortype_append(NODE_OT_delete);
@@ -84,6 +85,8 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_add_file);
   WM_operatortype_append(NODE_OT_add_mask);
   WM_operatortype_append(NODE_OT_add_material);
+  WM_operatortype_append(NODE_OT_add_color);
+  WM_operatortype_append(NODE_OT_add_import_node);
 
   WM_operatortype_append(NODE_OT_new_node_tree);
 
@@ -107,12 +110,11 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_cryptomatte_layer_add);
   WM_operatortype_append(NODE_OT_cryptomatte_layer_remove);
 
-  NODE_TYPES_BEGIN (ntype) {
+  for (bke::bNodeType *ntype : bke::node_types_get()) {
     if (ntype->register_operators) {
       ntype->register_operators();
     }
   }
-  NODE_TYPES_END;
 }
 
 void node_keymap(wmKeyConfig *keyconf)
@@ -124,6 +126,7 @@ void node_keymap(wmKeyConfig *keyconf)
   WM_keymap_ensure(keyconf, "Node Editor", SPACE_NODE, RGN_TYPE_WINDOW);
 
   node_link_modal_keymap(keyconf);
+  node_resize_modal_keymap(keyconf);
 }
 
 }  // namespace blender::ed::space_node

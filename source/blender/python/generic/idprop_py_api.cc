@@ -1045,9 +1045,9 @@ static IDProperty *idp_from_PyObject(IDProperty *prop_exist,
 /** \name Mapping Get/Set (Internal Access)
  * \{ */
 
-bool BPy_IDProperty_Map_ValidateAndCreate(PyObject *name_obj, IDProperty *group, PyObject *ob)
+bool BPy_IDProperty_Map_ValidateAndCreate(PyObject *key, IDProperty *group, PyObject *ob)
 {
-  const char *name = idp_try_read_name(name_obj);
+  const char *name = idp_try_read_name(key);
   if (!name) {
     return false;
   }
@@ -1617,7 +1617,7 @@ static PyObject *BPy_IDGroup_View_reversed(BPy_IDGroup_View *self, PyObject * /*
 
 static PyMethodDef BPy_IDGroup_View_methods[] = {
     {"__reversed__",
-     (PyCFunction)(void (*)(void))BPy_IDGroup_View_reversed,
+     (PyCFunction)(void (*)())BPy_IDGroup_View_reversed,
      METH_NOARGS,
      BPy_IDGroup_View_reversed_doc},
     {nullptr, nullptr},
@@ -2442,7 +2442,7 @@ static int BPy_IDArray_getbuffer(BPy_IDArray *self, Py_buffer *view, int flags)
   view->itemsize = itemsize;
   view->format = (char *)idp_format_from_array_type(prop->subtype);
 
-  Py_ssize_t *shape = static_cast<Py_ssize_t *>(MEM_mallocN(sizeof(Py_ssize_t), __func__));
+  Py_ssize_t *shape = MEM_mallocN<Py_ssize_t>(__func__);
   shape[0] = prop->len;
   view->shape = shape;
 

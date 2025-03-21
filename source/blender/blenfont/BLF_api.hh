@@ -37,6 +37,13 @@ enum class FontShadowType {
   Outline = 6,
 };
 
+enum class BLFWrapMode : int {
+  Minimal = 0,            /* Only on ascii space and line feed. Legacy and invariant. */
+  Typographical = 1 << 0, /* Multilingual, informed by Unicode Standard Annex #14. */
+  Path = 1 << 1,          /* Wrap on file path separators, space, underscores. */
+  HardLimit = 1 << 2,     /* Line break at limit. */
+};
+
 int BLF_init();
 void BLF_exit();
 
@@ -109,13 +116,15 @@ char *BLF_display_name_from_id(int fontid);
  */
 bool BLF_get_vfont_metrics(int fontid, float *ascend_ratio, float *em_ratio, float *scale);
 
+#define BLF_VFONT_METRICS_SCALE_DEFAULT float(1.0 / 1000.0)
+#define BLF_VFONT_METRICS_EM_RATIO_DEFAULT 1.0f
+#define BLF_VFONT_METRICS_ASCEND_RATIO_DEFAULT 0.8f
+
 /**
  * Convert a character's outlines into curves.
  */
-float BLF_character_to_curves(int fontid,
-                              unsigned int unicode,
-                              ListBase *nurbsbase,
-                              const float scale);
+float BLF_character_to_curves(
+    int fontid, unsigned int unicode, ListBase *nurbsbase, const float scale, bool use_fallback);
 
 /**
  * Check if font supports a particular glyph.
@@ -189,10 +198,10 @@ blender::Array<uchar> BLF_svg_icon_bitmap(
     bool multicolor = false,
     blender::FunctionRef<void(std::string &)> edit_source_cb = nullptr);
 
-typedef bool (*BLF_GlyphBoundsFn)(const char *str,
-                                  size_t str_step_ofs,
-                                  const rcti *bounds,
-                                  void *user_data);
+using BLF_GlyphBoundsFn = bool (*)(const char *str,
+                                   size_t str_step_ofs,
+                                   const rcti *bounds,
+                                   void *user_dataconst);
 
 /**
  * Run \a user_fn for each character, with the bound-box that would be used for drawing.
@@ -307,14 +316,20 @@ int BLF_glyph_advance(int fontid, const char *str);
  */
 void BLF_rotation(int fontid, float angle);
 void BLF_clipping(int fontid, int xmin, int ymin, int xmax, int ymax);
-void BLF_wordwrap(int fontid, int wrap_width);
+void BLF_wordwrap(int fontid, int wrap_width, BLFWrapMode mode = BLFWrapMode::Minimal);
 
 blender::Vector<blender::StringRef> BLF_string_wrap(int fontid,
                                                     blender::StringRef str,
-                                                    const int max_pixel_width);
+                                                    const int max_pixel_width,
+                                                    BLFWrapMode mode = BLFWrapMode::Minimal);
 
 void BLF_enable(int fontid, int option);
 void BLF_disable(int fontid, int option);
+
+/**
+ * Is this font part of the default fonts in the fallback stack?
+ */
+bool BLF_is_builtin(int fontid);
 
 /**
  * Note that shadow needs to be enabled with #BLF_enable.
@@ -336,6 +351,25 @@ void BLF_shadow_offset(int fontid, int x, int y);
  */
 void BLF_buffer(
     int fontid, float *fbuf, unsigned char *cbuf, int w, int h, ColorManagedDisplay *display);
+
+/**
+ * Opaque structure used to push/pop values set by the #BLF_buffer function.
+ */
+struct BLFBufferState;
+/**
+ * Store the current buffer state.
+ * This state *must* be popped with #BLF_buffer_state_pop.
+ */
+BLFBufferState *BLF_buffer_state_push(int fontid);
+/**
+ * Pop the state (restoring the state when #BLF_buffer_state_push was called).
+ */
+void BLF_buffer_state_pop(BLFBufferState *buffer_state);
+/**
+ * Free the state, only use in the rare case pop is not called
+ * (if the font itself is unloaded after pushing for example).
+ */
+void BLF_buffer_state_free(BLFBufferState *buffer_state);
 
 /**
  * Set the color to be used for text.
@@ -418,6 +452,9 @@ enum {
    * \note Can be checked without checking #BLF_MONOSPACED which can be assumed to be disabled.
    */
   BLF_RENDER_SUBPIXELAA = 1 << 18,
+
+  /* Do not look in other fonts when a glyph is not found in this font. */
+  BLF_NO_FALLBACK = 1 << 19,
 };
 
 #define BLF_DRAW_STR_DUMMY_MAX 1024

@@ -6,6 +6,7 @@
 #include "usd_attribute_utils.hh"
 #include "usd_utils.hh"
 
+#include "BKE_anonymous_attribute_id.hh"
 #include "BKE_attribute.hh"
 #include "BKE_report.hh"
 
@@ -25,7 +26,7 @@ void USDPointsWriter::do_write(HierarchyContext &context)
 
   const PointCloud *points = static_cast<const PointCloud *>(context.object->data);
   Span<pxr::GfVec3f> positions = points->positions().cast<pxr::GfVec3f>();
-  VArray<float> radii = *points->attributes().lookup<float>("radius", bke::AttrDomain::Point);
+  VArray<float> radii = points->radius();
 
   const pxr::UsdGeomPoints usd_points = pxr::UsdGeomPoints::Define(stage, usd_path);
 
@@ -55,8 +56,7 @@ void USDPointsWriter::do_write(HierarchyContext &context)
   this->write_velocities(points, usd_points, timecode);
   this->write_custom_data(points, usd_points, timecode);
 
-  const pxr::UsdPrim usd_prim = usd_points.GetPrim();
-  this->set_extents(usd_prim, timecode);
+  this->author_extent(usd_points, points->bounds_min_max(), timecode);
 }
 
 static std::optional<pxr::TfToken> convert_blender_domain_to_usd(
@@ -141,21 +141,6 @@ void USDPointsWriter::write_velocities(const PointCloud *points,
   }
 
   usd_value_writer_.SetAttribute(attr_vel, usd_velocities, timecode);
-}
-
-void USDPointsWriter::set_extents(const pxr::UsdPrim &prim, const pxr::UsdTimeCode timecode)
-{
-  pxr::UsdGeomBoundable boundable(prim);
-
-  pxr::VtArray<pxr::GfVec3f> extent;
-  pxr::UsdGeomBoundable::ComputeExtentFromPlugins(boundable, timecode, &extent);
-
-  pxr::UsdAttribute attr_extent = boundable.CreateExtentAttr(pxr::VtValue(), true);
-  if (!attr_extent.HasValue()) {
-    attr_extent.Set(extent, pxr::UsdTimeCode::Default());
-  }
-
-  usd_value_writer_.SetAttribute(attr_extent, extent, timecode);
 }
 
 }  // namespace blender::io::usd

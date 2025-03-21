@@ -6,20 +6,27 @@
  * \ingroup spseq
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
 #include "BLF_api.hh"
 
-#include "BLI_blenlib.h"
+#include "BLI_index_range.hh"
+#include "BLI_math_matrix.hh"
+#include "BLI_math_matrix_types.hh"
 #include "BLI_math_rotation.h"
+#include "BLI_math_vector_types.hh"
+#include "BLI_rect.h"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
-
-#include "IMB_imbuf_types.hh"
+#include "BLI_vector.hh"
 
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
+#include "DNA_sequence_types.h"
 #include "DNA_space_types.h"
+#include "DNA_view2d_types.h"
 
 #include "BKE_context.hh"
 #include "BKE_global.hh"
@@ -27,11 +34,14 @@
 
 #include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
+#include "IMB_imbuf_types.hh"
 
 #include "GPU_framebuffer.hh"
 #include "GPU_immediate.hh"
 #include "GPU_immediate_util.hh"
 #include "GPU_matrix.hh"
+#include "GPU_primitive.hh"
+#include "GPU_state.hh"
 #include "GPU_viewport.hh"
 
 #include "ED_gpencil_legacy.hh"
@@ -43,6 +53,7 @@
 #include "BIF_glutil.hh"
 
 #include "SEQ_channels.hh"
+#include "SEQ_effects.hh"
 #include "SEQ_iterator.hh"
 #include "SEQ_prefetch.hh"
 #include "SEQ_proxy.hh"
@@ -63,28 +74,56 @@
 #include "sequencer_quads_batch.hh"
 #include "sequencer_scopes.hh"
 
-static Sequence *special_seq_update = nullptr;
+namespace blender::ed::vse {
 
-void sequencer_special_update_set(Sequence *seq)
+static Strip *special_seq_update = nullptr;
+
+void sequencer_special_update_set(Strip *strip)
 {
-  special_seq_update = seq;
+  special_seq_update = strip;
 }
 
-Sequence *ED_sequencer_special_preview_get()
+Strip *special_preview_get()
 {
   return special_seq_update;
 }
 
-void ED_sequencer_special_preview_set(bContext *C, const int mval[2])
+/**
+ * Similar to `mouseover_strips_sorted_get`, but disregards padded strip handles. This allows for
+ * precision when previewing strips through a scrubbing operation.
+ */
+static Strip *mouseover_strip_get(const Scene *scene, const View2D *v2d, const int mval[2])
+{
+  float mouse_co[2];
+  UI_view2d_region_to_view(v2d, mval[0], mval[1], &mouse_co[0], &mouse_co[1]);
+
+  blender::Vector<Strip *> visible = sequencer_visible_strips_get(scene, v2d);
+  int mouse_channel = int(mouse_co[1]);
+  for (Strip *strip : visible) {
+    if (strip->machine != mouse_channel) {
+      continue;
+    }
+    rctf body;
+    strip_rectf(scene, strip, &body);
+    if (BLI_rctf_isect_pt_v(&body, mouse_co)) {
+      return strip;
+    }
+  }
+
+  return nullptr;
+}
+
+void special_preview_set(bContext *C, const int mval[2])
 {
   Scene *scene = CTX_data_scene(C);
   ARegion *region = CTX_wm_region(C);
-  eSeqHandle hand_dummy;
-  Sequence *seq = find_nearest_seq(scene, &region->v2d, mval, &hand_dummy);
-  sequencer_special_update_set(seq);
+  Strip *strip = mouseover_strip_get(scene, &region->v2d, mval);
+  if (strip != nullptr && strip->type != STRIP_TYPE_SOUND_RAM) {
+    sequencer_special_update_set(strip);
+  }
 }
 
-void ED_sequencer_special_preview_clear()
+void special_preview_clear()
 {
   sequencer_special_update_set(nullptr);
 }
@@ -101,7 +140,7 @@ ImBuf *sequencer_ibuf_get(const bContext *C,
   SpaceSeq *sseq = CTX_wm_space_seq(C);
   bScreen *screen = CTX_wm_screen(C);
 
-  SeqRenderData context = {nullptr};
+  seq::RenderData context = {nullptr};
   ImBuf *ibuf;
   int rectx, recty;
   double render_size;
@@ -115,13 +154,13 @@ ImBuf *sequencer_ibuf_get(const bContext *C,
     render_size = scene->r.size / 100.0;
   }
   else {
-    render_size = SEQ_rendersize_to_scale_factor(sseq->render_size);
+    render_size = seq::rendersize_to_scale_factor(sseq->render_size);
   }
 
   rectx = roundf(render_size * scene->r.xsch);
   recty = roundf(render_size * scene->r.ysch);
 
-  SEQ_render_new_render_data(
+  seq::render_new_render_data(
       bmain, depsgraph, scene, rectx, recty, sseq->render_size, false, &context);
   context.view_id = BKE_scene_multiview_view_id_get(&scene->r, viewname);
   context.use_proxies = (sseq->flag & SEQ_USE_PROXIES) != 0;
@@ -143,12 +182,12 @@ ImBuf *sequencer_ibuf_get(const bContext *C,
     GPU_framebuffer_restore();
   }
 
-  if (ED_sequencer_special_preview_get()) {
-    ibuf = SEQ_render_give_ibuf_direct(
-        &context, timeline_frame + frame_ofs, ED_sequencer_special_preview_get());
+  if (special_preview_get()) {
+    ibuf = seq::render_give_ibuf_direct(
+        &context, timeline_frame + frame_ofs, special_preview_get());
   }
   else {
-    ibuf = SEQ_render_give_ibuf(&context, timeline_frame + frame_ofs, sseq->chanshown);
+    ibuf = seq::render_give_ibuf(&context, timeline_frame + frame_ofs, sseq->chanshown);
   }
 
   if (viewport) {
@@ -178,7 +217,6 @@ static ImBuf *sequencer_make_scope(Scene *scene,
       display_ibuf, &scene->view_settings, &scene->display_settings);
 
   scope = make_scope_fn(display_ibuf);
-  IMB_rectfill_alpha(scope, 1.0f);
 
   IMB_freeImBuf(display_ibuf);
 
@@ -295,7 +333,7 @@ void sequencer_draw_maskedit(const bContext *C, Scene *scene, ARegion *region, S
 /* Force redraw, when prefetching and using cache view. */
 static void seq_prefetch_wm_notify(const bContext *C, Scene *scene)
 {
-  if (SEQ_prefetch_need_redraw(C, scene)) {
+  if (seq::prefetch_need_redraw(C, scene)) {
     WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, nullptr);
   }
 }
@@ -524,11 +562,10 @@ static void sequencer_draw_display_buffer(const bContext *C,
 }
 
 static void draw_histogram(ARegion *region,
-                           const blender::ed::seq::ScopeHistogram &hist,
+                           const ScopeHistogram &hist,
                            SeqQuadsBatch &quads,
                            const rctf &area)
 {
-  using namespace blender::ed::seq;
   if (hist.data.is_empty()) {
     return;
   }
@@ -600,10 +637,13 @@ static void draw_histogram(ARegion *region,
   UI_view2d_text_cache_draw(region);
 }
 
-static blender::float2 rgb_to_uv(const blender::float3 &rgb)
+static blender::float2 rgb_to_uv_scaled(const blender::float3 &rgb)
 {
   float y, u, v;
   rgb_to_yuv(rgb.x, rgb.y, rgb.z, &y, &u, &v, BLI_YUV_ITU_BT709);
+  /* Scale to +-0.5 range. */
+  u *= SeqScopes::VECSCOPE_U_SCALE;
+  v *= SeqScopes::VECSCOPE_V_SCALE;
   return blender::float2(u, v);
 }
 
@@ -632,15 +672,12 @@ static void draw_waveform_graticule(ARegion *region, SeqQuadsBatch &quads, const
 
 static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, const rctf &area)
 {
-  using namespace blender;
-
   const float skin_rad = DEG2RADF(123.0f); /* angle in radians of the skin tone line */
 
   const float w = BLI_rctf_size_x(&area);
   const float h = BLI_rctf_size_y(&area);
   const float2 center{BLI_rctf_cent_x(&area), BLI_rctf_cent_y(&area)};
-  /* Vector-scope image is scaled over UV range (+/-0.615). */
-  const float radius = ((w < h) ? w : h) * 0.5f * (0.5f / 0.615f);
+  const float radius = ((w < h) ? w : h) * 0.5f;
 
   /* Precalculate circle points/colors. */
   constexpr int circle_delta = 6;
@@ -649,9 +686,11 @@ static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, co
   float3 circle_col[num_circle_points];
   for (int i = 0; i < num_circle_points; i++) {
     float a = DEG2RADF(i * circle_delta);
-    float u = cosf(a);
-    float v = sinf(a);
-    circle_pos[i] = float2(u, v);
+    float x = cosf(a);
+    float y = sinf(a);
+    circle_pos[i] = float2(x, y);
+    float u = x / SeqScopes::VECSCOPE_U_SCALE;
+    float v = y / SeqScopes::VECSCOPE_V_SCALE;
 
     float3 col;
     yuv_to_rgb(0.5f, u, v, &col.x, &col.y, &col.z, BLI_YUV_ITU_BT709);
@@ -763,7 +802,7 @@ static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, co
   const float delta = radius * 0.01f;
   for (int i = 0; i < 6; i++) {
     float3 safe = primaries[i] * 0.75f;
-    float2 pos = center + rgb_to_uv(safe) * (radius * 2);
+    float2 pos = center + rgb_to_uv_scaled(safe) * (radius * 2);
     quads.add_wire_quad(pos.x - delta, pos.y - delta, pos.x + delta, pos.y + delta, col_target);
 
     buf[0] = names[i];
@@ -789,8 +828,6 @@ static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, co
 
 static void sequencer_draw_scopes(Scene *scene, ARegion *region, SpaceSeq *sseq)
 {
-  using namespace blender::ed::seq;
-
   /* Figure out draw coordinates. */
   rctf preview;
   sequencer_preview_get_rect(&preview, scene, region, sseq, false, false);
@@ -816,11 +853,7 @@ static void sequencer_draw_scopes(Scene *scene, ARegion *region, SpaceSeq *sseq)
 
   bool use_blend = sseq->mainb == SEQ_DRAW_IMG_IMBUF && sseq->flag & SEQ_USE_ALPHA;
 
-  /* Draw opaque black rectangle over whole preview area. The scope texture
-   * with clamp to border extend mode should be enough, but results in
-   * garbage pixels around the actual scope on some GPUs/drivers (#119505).
-   * To fix that, background must be drawn, and then the scopes texture be
-   * blended on top. */
+  /* Draw black rectangle over scopes area. */
   if (sseq->mainb != SEQ_DRAW_IMG_IMBUF) {
     GPU_blend(GPU_BLEND_NONE);
     uint pos = GPU_vertformat_attr_add(immVertexFormat(), "pos", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
@@ -829,7 +862,6 @@ static void sequencer_draw_scopes(Scene *scene, ARegion *region, SpaceSeq *sseq)
     immUniformColor4ubv(black);
     immRectf(pos, preview.xmin, preview.ymin, preview.xmax, preview.ymax);
     immUnbindProgram();
-    use_blend = true;
   }
 
   /* Draw scope image if there is one. */
@@ -853,7 +885,7 @@ static void sequencer_draw_scopes(Scene *scene, ARegion *region, SpaceSeq *sseq)
 
   if (scope_image != nullptr) {
     if (scope_image->float_buffer.data && scope_image->byte_buffer.data == nullptr) {
-      IMB_rect_from_float(scope_image);
+      IMB_byte_from_float(scope_image);
     }
 
     eGPUTextureFormat format = GPU_RGBA8;
@@ -917,8 +949,6 @@ static void sequencer_draw_scopes(Scene *scene, ARegion *region, SpaceSeq *sseq)
 
 static bool sequencer_calc_scopes(Scene *scene, SpaceSeq *sseq, ImBuf *ibuf, bool draw_backdrop)
 {
-  using namespace blender::ed::seq;
-
   if (draw_backdrop || (sseq->mainb == SEQ_DRAW_IMG_IMBUF && sseq->zebra == 0)) {
     return false; /* Not drawing any scopes. */
   }
@@ -976,7 +1006,7 @@ static bool sequencer_calc_scopes(Scene *scene, SpaceSeq *sseq, ImBuf *ibuf, boo
 
 bool sequencer_draw_get_transform_preview(SpaceSeq *sseq, Scene *scene)
 {
-  Sequence *last_seq = SEQ_select_active_get(scene);
+  Strip *last_seq = seq::select_active_get(scene);
   if (last_seq == nullptr) {
     return false;
   }
@@ -988,29 +1018,31 @@ bool sequencer_draw_get_transform_preview(SpaceSeq *sseq, Scene *scene)
 
 int sequencer_draw_get_transform_preview_frame(Scene *scene)
 {
-  Sequence *last_seq = SEQ_select_active_get(scene);
+  Strip *last_seq = seq::select_active_get(scene);
   /* #sequencer_draw_get_transform_preview must already have been called. */
   BLI_assert(last_seq != nullptr);
   int preview_frame;
 
   if (last_seq->flag & SEQ_RIGHTSEL) {
-    preview_frame = SEQ_time_right_handle_frame_get(scene, last_seq) - 1;
+    preview_frame = seq::time_right_handle_frame_get(scene, last_seq) - 1;
   }
   else {
-    preview_frame = SEQ_time_left_handle_frame_get(scene, last_seq);
+    preview_frame = seq::time_left_handle_frame_get(scene, last_seq);
   }
 
   return preview_frame;
 }
 
-static void seq_draw_image_origin_and_outline(const bContext *C, Sequence *seq, bool is_active_seq)
+static void strip_draw_image_origin_and_outline(const bContext *C,
+                                                Strip *strip,
+                                                bool is_active_seq)
 {
   SpaceSeq *sseq = CTX_wm_space_seq(C);
   const ARegion *region = CTX_wm_region(C);
   if (region->regiontype == RGN_TYPE_PREVIEW && !sequencer_view_preview_only_poll(C)) {
     return;
   }
-  if ((seq->flag & SELECT) == 0) {
+  if ((strip->flag & SELECT) == 0) {
     return;
   }
   if (ED_screen_animation_no_scrub(CTX_wm_manager(C))) {
@@ -1030,8 +1062,8 @@ static void seq_draw_image_origin_and_outline(const bContext *C, Sequence *seq, 
     return;
   }
 
-  float origin[2];
-  SEQ_image_transform_origin_offset_pixelspace_get(CTX_data_scene(C), seq, origin);
+  const blender::float2 origin = seq::image_transform_origin_offset_pixelspace_get(
+      CTX_data_scene(C), strip);
 
   /* Origin. */
   GPUVertFormat *format = immVertexFormat();
@@ -1047,8 +1079,8 @@ static void seq_draw_image_origin_and_outline(const bContext *C, Sequence *seq, 
   immUnbindProgram();
 
   /* Outline. */
-  float seq_image_quad[4][2];
-  SEQ_image_transform_final_quad_get(CTX_data_scene(C), seq, seq_image_quad);
+  const blender::Array<blender::float2> strip_image_quad = seq::image_transform_final_quad_get(
+      CTX_data_scene(C), strip);
 
   GPU_line_smooth(true);
   GPU_blend(GPU_BLEND_ALPHA);
@@ -1065,15 +1097,193 @@ static void seq_draw_image_origin_and_outline(const bContext *C, Sequence *seq, 
   immUniformColor3fv(col);
   immUniform1f("lineWidth", U.pixelsize);
   immBegin(GPU_PRIM_LINE_LOOP, 4);
-  immVertex2f(pos, seq_image_quad[0][0], seq_image_quad[0][1]);
-  immVertex2f(pos, seq_image_quad[1][0], seq_image_quad[1][1]);
-  immVertex2f(pos, seq_image_quad[2][0], seq_image_quad[2][1]);
-  immVertex2f(pos, seq_image_quad[3][0], seq_image_quad[3][1]);
+  immVertex2f(pos, strip_image_quad[0].x, strip_image_quad[0].y);
+  immVertex2f(pos, strip_image_quad[1].x, strip_image_quad[1].y);
+  immVertex2f(pos, strip_image_quad[2].x, strip_image_quad[2].y);
+  immVertex2f(pos, strip_image_quad[3].x, strip_image_quad[3].y);
   immEnd();
   immUnbindProgram();
   GPU_line_width(1);
   GPU_blend(GPU_BLEND_NONE);
   GPU_line_smooth(false);
+}
+
+static void text_selection_draw(const bContext *C, const Strip *strip, uint pos)
+{
+  const TextVars *data = static_cast<TextVars *>(strip->effectdata);
+  const TextVarsRuntime *text = data->runtime;
+  const Scene *scene = CTX_data_scene(C);
+
+  if (data->selection_start_offset == -1 || strip_text_selection_range_get(data).is_empty()) {
+    return;
+  }
+
+  const blender::IndexRange sel_range = strip_text_selection_range_get(data);
+  const blender::int2 selection_start = strip_text_cursor_offset_to_position(text,
+                                                                             sel_range.first());
+  const blender::int2 selection_end = strip_text_cursor_offset_to_position(text, sel_range.last());
+  const int line_start = selection_start.y;
+  const int line_end = selection_end.y;
+
+  for (int line_index = line_start; line_index <= line_end; line_index++) {
+    const blender::seq::LineInfo line = text->lines[line_index];
+    blender::seq::CharInfo character_start = line.characters.first();
+    blender::seq::CharInfo character_end = line.characters.last();
+
+    if (line_index == selection_start.y) {
+      character_start = line.characters[selection_start.x];
+    }
+    if (line_index == selection_end.y) {
+      character_end = line.characters[selection_end.x];
+    }
+
+    const float line_y = character_start.position.y + text->font_descender;
+
+    const blender::float2 view_offs{-scene->r.xsch / 2.0f, -scene->r.ysch / 2.0f};
+    const float view_aspect = scene->r.xasp / scene->r.yasp;
+    blender::float3x3 transform_mat = seq::image_transform_matrix_get(scene, strip);
+    blender::float4x2 selection_quad{
+        {character_start.position.x, line_y},
+        {character_start.position.x, line_y + text->line_height},
+        {character_end.position.x + character_end.advance_x, line_y + text->line_height},
+        {character_end.position.x + character_end.advance_x, line_y},
+    };
+
+    immBegin(GPU_PRIM_TRIS, 6);
+    immUniformThemeColor(TH_SEQ_SELECTED_TEXT);
+
+    for (int i : blender::IndexRange(0, 4)) {
+      selection_quad[i] += view_offs;
+      selection_quad[i] = blender::math::transform_point(transform_mat, selection_quad[i]);
+      selection_quad[i].x *= view_aspect;
+    }
+    for (int i : blender::Vector<int>{0, 1, 2, 2, 3, 0}) {
+      immVertex2f(pos, selection_quad[i][0], selection_quad[i][1]);
+    }
+
+    immEnd();
+  }
+}
+
+static blender::float2 coords_region_view_align(const View2D *v2d, const blender::float2 coords)
+{
+  blender::int2 coords_view;
+  UI_view2d_view_to_region(v2d, coords.x, coords.y, &coords_view.x, &coords_view.y);
+  coords_view.x = std::round(coords_view.x);
+  coords_view.y = std::round(coords_view.y);
+  blender::float2 coords_region_aligned;
+  UI_view2d_region_to_view(
+      v2d, coords_view.x, coords_view.y, &coords_region_aligned.x, &coords_region_aligned.y);
+  return coords_region_aligned;
+}
+
+static void text_edit_draw_cursor(const bContext *C, const Strip *strip, uint pos)
+{
+  const TextVars *data = static_cast<TextVars *>(strip->effectdata);
+  const TextVarsRuntime *text = data->runtime;
+  const Scene *scene = CTX_data_scene(C);
+
+  const blender::float2 view_offs{-scene->r.xsch / 2.0f, -scene->r.ysch / 2.0f};
+  const float view_aspect = scene->r.xasp / scene->r.yasp;
+  blender::float3x3 transform_mat = seq::image_transform_matrix_get(scene, strip);
+  const blender::int2 cursor_position = strip_text_cursor_offset_to_position(text,
+                                                                             data->cursor_offset);
+  const float cursor_width = 10;
+  blender::float2 cursor_coords =
+      text->lines[cursor_position.y].characters[cursor_position.x].position;
+  /* Clamp cursor coords to be inside of text boundbox. Compensate for cursor width, but also line
+   * width hardcoded in shader. */
+  rcti text_boundbox = text->text_boundbox;
+  text_boundbox.xmax -= cursor_width + U.pixelsize;
+  text_boundbox.xmin += U.pixelsize;
+
+  cursor_coords.x = std::clamp(
+      cursor_coords.x, float(text_boundbox.xmin), float(text_boundbox.xmax));
+  cursor_coords = coords_region_view_align(UI_view2d_fromcontext(C), cursor_coords);
+
+  blender::float4x2 cursor_quad{
+      {cursor_coords.x, cursor_coords.y},
+      {cursor_coords.x, cursor_coords.y + text->line_height},
+      {cursor_coords.x + cursor_width, cursor_coords.y + text->line_height},
+      {cursor_coords.x + cursor_width, cursor_coords.y},
+  };
+  const blender::float2 descender_offs{0.0f, float(text->font_descender)};
+
+  immBegin(GPU_PRIM_TRIS, 6);
+  immUniformThemeColor(TH_SEQ_TEXT_CURSOR);
+
+  for (int i : blender::IndexRange(0, 4)) {
+    cursor_quad[i] += descender_offs + view_offs;
+    cursor_quad[i] = blender::math::transform_point(transform_mat, cursor_quad[i]);
+    cursor_quad[i].x *= view_aspect;
+  }
+  for (int i : blender::Vector<int>{0, 1, 2, 2, 3, 0}) {
+    immVertex2f(pos, cursor_quad[i][0], cursor_quad[i][1]);
+  }
+
+  immEnd();
+}
+
+static void text_edit_draw_box(const bContext *C, const Strip *strip, uint pos)
+{
+  const TextVars *data = static_cast<TextVars *>(strip->effectdata);
+  const TextVarsRuntime *text = data->runtime;
+  const Scene *scene = CTX_data_scene(C);
+
+  const blender::float2 view_offs{-scene->r.xsch / 2.0f, -scene->r.ysch / 2.0f};
+  const float view_aspect = scene->r.xasp / scene->r.yasp;
+  blender::float3x3 transform_mat = seq::image_transform_matrix_get(CTX_data_scene(C), strip);
+  blender::float4x2 box_quad{
+      {float(text->text_boundbox.xmin), float(text->text_boundbox.ymin)},
+      {float(text->text_boundbox.xmin), float(text->text_boundbox.ymax)},
+      {float(text->text_boundbox.xmax), float(text->text_boundbox.ymax)},
+      {float(text->text_boundbox.xmax), float(text->text_boundbox.ymin)},
+  };
+
+  GPU_blend(GPU_BLEND_NONE);
+  immBindBuiltinProgram(GPU_SHADER_3D_LINE_DASHED_UNIFORM_COLOR);
+  blender::float3 col;
+  UI_GetThemeColorShade3fv(TH_SEQ_ACTIVE, -50, col);
+  immUniformColor3fv(col);
+  immUniform1f("lineWidth", U.pixelsize);
+  immUniform1f("dash_width", 10.0f);
+  immBegin(GPU_PRIM_LINE_LOOP, 4);
+
+  for (int i : blender::IndexRange(0, 4)) {
+    box_quad[i] += view_offs;
+    box_quad[i] = blender::math::transform_point(transform_mat, box_quad[i]);
+    box_quad[i].x *= view_aspect;
+    immVertex2f(pos, box_quad[i][0], box_quad[i][1]);
+  }
+
+  immEnd();
+  immUnbindProgram();
+}
+
+static void text_edit_draw(const bContext *C)
+{
+  if (!sequencer_text_editing_active_poll(const_cast<bContext *>(C))) {
+    return;
+  }
+  const Strip *strip = seq::select_active_get(CTX_data_scene(C));
+  if (!seq::effects_can_render_text(strip)) {
+    return;
+  }
+
+  GPUVertFormat *format = immVertexFormat();
+  const uint pos = GPU_vertformat_attr_add(format, "pos", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+  GPU_line_smooth(true);
+  GPU_blend(GPU_BLEND_ALPHA);
+  immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
+
+  text_selection_draw(C, strip, pos);
+  text_edit_draw_cursor(C, strip, pos);
+
+  immUnbindProgram();
+  GPU_blend(GPU_BLEND_NONE);
+  GPU_line_smooth(false);
+
+  text_edit_draw_box(C, strip, pos);
 }
 
 void sequencer_draw_preview(const bContext *C,
@@ -1088,7 +1298,7 @@ void sequencer_draw_preview(const bContext *C,
   View2D *v2d = &region->v2d;
   ImBuf *ibuf = nullptr;
   float viewrect[2];
-  const bool show_imbuf = ED_space_sequencer_check_show_imbuf(sseq);
+  const bool show_imbuf = check_show_imbuf(sseq);
   const bool draw_gpencil = ((sseq->preview_overlay.flag & SEQ_PREVIEW_SHOW_GPENCIL) && sseq->gpd);
   const char *names[2] = {STEREO_LEFT_NAME, STEREO_RIGHT_NAME};
 
@@ -1155,13 +1365,14 @@ void sequencer_draw_preview(const bContext *C,
   }
 
   if (!draw_backdrop && scene->ed != nullptr) {
-    Editing *ed = SEQ_editing_get(scene);
-    ListBase *channels = SEQ_channels_displayed_get(ed);
-    blender::VectorSet strips = SEQ_query_rendered_strips(
+    Editing *ed = seq::editing_get(scene);
+    ListBase *channels = seq::channels_displayed_get(ed);
+    blender::VectorSet strips = seq::query_rendered_strips(
         scene, channels, ed->seqbasep, timeline_frame, 0);
-    Sequence *active_seq = SEQ_select_active_get(scene);
-    for (Sequence *seq : strips) {
-      seq_draw_image_origin_and_outline(C, seq, seq == active_seq);
+    Strip *active_seq = seq::select_active_get(scene);
+    for (Strip *strip : strips) {
+      strip_draw_image_origin_and_outline(C, strip, strip == active_seq);
+      text_edit_draw(C);
     }
   }
 
@@ -1185,3 +1396,5 @@ void sequencer_draw_preview(const bContext *C,
   UI_view2d_view_restore(C);
   seq_prefetch_wm_notify(C, scene);
 }
+
+}  // namespace blender::ed::vse

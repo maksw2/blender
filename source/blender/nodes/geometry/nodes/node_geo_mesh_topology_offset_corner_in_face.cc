@@ -2,9 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BKE_mesh.hh"
-
-#include "BLI_task.hh"
+#include "DNA_mesh_types.h"
 
 #include "node_geometry_util.hh"
 
@@ -55,15 +53,12 @@ class OffsetCornerInFaceFieldInput final : public bke::MeshFieldInput {
 
     Array<int> offset_corners(mask.min_array_size());
     mask.foreach_index_optimized<int>(GrainSize(2048), [&](const int selection_i) {
-      const int corner_i = corner_indices[selection_i];
+      const int corner = corner_indices[selection_i];
       const int offset = offsets[selection_i];
-      if (!corner_range.contains(corner_i)) {
-        offset_corners[selection_i] = 0;
-        return;
-      }
-
-      const IndexRange face = faces[corner_to_face[corner_i]];
-      offset_corners[selection_i] = apply_offset_in_cyclic_range(face, corner_i, offset);
+      const IndexRange face = faces[corner_to_face[corner]];
+      const int corner_index_in_face = corner - face.start();
+      offset_corners[selection_i] = face.start() + math::mod_periodic<int>(
+                                                       corner_index_in_face + offset, face.size());
     });
 
     return VArray<int>::ForContainer(std::move(offset_corners));
@@ -107,13 +102,15 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(&ntype,
-                     GEO_NODE_MESH_TOPOLOGY_OFFSET_CORNER_IN_FACE,
-                     "Offset Corner in Face",
-                     NODE_CLASS_INPUT);
+  geo_node_type_base(
+      &ntype, "GeometryNodeOffsetCornerInFace", GEO_NODE_MESH_TOPOLOGY_OFFSET_CORNER_IN_FACE);
+  ntype.ui_name = "Offset Corner in Face";
+  ntype.ui_description = "Retrieve corners in the same face as another";
+  ntype.enum_name_legacy = "OFFSET_CORNER_IN_FACE";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

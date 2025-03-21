@@ -15,6 +15,7 @@
 #include "BLI_bitmap.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
+#include "BLI_math_vector.hh"
 
 #include "BLT_translation.hh"
 
@@ -24,7 +25,6 @@
 #include "DNA_screen_types.h"
 
 #include "BKE_attribute.hh"
-#include "BKE_customdata.hh"
 #include "BKE_deform.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
@@ -45,7 +45,7 @@ static void generate_vert_coordinates(Mesh *mesh,
                                       const float offset[3],
                                       const int verts_num,
                                       float (*r_cos)[3],
-                                      float r_size[3])
+                                      blender::float3 *r_size)
 {
   using namespace blender;
   float min_co[3], max_co[3];
@@ -71,21 +71,21 @@ static void generate_vert_coordinates(Mesh *mesh,
 
       /* Not we are not interested in signs here - they are even troublesome actually,
        * due to security clamping! */
-      abs_v3_v3(r_size, ob_center->scale);
+      *r_size = blender::math::abs(blender::float3(ob_center->scale));
     }
     else {
       /* Set size. */
-      sub_v3_v3v3(r_size, max_co, min_co);
+      sub_v3_v3v3(*r_size, max_co, min_co);
     }
 
     /* Error checks - we do not want one or more of our sizes to be null! */
-    if (is_zero_v3(r_size)) {
-      r_size[0] = r_size[1] = r_size[2] = 1.0f;
+    if (is_zero_v3(*r_size)) {
+      *r_size = float3(1.0f);
     }
     else {
-      CLAMP_MIN(r_size[0], FLT_EPSILON);
-      CLAMP_MIN(r_size[1], FLT_EPSILON);
-      CLAMP_MIN(r_size[2], FLT_EPSILON);
+      CLAMP_MIN((*r_size)[0], FLT_EPSILON);
+      CLAMP_MIN((*r_size)[1], FLT_EPSILON);
+      CLAMP_MIN((*r_size)[2], FLT_EPSILON);
     }
   }
 
@@ -134,8 +134,7 @@ static void mix_normals(const float mix_factor,
   int i;
 
   if (dvert) {
-    facs = static_cast<float *>(
-        MEM_malloc_arrayN(size_t(corner_verts.size()), sizeof(*facs), __func__));
+    facs = MEM_malloc_arrayN<float>(size_t(corner_verts.size()), __func__);
     BKE_defvert_extract_vgroup_to_loopweights(dvert,
                                               defgrp_index,
                                               verts_num,
@@ -233,14 +232,13 @@ static void normalEditModifier_do_radial(NormalEditModifierData *enmd,
 
   const bool do_facenors_fix = (enmd->flag & MOD_NORMALEDIT_NO_POLYNORS_FIX) == 0;
 
-  float(*cos)[3] = static_cast<float(*)[3]>(
-      MEM_malloc_arrayN(size_t(vert_positions.size()), sizeof(*cos), __func__));
+  float(*cos)[3] = MEM_malloc_arrayN<float[3]>(size_t(vert_positions.size()), __func__);
   blender::Array<blender::float3> nos(corner_verts.size());
-  float size[3];
+  float3 size;
 
   BLI_bitmap *done_verts = BLI_BITMAP_NEW(size_t(vert_positions.size()), __func__);
 
-  generate_vert_coordinates(mesh, ob, ob_target, enmd->offset, vert_positions.size(), cos, size);
+  generate_vert_coordinates(mesh, ob, ob_target, enmd->offset, vert_positions.size(), cos, &size);
 
   /**
    * size gives us our spheroid coefficients `(A, B, C)`.
@@ -384,8 +382,7 @@ static void normalEditModifier_do_directional(NormalEditModifierData *enmd,
     }
   }
   else {
-    float(*cos)[3] = static_cast<float(*)[3]>(
-        MEM_malloc_arrayN(size_t(positions.size()), sizeof(*cos), __func__));
+    float(*cos)[3] = MEM_malloc_arrayN<float[3]>(size_t(positions.size()), __func__);
     generate_vert_coordinates(mesh, ob, ob_target, nullptr, positions.size(), cos, nullptr);
 
     BLI_bitmap *done_verts = BLI_BITMAP_NEW(size_t(positions.size()), __func__);
@@ -515,7 +512,6 @@ static Mesh *normalEditModifier_do(NormalEditModifierData *enmd,
                                              corner_verts,
                                              corner_edges,
                                              result->corner_to_face_map(),
-                                             result->vert_normals(),
                                              result->face_normals(),
                                              sharp_edges.span,
                                              sharp_faces,
@@ -632,15 +628,15 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   int mode = RNA_enum_get(ptr, "mode");
 
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 
   uiLayoutSetPropSep(layout, true);
 
-  uiItemR(layout, ptr, "target", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "target", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumn(layout, false);
   uiLayoutSetActive(col, mode == MOD_NORMALEDIT_MODE_DIRECTIONAL);
-  uiItemR(col, ptr, "use_direction_parallel", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "use_direction_parallel", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   modifier_panel_end(layout, ptr);
 }
@@ -656,13 +652,13 @@ static void mix_mode_panel_draw(const bContext * /*C*/, Panel *panel)
 
   uiLayoutSetPropSep(layout, true);
 
-  uiItemR(layout, ptr, "mix_mode", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "mix_factor", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mix_mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(layout, ptr, "mix_factor", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", nullptr);
+  modifier_vgroup_ui(layout, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", std::nullopt);
 
   row = uiLayoutRow(layout, true);
-  uiItemR(row, ptr, "mix_limit", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(row, ptr, "mix_limit", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   uiItemR(row,
           ptr,
           "no_polynors_fix",
@@ -687,7 +683,7 @@ static void offset_panel_draw(const bContext * /*C*/, Panel *panel)
   uiLayoutSetPropSep(layout, true);
 
   uiLayoutSetActive(layout, needs_object_offset);
-  uiItemR(layout, ptr, "offset", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "offset", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void panel_register(ARegionType *region_type)

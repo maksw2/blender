@@ -22,7 +22,6 @@
 #include "bmesh.hh"
 
 #include "GPU_vertex_buffer.hh"
-#include "GPU_vertex_format.hh"
 
 #include "draw_cache_extract.hh"
 
@@ -214,32 +213,24 @@ struct EditLoopData {
 
 void mesh_render_data_face_flag(const MeshRenderData &mr,
                                 const BMFace *efa,
-                                BMUVOffsets offsets,
+                                const BMUVOffsets &offsets,
                                 EditLoopData &eattr);
 void mesh_render_data_loop_flag(const MeshRenderData &mr,
                                 const BMLoop *l,
-                                BMUVOffsets offsets,
+                                const BMUVOffsets &offsets,
                                 EditLoopData &eattr);
 void mesh_render_data_loop_edge_flag(const MeshRenderData &mr,
                                      const BMLoop *l,
-                                     BMUVOffsets offsets,
+                                     const BMUVOffsets &offsets,
                                      EditLoopData &eattr);
 
-template<typename GPUType> inline GPUType convert_normal(const float3 &src);
-
-template<> inline GPUPackedNormal convert_normal(const float3 &src)
+/* In the GPU vertex buffers, the value for each vertex is duplicated to each of its vertex
+ * corners. So the edges on the GPU connect face corners rather than vertices. */
+inline uint2 edge_from_corners(const IndexRange face, const int corner)
 {
-  return GPU_normal_convert_i10_v3(src);
+  const int corner_next = bke::mesh::face_corner_next(face, corner);
+  return uint2(corner, corner_next);
 }
-
-template<> inline short4 convert_normal(const float3 &src)
-{
-  short4 dst;
-  normal_float_to_short_v3(dst, src);
-  return dst;
-}
-
-template<typename GPUType> void convert_normals(Span<float3> src, MutableSpan<GPUType> dst);
 
 template<typename T>
 void extract_mesh_loose_edge_data(const Span<T> vert_data,

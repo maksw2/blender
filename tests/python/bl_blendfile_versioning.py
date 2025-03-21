@@ -9,6 +9,10 @@
 #
 # This needs to be investigated!
 
+__all__ = (
+    "main",
+)
+
 import os
 import platform
 import sys
@@ -54,19 +58,6 @@ class TestBlendFileOpenAllTestFiles(TestHelper):
         # Directories to exclude relative to `./tests/data/`.
         self.excluded_dirs = ()
 
-        if platform.system() == "Darwin":
-            # NOTE(@ideasman42):
-            # - `x86_64` fails often.
-            # - `arm64` can succeed but is unreliable enough to keep disabled.
-            # Keep both disabled.
-            self.excluded_dirs = (
-                *self.excluded_dirs,
-                # The assert in `BKE_libblock_alloc_in_lib` often fails:
-                # `BLI_assert(bmain->is_locked_for_linking == false || ELEM(type, ID_WS, ID_GR, ID_NT))`.
-                # This needs to be investigated.
-                "io_tests/blend_big_endian/",
-            )
-
         assert all(p.endswith("/") for p in self.excluded_dirs)
         self.excluded_dirs = tuple(p.replace("/", os.sep) for p in self.excluded_dirs)
 
@@ -92,11 +83,12 @@ class TestBlendFileOpenAllTestFiles(TestHelper):
         slice_stride_base = total_len // slice_range
         slice_stride_remain = total_len % slice_range
 
-        def gen_indices(i): return (
-            (i * (slice_stride_base + 1))
-            if i < slice_stride_remain else
-            (slice_stride_remain * (slice_stride_base + 1)) + ((i - slice_stride_remain) * slice_stride_base)
-        )
+        def gen_indices(i):
+            return (
+                (i * (slice_stride_base + 1))
+                if i < slice_stride_remain else
+                (slice_stride_remain * (slice_stride_base + 1)) + ((i - slice_stride_remain) * slice_stride_base)
+            )
         slice_indices = [(gen_indices(i), gen_indices(i + 1)) for i in range(slice_range)]
         return slice_indices[slice_index]
 

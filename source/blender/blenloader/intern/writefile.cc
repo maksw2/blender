@@ -60,7 +60,6 @@
 
 #include <cerrno>
 #include <climits>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -74,6 +73,8 @@
 #  include <unistd.h> /* FreeBSD, for write() and close(). */
 #endif
 
+#include <fmt/format.h>
+
 #include "BLI_utildefines.h"
 
 #include "CLG_log.h"
@@ -81,22 +82,21 @@
 /* Allow writefile to use deprecated functionality (for forward compatibility code). */
 #define DNA_DEPRECATED_ALLOW
 
-#include "DNA_collection_types.h"
 #include "DNA_fileglobal_types.h"
 #include "DNA_genfile.h"
 #include "DNA_key_types.h"
+#include "DNA_print.hh"
 #include "DNA_sdna_types.h"
+#include "DNA_userdef_types.h"
 
-#include "BLI_bitmap.h"
-#include "BLI_blenlib.h"
 #include "BLI_endian_defines.h"
-#include "BLI_endian_switch.h"
+#include "BLI_fileops.hh"
 #include "BLI_implicit_sharing.hh"
-#include "BLI_link_utils.h"
-#include "BLI_linklist.h"
 #include "BLI_math_base.h"
-#include "BLI_mempool.h"
+#include "BLI_multi_value_map.hh"
+#include "BLI_path_utils.hh"
 #include "BLI_set.hh"
+#include "BLI_string.h"
 #include "BLI_threads.h"
 
 #include "MEM_guardedalloc.h" /* MEM_freeN */
@@ -111,6 +111,7 @@
 #include "BKE_lib_id.hh"
 #include "BKE_lib_override.hh"
 #include "BKE_lib_query.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_main_namemap.hh"
 #include "BKE_node.hh"
@@ -134,6 +135,13 @@
 
 /* Make preferences read-only. */
 #define U (*((const UserDef *)&U))
+
+/**
+ * Generate an additional file next to every saved .blend file that contains the file content in a
+ * more human readable form.
+ */
+#define GENERATE_DEBUG_BLEND_FILE 0
+#define DEBUG_BLEND_FILE_SUFFIX ".debug.txt"
 
 /* ********* my write, buffered writing with minimum size chunks ************ */
 
@@ -267,8 +275,7 @@ void ZstdWriteWrap::write_task(ZstdWriteBlockTask *task)
   }
   else {
     if (base_wrap.write(out_buf, out_size)) {
-      ZstdFrame *frameinfo = static_cast<ZstdFrame *>(
-          MEM_mallocN(sizeof(ZstdFrame), "zstd frameinfo"));
+      ZstdFrame *frameinfo = MEM_mallocN<ZstdFrame>("zstd frameinfo");
       frameinfo->uncompressed_size = task->size;
       frameinfo->compressed_size = out_size;
       BLI_addtail(&frames, frameinfo);
@@ -362,8 +369,7 @@ bool ZstdWriteWrap::write(const void *buf, const size_t buf_len)
     return false;
   }
 
-  ZstdWriteBlockTask *task = static_cast<ZstdWriteBlockTask *>(
-      MEM_mallocN(sizeof(ZstdWriteBlockTask), __func__));
+  ZstdWriteBlockTask *task = MEM_mallocN<ZstdWriteBlockTask>(__func__);
   task->data = MEM_mallocN(buf_len, __func__);
   memcpy(task->data, buf, buf_len);
   task->size = buf_len;
@@ -401,6 +407,7 @@ bool ZstdWriteWrap::write(const void *buf, const size_t buf_len)
 
 struct WriteData {
   const SDNA *sdna;
+  std::ostream *debug_dst = nullptr;
 
   struct {
     /** Use for file and memory writing (size stored in max_size). */
@@ -658,7 +665,7 @@ static void mywrite_id_begin(WriteData *wd, ID *id)
       if (MemFileChunk *ref = wd->mem.id_session_uid_mapping.lookup_default(id->session_uid,
                                                                             nullptr))
       {
-        wd->mem.reference_current_chunk = static_cast<MemFileChunk *>(ref);
+        wd->mem.reference_current_chunk = ref;
       }
       /* Else, no existing memchunk found, i.e. this is supposed to be a new ID. */
     }
@@ -758,6 +765,10 @@ static void writestruct_at_address_nr(WriteData *wd,
     return;
   }
 
+  if (wd->debug_dst) {
+    blender::dna::print_structs_at_address(*wd->sdna, struct_nr, data, adr, nr, *wd->debug_dst);
+  }
+
   write_bhead(wd, bh);
   mywrite(wd, data, size_t(bh.len));
 }
@@ -766,6 +777,32 @@ static void writestruct_nr(
     WriteData *wd, const int filecode, const int struct_nr, const int64_t nr, const void *adr)
 {
   writestruct_at_address_nr(wd, filecode, struct_nr, nr, adr, adr);
+}
+
+static void write_raw_data_in_debug_file(WriteData *wd, const size_t len, const void *adr)
+{
+  fmt::memory_buffer buf;
+  fmt::appender dst{buf};
+
+  fmt::format_to(dst, "<Raw Data> at {} ({} bytes)\n", adr, len);
+
+  constexpr int bytes_per_row = 8;
+  const int len_digits = std::to_string(std::max<size_t>(0, len - 1)).size();
+
+  for (size_t i = 0; i < len; i++) {
+    if (i % bytes_per_row == 0) {
+      fmt::format_to(dst, "  {:{}}: ", i, len_digits);
+    }
+    fmt::format_to(dst, "{:02x} ", reinterpret_cast<const uint8_t *>(adr)[i]);
+    if (i % bytes_per_row == bytes_per_row - 1) {
+      fmt::format_to(dst, "\n");
+    }
+  }
+  if (len % bytes_per_row != 0) {
+    fmt::format_to(dst, "\n");
+  }
+
+  *wd->debug_dst << fmt::to_string(buf);
 }
 
 /**
@@ -793,6 +830,10 @@ static void writedata(WriteData *wd, const int filecode, const size_t len, const
   BLI_STATIC_ASSERT(SDNA_RAW_DATA_STRUCT_INDEX == 0, "'raw data' SDNA struct index should be 0")
   bh.SDNAnr = SDNA_RAW_DATA_STRUCT_INDEX;
   bh.len = int(len);
+
+  if (wd->debug_dst) {
+    write_raw_data_in_debug_file(wd, len, adr);
+  }
 
   write_bhead(wd, bh);
   mywrite(wd, adr, len);
@@ -1025,82 +1066,88 @@ static void write_userdef(BlendWriter *writer, const UserDef *userdef)
   }
 }
 
-/** Keep it last of `write_*_data` functions. */
-static void write_libraries(WriteData *wd, Main *main)
+/**
+ * Writes ID and all its direct data to the file.
+ */
+static void write_id(WriteData *wd, ID *id)
 {
-  ListBase *lbarray[INDEX_ID_MAX];
-  ID *id;
-  int a, tot;
-  bool found_one;
+  const IDTypeInfo *id_type = BKE_idtype_get_info_from_id(id);
+  mywrite_id_begin(wd, id);
+  if (id_type->blend_write != nullptr) {
+    BlendWriter writer = {wd};
+    BLO_Write_IDBuffer id_buffer{*id, &writer};
+    id_type->blend_write(&writer, id_buffer.get(), id);
+  }
+  mywrite_id_end(wd, id);
+}
 
-  for (; main; main = main->next) {
-    a = tot = set_listbasepointers(main, lbarray);
+/** Keep it last of `write_*_data` functions. */
+static void write_libraries(WriteData *wd, Main *bmain)
+{
+  /* Gather IDs coming from each library. */
+  blender::MultiValueMap<Library *, ID *> linked_ids_by_library;
+  {
+    ID *id;
+    FOREACH_MAIN_ID_BEGIN (bmain, id) {
+      if (!ID_IS_LINKED(id)) {
+        continue;
+      }
+      BLI_assert(id->lib);
+      linked_ids_by_library.add(id->lib, id);
+    }
+    FOREACH_MAIN_ID_END;
+  }
 
-    /* Test: is lib being used. */
-    if (main->curlib && main->curlib->packedfile) {
-      found_one = true;
+  LISTBASE_FOREACH (Library *, library_ptr, &bmain->libraries) {
+    Library &library = *library_ptr;
+    const blender::Span<ID *> ids = linked_ids_by_library.lookup(&library);
+
+    /* Gather IDs that are somehow directly referenced by data in the current blend file. */
+    blender::Vector<ID *> ids_used_from_library;
+    for (ID *id : ids) {
+      if (id->us == 0) {
+        continue;
+      }
+      if (id->tag & ID_TAG_EXTERN) {
+        ids_used_from_library.append(id);
+        continue;
+      }
+      if ((id->tag & ID_TAG_INDIRECT) && (id->flag & ID_FLAG_INDIRECT_WEAK_LINK)) {
+        ids_used_from_library.append(id);
+        continue;
+      }
+    }
+
+    bool should_write_library = false;
+    if (library.packedfile) {
+      should_write_library = true;
     }
     else if (wd->use_memfile) {
-      /* When writing undo step we always write all existing libraries, makes reading undo step
-       * much easier when dealing with purely indirectly used libraries. */
-      found_one = true;
+      /* When writing undo step we always write all existing libraries. That makes reading undo
+       * step much easier when dealing with purely indirectly used libraries. */
+      should_write_library = true;
     }
     else {
-      found_one = false;
-      while (!found_one && tot--) {
-        for (id = static_cast<ID *>(lbarray[tot]->first); id; id = static_cast<ID *>(id->next)) {
-          if (id->us > 0 &&
-              ((id->tag & ID_TAG_EXTERN) ||
-               ((id->tag & ID_TAG_INDIRECT) && (id->flag & ID_FLAG_INDIRECT_WEAK_LINK))))
-          {
-            found_one = true;
-            break;
-          }
-        }
-      }
+      should_write_library = !ids_used_from_library.is_empty();
     }
 
-    /* To be able to restore `quit.blend` and temp saves,
-     * the packed blend has to be in undo buffers... */
-    /* XXX needs rethink, just like save UI in undo files now -
-     * would be nice to append things only for the `quit.blend` and temp saves. */
-    if (found_one) {
-      /* Not overridable. */
+    if (!should_write_library) {
+      /* Nothing from the library is used, so it does not have to be written. */
+      continue;
+    }
 
-      void *runtime_name_data = main->curlib->runtime.name_map;
-      main->curlib->runtime.name_map = nullptr;
+    write_id(wd, &library.id);
 
-      BlendWriter writer = {wd};
-      writestruct(wd, ID_LI, Library, 1, main->curlib);
-      BKE_id_blend_write(&writer, &main->curlib->id);
-
-      main->curlib->runtime.name_map = static_cast<UniqueName_Map *>(runtime_name_data);
-
-      if (main->curlib->packedfile) {
-        BKE_packedfile_blend_write(&writer, main->curlib->packedfile);
-        if (wd->use_memfile == false) {
-          CLOG_INFO(&LOG, 2, "Write packed .blend: %s", main->curlib->filepath);
-        }
+    /* Write placeholders for linked data-blocks that are used. */
+    for (const ID *id : ids_used_from_library) {
+      if (!BKE_idtype_idcode_is_linkable(GS(id->name))) {
+        CLOG_ERROR(&LOG,
+                   "Data-block '%s' from lib '%s' is not linkable, but is flagged as "
+                   "directly linked",
+                   id->name,
+                   library.runtime->filepath_abs);
       }
-
-      /* Write link placeholders for all direct linked IDs. */
-      while (a--) {
-        for (id = static_cast<ID *>(lbarray[a]->first); id; id = static_cast<ID *>(id->next)) {
-          if (id->us > 0 &&
-              ((id->tag & ID_TAG_EXTERN) ||
-               ((id->tag & ID_TAG_INDIRECT) && (id->flag & ID_FLAG_INDIRECT_WEAK_LINK))))
-          {
-            if (!BKE_idtype_idcode_is_linkable(GS(id->name))) {
-              CLOG_ERROR(&LOG,
-                         "Data-block '%s' from lib '%s' is not linkable, but is flagged as "
-                         "directly linked",
-                         id->name,
-                         main->curlib->runtime.filepath_abs);
-            }
-            writestruct(wd, ID_LINK_PLACEHOLDER, ID, 1, id);
-          }
-        }
-      }
+      writestruct(wd, ID_LINK_PLACEHOLDER, ID, 1, id);
     }
   }
 
@@ -1224,11 +1271,8 @@ BLO_Write_IDBuffer::BLO_Write_IDBuffer(ID &id, const bool is_undo)
    * when we need to re-read the ID into its original address, this is currently cleared in
    * #direct_link_id_common in `readfile.cc` anyway. */
   temp_id->py_instance = nullptr;
-
-  DrawDataList *drawdata = DRW_drawdatalist_from_id(temp_id);
-  if (drawdata) {
-    BLI_listbase_clear(reinterpret_cast<ListBase *>(drawdata));
-  }
+  /* Clear runtime data struct. */
+  memset(&temp_id->runtime, 0, sizeof(temp_id->runtime));
 }
 
 BLO_Write_IDBuffer::BLO_Write_IDBuffer(ID &id, BlendWriter *writer)
@@ -1242,7 +1286,7 @@ static int write_id_direct_linked_data_process_cb(LibraryIDLinkCallbackData *cb_
 {
   ID *self_id = cb_data->self_id;
   ID *id = *cb_data->id_pointer;
-  const int cb_flag = cb_data->cb_flag;
+  const LibraryForeachIDCallbackFlag cb_flag = cb_data->cb_flag;
 
   if (id == nullptr || !ID_IS_LINKED(id)) {
     return IDWALK_RET_NOP;
@@ -1272,21 +1316,6 @@ static int write_id_direct_linked_data_process_cb(LibraryIDLinkCallbackData *cb_
   return IDWALK_RET_NOP;
 }
 
-/**
- * Writes ID and all its direct data to the file.
- */
-static void write_id(WriteData *wd, ID *id)
-{
-  const IDTypeInfo *id_type = BKE_idtype_get_info_from_id(id);
-  mywrite_id_begin(wd, id);
-  if (id_type->blend_write != nullptr) {
-    BlendWriter writer = {wd};
-    BLO_Write_IDBuffer id_buffer{*id, &writer};
-    id_type->blend_write(&writer, id_buffer.get(), id);
-  }
-  mywrite_id_end(wd, id);
-}
-
 static void write_blend_file_header(WriteData *wd)
 {
   char buf[16];
@@ -1309,6 +1338,10 @@ static blender::Vector<ID *> gather_local_ids_to_write(Main *bmain, const bool i
   FOREACH_MAIN_ID_BEGIN (bmain, id) {
     if (GS(id->name) == ID_LI) {
       /* Libraries are handled separately below. */
+      continue;
+    }
+    if (ID_IS_LINKED(id)) {
+      /* Linked data-blocks are handled separately below. */
       continue;
     }
     const IDTypeInfo *id_type = BKE_idtype_get_info_from_id(id);
@@ -1375,12 +1408,13 @@ static bool write_file_handle(Main *mainvar,
                               MemFile *current,
                               const int write_flags,
                               const bool use_userdef,
-                              const BlendThumbnail *thumb)
+                              const BlendThumbnail *thumb,
+                              std::ostream *debug_dst)
 {
-  ListBase mainlist;
   WriteData *wd;
 
   wd = mywrite_begin(ww, compare, current);
+  wd->debug_dst = debug_dst;
   BlendWriter writer = {wd};
 
   /* Clear 'directly linked' flag for all linked data, these are not necessarily valid/up-to-date
@@ -1428,8 +1462,6 @@ static bool write_file_handle(Main *mainvar,
     }
   }
 
-  blo_split_main(&mainlist, mainvar);
-
   write_blend_file_header(wd);
   write_renderinfo(wd, mainvar);
   write_thumb(wd, thumb);
@@ -1465,8 +1497,8 @@ static bool write_file_handle(Main *mainvar,
     write_id(wd, id);
   }
 
-  /* Special handling, operating over split Mains... */
-  write_libraries(wd, mainvar->next);
+  /* Write libraries about libraries and linked data-blocks. */
+  write_libraries(wd, mainvar);
 
   /* So changes above don't cause a 'DNA1' to be detected as changed on undo. */
   mywrite_flush(wd);
@@ -1485,8 +1517,6 @@ static bool write_file_handle(Main *mainvar,
   BHead bhead{};
   bhead.code = BLO_CODE_ENDB;
   write_bhead(wd, bhead);
-
-  blo_join_main(&mainlist);
 
   return mywrite_end(wd);
 }
@@ -1548,7 +1578,7 @@ static void write_file_main_validate_pre(Main *bmain, ReportList *reports)
   }
 
   BLO_main_validate_shapekeys(bmain, reports);
-  if (!BKE_main_namemap_validate_and_fix(bmain)) {
+  if (!BKE_main_namemap_validate_and_fix(*bmain)) {
     BKE_report(reports,
                RPT_ERROR,
                "Critical data corruption: Conflicts and/or otherwise invalid data-blocks names "
@@ -1699,9 +1729,17 @@ static bool BLO_write_file_impl(Main *mainvar,
     }
   }
 
+#if GENERATE_DEBUG_BLEND_FILE
+  std::string debug_dst_path = blender::StringRef(filepath) + DEBUG_BLEND_FILE_SUFFIX;
+  blender::fstream debug_dst_file(debug_dst_path, std::ios::out);
+  std::ostream *debug_dst = &debug_dst_file;
+#else
+  std::ostream *debug_dst = nullptr;
+#endif
+
   /* Actual file writing. */
   const bool err = write_file_handle(
-      mainvar, &ww, nullptr, nullptr, write_flags, use_userdef, thumb);
+      mainvar, &ww, nullptr, nullptr, write_flags, use_userdef, thumb, debug_dst);
 
   ww.close();
 
@@ -1763,7 +1801,7 @@ bool BLO_write_file_mem(Main *mainvar, MemFile *compare, MemFile *current, const
   bool use_userdef = false;
 
   const bool err = write_file_handle(
-      mainvar, nullptr, compare, current, write_flags, use_userdef, nullptr);
+      mainvar, nullptr, compare, current, write_flags, use_userdef, nullptr, nullptr);
 
   return (err == 0);
 }
@@ -1872,6 +1910,11 @@ void BLO_write_char_array(BlendWriter *writer, const int64_t num, const char *da
 void BLO_write_int8_array(BlendWriter *writer, const int64_t num, const int8_t *data_ptr)
 {
   BLO_write_raw(writer, sizeof(int8_t) * size_t(num), data_ptr);
+}
+
+void BLO_write_int16_array(BlendWriter *writer, const int64_t num, const int16_t *data_ptr)
+{
+  BLO_write_raw(writer, sizeof(int16_t) * size_t(num), data_ptr);
 }
 
 void BLO_write_uint8_array(BlendWriter *writer, const int64_t num, const uint8_t *data_ptr)

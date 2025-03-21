@@ -18,8 +18,6 @@
 
 #include "GPU_material.hh"
 
-#include "COM_shader_node.hh"
-
 #include "node_composite_util.hh"
 
 /* **************** ALPHAOVER ******************** */
@@ -47,7 +45,7 @@ static void cmp_node_alphaover_declare(NodeDeclarationBuilder &b)
 
 static void node_alphaover_init(bNodeTree * /*ntree*/, bNode *node)
 {
-  node->storage = MEM_cnew<NodeTwoFloats>(__func__);
+  node->storage = MEM_callocN<NodeTwoFloats>(__func__);
 }
 
 static void node_composit_buts_alphaover(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
@@ -55,11 +53,11 @@ static void node_composit_buts_alphaover(uiLayout *layout, bContext * /*C*/, Poi
   uiLayout *col;
 
   col = uiLayoutColumn(layout, true);
-  uiItemR(col, ptr, "use_premultiply", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "premul", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "use_premultiply", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "premul", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 static bool get_use_premultiply(const bNode &node)
 {
@@ -71,38 +69,27 @@ static float get_premultiply_factor(const bNode &node)
   return node_storage(node).x;
 }
 
-class AlphaOverShaderNode : public ShaderNode {
- public:
-  using ShaderNode::ShaderNode;
-
-  void compile(GPUMaterial *material) override
-  {
-    GPUNodeStack *inputs = get_inputs_array();
-    GPUNodeStack *outputs = get_outputs_array();
-
-    const float premultiply_factor = get_premultiply_factor(bnode());
-    if (premultiply_factor != 0.0f) {
-      GPU_stack_link(material,
-                     &bnode(),
-                     "node_composite_alpha_over_mixed",
-                     inputs,
-                     outputs,
-                     GPU_uniform(&premultiply_factor));
-      return;
-    }
-
-    if (get_use_premultiply(bnode())) {
-      GPU_stack_link(material, &bnode(), "node_composite_alpha_over_key", inputs, outputs);
-      return;
-    }
-
-    GPU_stack_link(material, &bnode(), "node_composite_alpha_over_premultiply", inputs, outputs);
-  }
-};
-
-static ShaderNode *get_compositor_shader_node(DNode node)
+static int node_gpu_material(GPUMaterial *material,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *inputs,
+                             GPUNodeStack *outputs)
 {
-  return new AlphaOverShaderNode(node);
+  const float premultiply_factor = get_premultiply_factor(*node);
+  if (premultiply_factor != 0.0f) {
+    return GPU_stack_link(material,
+                          node,
+                          "node_composite_alpha_over_mixed",
+                          inputs,
+                          outputs,
+                          GPU_uniform(&premultiply_factor));
+  }
+
+  if (get_use_premultiply(*node)) {
+    return GPU_stack_link(material, node, "node_composite_alpha_over_key", inputs, outputs);
+  }
+
+  return GPU_stack_link(material, node, "node_composite_alpha_over_premultiply", inputs, outputs);
 }
 
 static float4 alpha_over_mixed(const float factor,
@@ -197,14 +184,18 @@ void register_node_type_cmp_alphaover()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_ALPHAOVER, "Alpha Over", NODE_CLASS_OP_COLOR);
+  cmp_node_type_base(&ntype, "CompositorNodeAlphaOver", CMP_NODE_ALPHAOVER);
+  ntype.ui_name = "Alpha Over";
+  ntype.ui_description = "Overlay a foreground image onto a background image";
+  ntype.enum_name_legacy = "ALPHAOVER";
+  ntype.nclass = NODE_CLASS_OP_COLOR;
   ntype.declare = file_ns::cmp_node_alphaover_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_alphaover;
   ntype.initfunc = file_ns::node_alphaover_init;
   blender::bke::node_type_storage(
-      &ntype, "NodeTwoFloats", node_free_standard_storage, node_copy_standard_storage);
-  ntype.get_compositor_shader_node = file_ns::get_compositor_shader_node;
+      ntype, "NodeTwoFloats", node_free_standard_storage, node_copy_standard_storage);
+  ntype.gpu_fn = file_ns::node_gpu_material;
   ntype.build_multi_function = file_ns::node_build_multi_function;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

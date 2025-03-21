@@ -70,13 +70,13 @@ static void node_declare(NodeDeclarationBuilder &b)
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
   uiItemR(layout, ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "use_all_curves", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
+  uiItemR(layout, ptr, "use_all_curves", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryCurveSample *data = MEM_cnew<NodeGeometryCurveSample>(__func__);
+  NodeGeometryCurveSample *data = MEM_callocN<NodeGeometryCurveSample>(__func__);
   data->mode = GEO_NODE_CURVE_SAMPLE_FACTOR;
   data->use_all_curves = false;
   data->data_type = CD_PROP_FLOAT;
@@ -262,13 +262,15 @@ class SampleCurveFunction : public mf::MultiFunction {
     };
 
     if (!geometry_set_.has_curves()) {
-      return return_default();
+      return_default();
+      return;
     }
 
     const Curves &curves_id = *geometry_set_.get_curves();
     const bke::CurvesGeometry &curves = curves_id.geometry.wrap();
     if (curves.is_empty()) {
-      return return_default();
+      return_default();
+      return;
     }
     curves.ensure_can_interpolate_to_evaluated();
     Span<float3> evaluated_positions = curves.evaluated_positions();
@@ -494,15 +496,20 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_SAMPLE_CURVE, "Sample Curve", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeSampleCurve", GEO_NODE_SAMPLE_CURVE);
+  ntype.ui_name = "Sample Curve";
+  ntype.ui_description =
+      "Retrieve data from a point on a curve at a certain distance from its start";
+  ntype.enum_name_legacy = "SAMPLE_CURVE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryCurveSample", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryCurveSample", node_free_standard_storage, node_copy_standard_storage);
   ntype.draw_buttons = node_layout;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

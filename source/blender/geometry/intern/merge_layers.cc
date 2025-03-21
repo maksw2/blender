@@ -4,10 +4,11 @@
 
 #include "GEO_merge_layers.hh"
 
+#include "BLI_math_matrix.hh"
+
 #include "BKE_attribute_math.hh"
 #include "BKE_curves.hh"
 #include "BKE_grease_pencil.hh"
-#include "BKE_lib_id.hh"
 
 #include "GEO_join_geometries.hh"
 
@@ -47,10 +48,8 @@ GreasePencil *merge_layers(const GreasePencil &src_grease_pencil,
 
   GreasePencil *new_grease_pencil = BKE_grease_pencil_new_nomain();
 
+  BKE_grease_pencil_copy_parameters(src_grease_pencil, *new_grease_pencil);
   new_grease_pencil->runtime->eval_frame = src_grease_pencil.runtime->eval_frame;
-  new_grease_pencil->material_array = static_cast<Material **>(
-      MEM_dupallocN(src_grease_pencil.material_array));
-  new_grease_pencil->material_array_num = src_grease_pencil.material_array_num;
 
   const int new_layers_num = layers_to_merge.size();
   new_grease_pencil->add_layers_with_empty_drawings_for_eval(new_layers_num);
@@ -63,6 +62,7 @@ GreasePencil *merge_layers(const GreasePencil &src_grease_pencil,
     const int first_src_layer_i = src_layer_indices[0];
     const Layer &first_src_layer = src_grease_pencil.layer(first_src_layer_i);
     layer.set_name(first_src_layer.name());
+    layer.opacity = first_src_layer.opacity;
     Drawing *drawing = new_grease_pencil->get_eval_drawing(layer);
     BLI_assert(drawing != nullptr);
     curves_by_new_layer[new_layer_i] = &drawing->strokes_for_write();

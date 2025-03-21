@@ -8,8 +8,6 @@
  * Functions for mapping data between meshes.
  */
 
-#include <climits>
-
 #include "CLG_log.h"
 
 #include "MEM_guardedalloc.h"
@@ -17,6 +15,7 @@
 #include "BLI_array.hh"
 #include "BLI_astar.h"
 #include "BLI_bit_vector.hh"
+#include "BLI_index_mask.hh"
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_solvers.h"
@@ -32,9 +31,8 @@
 #include "BKE_mesh.hh"
 #include "BKE_mesh_mapping.hh"
 #include "BKE_mesh_remap.hh" /* own include */
-#include "BKE_mesh_runtime.hh"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 static CLG_LogRef LOG = {"bke.mesh"};
 
@@ -42,7 +40,7 @@ static CLG_LogRef LOG = {"bke.mesh"};
 /** \name Some Generic Helpers
  * \{ */
 
-static bool mesh_remap_bvhtree_query_nearest(BVHTreeFromMesh *treedata,
+static bool mesh_remap_bvhtree_query_nearest(blender::bke::BVHTreeFromMesh *treedata,
                                              BVHTreeNearest *nearest,
                                              const float co[3],
                                              const float max_dist_sq,
@@ -71,7 +69,7 @@ static bool mesh_remap_bvhtree_query_nearest(BVHTreeFromMesh *treedata,
   return false;
 }
 
-static bool mesh_remap_bvhtree_query_raycast(BVHTreeFromMesh *treedata,
+static bool mesh_remap_bvhtree_query_raycast(blender::bke::BVHTreeFromMesh *treedata,
                                              BVHTreeRayHit *rayhit,
                                              const float co[3],
                                              const float no[3],
@@ -123,7 +121,7 @@ float BKE_mesh_remap_calc_difference_from_mesh(const SpaceTransform *space_trans
   float result = 0.0f;
   int i;
 
-  BVHTreeFromMesh treedata = me_src->bvh_verts();
+  blender::bke::BVHTreeFromMesh treedata = me_src->bvh_verts();
   nearest.index = -1;
 
   for (i = 0; i < numverts_dst; i++) {
@@ -179,7 +177,7 @@ static void mesh_calc_eigen_matrix(const float (*positions)[3],
   int i;
 
   if (positions) {
-    cos = static_cast<float(*)[3]>(MEM_mallocN(sizeof(*cos) * size_t(numverts), __func__));
+    cos = MEM_malloc_arrayN<float[3]>(size_t(numverts), __func__);
     memcpy(cos, positions, sizeof(float[3]) * size_t(numverts));
     /* TODO(sergey): For until we officially drop all compilers which
      * doesn't handle casting correct we use workaround to avoid explicit
@@ -315,7 +313,7 @@ void BKE_mesh_remap_init(MeshPairRemap *map, const int items_num)
 void BKE_mesh_remap_free(MeshPairRemap *map)
 {
   if (map->mem) {
-    BLI_memarena_free((MemArena *)map->mem);
+    BLI_memarena_free(map->mem);
   }
 
   map->items_num = 0;
@@ -470,7 +468,7 @@ void BKE_mesh_remap_calc_verts_from_mesh(const int mode,
     }
   }
   else {
-    BVHTreeFromMesh treedata{};
+    blender::bke::BVHTreeFromMesh treedata{};
     BVHTreeNearest nearest = {0};
     BVHTreeRayHit rayhit = {0};
     float hit_dist;
@@ -558,11 +556,9 @@ void BKE_mesh_remap_calc_verts_from_mesh(const int mode,
       const blender::Span<int> tri_faces = me_src->corner_tri_faces();
 
       size_t tmp_buff_size = MREMAP_DEFAULT_BUFSIZE;
-      float(*vcos)[3] = static_cast<float(*)[3]>(
-          MEM_mallocN(sizeof(*vcos) * tmp_buff_size, __func__));
-      int *indices = static_cast<int *>(MEM_mallocN(sizeof(*indices) * tmp_buff_size, __func__));
-      float *weights = static_cast<float *>(
-          MEM_mallocN(sizeof(*weights) * tmp_buff_size, __func__));
+      float(*vcos)[3] = MEM_malloc_arrayN<float[3]>(tmp_buff_size, __func__);
+      int *indices = MEM_malloc_arrayN<int>(tmp_buff_size, __func__);
+      float *weights = MEM_malloc_arrayN<float>(tmp_buff_size, __func__);
 
       treedata = me_src->bvh_corner_tris();
 
@@ -695,7 +691,7 @@ void BKE_mesh_remap_calc_edges_from_mesh(const int mode,
     }
   }
   else {
-    BVHTreeFromMesh treedata{};
+    blender::bke::BVHTreeFromMesh treedata{};
     BVHTreeNearest nearest = {0};
     BVHTreeRayHit rayhit = {0};
     float hit_dist;
@@ -710,8 +706,7 @@ void BKE_mesh_remap_calc_edges_from_mesh(const int mode,
         float hit_dist;
         int index;
       };
-      HitData *v_dst_to_src_map = static_cast<HitData *>(
-          MEM_mallocN(sizeof(*v_dst_to_src_map) * size_t(numverts_dst), __func__));
+      HitData *v_dst_to_src_map = MEM_malloc_arrayN<HitData>(size_t(numverts_dst), __func__);
 
       for (i = 0; i < numverts_dst; i++) {
         v_dst_to_src_map[i].hit_dist = -1.0f;
@@ -907,11 +902,9 @@ void BKE_mesh_remap_calc_edges_from_mesh(const int mode,
       const int numedges_src = me_src->edges_num;
 
       /* Subtleness - this one we can allocate only max number of cast rays per edges! */
-      int *indices = static_cast<int *>(
-          MEM_mallocN(sizeof(*indices) * size_t(min_ii(numedges_src, num_rays_max)), __func__));
+      int *indices = MEM_malloc_arrayN<int>(size_t(min_ii(numedges_src, num_rays_max)), __func__);
       /* Here it's simpler to just allocate for all edges :/ */
-      float *weights = static_cast<float *>(
-          MEM_mallocN(sizeof(*weights) * size_t(numedges_src), __func__));
+      float *weights = MEM_malloc_arrayN<float>(size_t(numedges_src), __func__);
 
       treedata = me_src->bvh_edges();
 
@@ -1094,8 +1087,7 @@ static void mesh_island_to_astar_graph(MeshIslandStore *islands,
   BLI_bitmap *done_edges = BLI_BITMAP_NEW(numedges, __func__);
 
   const int node_num = islands ? island_face_map->count : int(faces.size());
-  uchar *face_status = static_cast<uchar *>(
-      MEM_callocN(sizeof(*face_status) * size_t(node_num), __func__));
+  uchar *face_status = MEM_calloc_arrayN<uchar>(size_t(node_num), __func__);
   float(*face_centers)[3];
 
   int pidx_isld;
@@ -1234,7 +1226,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
     }
   }
   else {
-    Array<BVHTreeFromMesh> treedata;
+    Array<blender::bke::BVHTreeFromMesh> treedata;
     BVHTreeNearest nearest = {0};
     BVHTreeRayHit rayhit = {0};
     int num_trees = 0;
@@ -1261,7 +1253,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
 
     blender::Array<blender::float3> face_cents_src;
 
-    GroupedSpan<int> vert_to_loop_map_src;
+    GroupedSpan<int> vert_to_corner_map_src;
     GroupedSpan<int> vert_to_face_map_src;
 
     Array<int> edge_to_face_src_offsets;
@@ -1294,12 +1286,9 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
     size_t islands_res_buff_size = MREMAP_DEFAULT_BUFSIZE;
 
     if (!use_from_vert) {
-      vcos_interp = static_cast<float(*)[3]>(
-          MEM_mallocN(sizeof(*vcos_interp) * buff_size_interp, __func__));
-      indices_interp = static_cast<int *>(
-          MEM_mallocN(sizeof(*indices_interp) * buff_size_interp, __func__));
-      weights_interp = static_cast<float *>(
-          MEM_mallocN(sizeof(*weights_interp) * buff_size_interp, __func__));
+      vcos_interp = MEM_malloc_arrayN<float[3]>(buff_size_interp, __func__);
+      indices_interp = MEM_malloc_arrayN<int>(buff_size_interp, __func__);
+      weights_interp = MEM_malloc_arrayN<float>(buff_size_interp, __func__);
     }
 
     {
@@ -1324,7 +1313,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
     }
 
     if (use_from_vert) {
-      vert_to_loop_map_src = me_src->vert_to_corner_map();
+      vert_to_corner_map_src = me_src->vert_to_corner_map();
       if (mode & MREMAP_USE_POLY) {
         vert_to_face_map_src = me_src->vert_to_face_map();
       }
@@ -1356,7 +1345,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
     /* First, generate the islands, if possible. */
     if (gen_islands_src) {
       const bool *uv_seams = static_cast<const bool *>(
-          CustomData_get_layer_named(&me_src->edge_data, CD_PROP_BOOL, ".uv_seam"));
+          CustomData_get_layer_named(&me_src->edge_data, CD_PROP_BOOL, "uv_seam"));
       use_islands = gen_islands_src(reinterpret_cast<const float(*)[3]>(positions_src.data()),
                                     num_verts_src,
                                     edges_src.data(),
@@ -1371,8 +1360,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
       num_trees = use_islands ? island_store.islands_num : 1;
       treedata.reinitialize(num_trees);
       if (isld_steps_src) {
-        as_graphdata = static_cast<BLI_AStarGraph *>(
-            MEM_callocN(sizeof(*as_graphdata) * size_t(num_trees), __func__));
+        as_graphdata = MEM_calloc_arrayN<BLI_AStarGraph>(size_t(num_trees), __func__);
       }
 
       if (use_islands) {
@@ -1388,7 +1376,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
       num_trees = 1;
       treedata.reinitialize(1);
       if (isld_steps_src) {
-        as_graphdata = static_cast<BLI_AStarGraph *>(MEM_callocN(sizeof(*as_graphdata), __func__));
+        as_graphdata = MEM_callocN<BLI_AStarGraph>(__func__);
       }
     }
 
@@ -1414,18 +1402,17 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
 
         for (tindex = 0; tindex < num_trees; tindex++) {
           MeshElemMap *isld = island_store.islands[tindex];
-          int num_verts_active = 0;
           verts_active.fill(false);
           for (int i = 0; i < isld->count; i++) {
             for (const int vidx_src : corner_verts_src.slice(faces_src[isld->indices[i]])) {
               if (!verts_active[vidx_src]) {
                 verts_active[vidx_src].set();
-                num_verts_active++;
               }
             }
           }
-          bvhtree_from_mesh_verts_ex(
-              &treedata[tindex], positions_src, verts_active, num_verts_active, 0.0, 2, 6);
+          IndexMaskMemory memory;
+          treedata[tindex] = blender::bke::bvhtree_from_mesh_verts_ex(
+              positions_src, IndexMask::from_bits(verts_active, memory));
         }
       }
       else {
@@ -1437,27 +1424,23 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
       if (use_islands) {
         corner_tris_src = me_src->corner_tris();
         tri_faces_src = me_src->corner_tri_faces();
-        blender::BitVector<> corner_tris_active(corner_tris_src.size());
+        blender::BitVector<> faces_active(corner_tris_src.size());
 
         for (tindex = 0; tindex < num_trees; tindex++) {
-          int corner_tris_num_active = 0;
-          corner_tris_active.fill(false);
-          for (const int64_t i : corner_tris_src.index_range()) {
-            const blender::IndexRange face = faces_src[tri_faces_src[i]];
+          faces_active.fill(false);
+          for (const int64_t i : faces_src.index_range()) {
+            const blender::IndexRange face = faces_src[i];
             if (island_store.items_to_islands[face.start()] == tindex) {
-              corner_tris_active[i].set();
-              corner_tris_num_active++;
+              faces_active[i].set();
             }
           }
-          bvhtree_from_mesh_corner_tris_ex(&treedata[tindex],
-                                           positions_src,
-                                           corner_verts_src,
-                                           corner_tris_src,
-                                           corner_tris_active,
-                                           corner_tris_num_active,
-                                           0.0,
-                                           2,
-                                           6);
+          IndexMaskMemory memory;
+          treedata[tindex] = blender::bke::bvhtree_from_mesh_corner_tris_ex(
+              positions_src,
+              faces_src,
+              corner_verts_src,
+              corner_tris_src,
+              IndexMask::from_bits(faces_active, memory));
         }
       }
       else {
@@ -1467,11 +1450,9 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
     }
 
     /* And check each dest face! */
-    islands_res = static_cast<IslandResult **>(
-        MEM_mallocN(sizeof(*islands_res) * size_t(num_trees), __func__));
+    islands_res = MEM_malloc_arrayN<IslandResult *>(size_t(num_trees), __func__);
     for (tindex = 0; tindex < num_trees; tindex++) {
-      islands_res[tindex] = static_cast<IslandResult *>(
-          MEM_mallocN(sizeof(**islands_res) * islands_res_buff_size, __func__));
+      islands_res[tindex] = MEM_malloc_arrayN<IslandResult>(islands_res_buff_size, __func__);
     }
     const blender::Span<int> tri_faces = me_src->corner_tri_faces();
 
@@ -1500,7 +1481,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
       }
 
       for (tindex = 0; tindex < num_trees; tindex++) {
-        BVHTreeFromMesh *tdata = &treedata[tindex];
+        blender::bke::BVHTreeFromMesh *tdata = &treedata[tindex];
 
         for (plidx_dst = 0; plidx_dst < face_dst.size(); plidx_dst++) {
           const int vert_dst = corner_verts_dst[face_dst.start() + plidx_dst];
@@ -1530,7 +1511,7 @@ void BKE_mesh_remap_calc_loops_from_mesh(const int mode,
                 }
                 nor_dst = &tmp_no;
                 nors_src = loop_normals_src;
-                vert_to_refelem_map_src = vert_to_loop_map_src[nearest.index];
+                vert_to_refelem_map_src = vert_to_corner_map_src[nearest.index];
               }
               else { /* if (mode == MREMAP_MODE_LOOP_NEAREST_POLYNOR) { */
                 nor_dst = &pnor_dst;
@@ -2060,7 +2041,7 @@ void BKE_mesh_remap_calc_faces_from_mesh(const int mode,
     float hit_dist;
     const blender::Span<int> tri_faces = me_src->corner_tri_faces();
 
-    BVHTreeFromMesh treedata = me_src->bvh_corner_tris();
+    blender::bke::BVHTreeFromMesh treedata = me_src->bvh_corner_tris();
 
     if (mode == MREMAP_MODE_POLY_NEAREST) {
       nearest.index = -1;
@@ -2123,16 +2104,13 @@ void BKE_mesh_remap_calc_faces_from_mesh(const int mode,
       const size_t numfaces_src = size_t(me_src->faces_num);
 
       /* Here it's simpler to just allocate for all faces :/ */
-      int *indices = static_cast<int *>(MEM_mallocN(sizeof(*indices) * numfaces_src, __func__));
-      float *weights = static_cast<float *>(
-          MEM_mallocN(sizeof(*weights) * numfaces_src, __func__));
+      int *indices = MEM_malloc_arrayN<int>(numfaces_src, __func__);
+      float *weights = MEM_malloc_arrayN<float>(numfaces_src, __func__);
 
       size_t tmp_face_size = MREMAP_DEFAULT_BUFSIZE;
-      float(*face_vcos_2d)[2] = static_cast<float(*)[2]>(
-          MEM_mallocN(sizeof(*face_vcos_2d) * tmp_face_size, __func__));
+      float(*face_vcos_2d)[2] = MEM_malloc_arrayN<float[2]>(tmp_face_size, __func__);
       /* Tessellated 2D face, always (num_loops - 2) triangles. */
-      int(*tri_vidx_2d)[3] = static_cast<int(*)[3]>(
-          MEM_mallocN(sizeof(*tri_vidx_2d) * (tmp_face_size - 2), __func__));
+      int(*tri_vidx_2d)[3] = MEM_malloc_arrayN<int[3]>(tmp_face_size - 2, __func__);
 
       for (const int64_t i : faces_dst.index_range()) {
         /* For each dst face, we sample some rays from it (2D grid in pnor space)

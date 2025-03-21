@@ -6,13 +6,13 @@
  * \ingroup spbuttons
  */
 
-#include <cstdio>
 #include <cstring>
 
 #include "MEM_guardedalloc.h"
 
 #include "BLI_bitmap.h"
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
@@ -34,7 +34,6 @@
 #include "RNA_access.hh"
 
 #include "UI_interface.hh"
-#include "UI_resources.hh"
 
 #include "BLO_read_write.hh"
 
@@ -818,6 +817,7 @@ static void buttons_area_listener(const wmSpaceTypeListenerParams *params)
       break;
     case NC_ANIMATION:
       switch (wmn->data) {
+        case ND_KEYFRAME_PROP:
         case ND_NLA_ACTCHANGE:
           ED_area_tag_redraw(area);
           break;
@@ -1030,6 +1030,7 @@ void ED_spacetype_buttons()
   art->draw = ED_region_panels_draw;
   art->listener = buttons_main_region_listener;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_FRAMES;
+  art->lock = true;
   buttons_context_register(art);
   BLI_addhead(&st->regiontypes, art);
 

@@ -13,9 +13,7 @@
 #include "DNA_mesh_types.h"
 
 #include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
 
-#include "BKE_customdata.hh"
 #include "BKE_subdiv.hh"
 #include "BKE_subdiv_eval.hh"
 #include "BKE_subdiv_foreach.hh"
@@ -53,8 +51,7 @@ static void subdiv_mesh_prepare_accumulator(SubdivDeformContext *ctx, int num_ve
   if (!ctx->have_displacement) {
     return;
   }
-  ctx->accumulated_counters = static_cast<int *>(
-      MEM_calloc_arrayN(num_vertices, sizeof(*ctx->accumulated_counters), __func__));
+  ctx->accumulated_counters = MEM_calloc_arrayN<int>(size_t(num_vertices), __func__);
 }
 
 static void subdiv_mesh_context_free(SubdivDeformContext *ctx)
@@ -136,7 +133,6 @@ static void subdiv_mesh_vertex_corner(const ForeachContext *foreach_context,
                                       const int /*subdiv_vertex_index*/)
 {
   SubdivDeformContext *ctx = static_cast<SubdivDeformContext *>(foreach_context->user_data);
-  BLI_assert(coarse_vertex_index != ORIGINDEX_NONE);
   float inv_num_accumulated = 1.0f;
   if (ctx->accumulated_counters != nullptr) {
     inv_num_accumulated = 1.0f / ctx->accumulated_counters[coarse_vertex_index];

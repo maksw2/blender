@@ -2,7 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BKE_mesh.hh"
+#include "DNA_mesh_types.h"
+
 #include "BKE_mesh_mapping.hh"
 
 #include "BLI_array_utils.hh"
@@ -53,7 +54,7 @@ class CornersOfEdgeInput final : public bke::MeshFieldInput {
     Array<int> map_offsets;
     Array<int> map_indices;
     const Span<int> corner_edges = mesh.corner_edges();
-    const GroupedSpan<int> edge_to_loop_map = bke::mesh::build_edge_to_corner_map(
+    const GroupedSpan<int> edge_to_corner_map = bke::mesh::build_edge_to_corner_map(
         mesh.corner_edges(), mesh.edges_num, map_offsets, map_indices);
 
     const bke::MeshFieldContext context{mesh, domain};
@@ -86,7 +87,7 @@ class CornersOfEdgeInput final : public bke::MeshFieldInput {
           continue;
         }
 
-        const Span<int> corners = edge_to_loop_map[edge_i];
+        const Span<int> corners = edge_to_corner_map[edge_i];
         if (corners.is_empty()) {
           corner_of_edge[selection_i] = 0;
           continue;
@@ -190,11 +191,14 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(
-      &ntype, GEO_NODE_MESH_TOPOLOGY_CORNERS_OF_EDGE, "Corners of Edge", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeCornersOfEdge", GEO_NODE_MESH_TOPOLOGY_CORNERS_OF_EDGE);
+  ntype.ui_name = "Corners of Edge";
+  ntype.ui_description = "Retrieve face corners connected to edges";
+  ntype.enum_name_legacy = "CORNERS_OF_EDGE";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

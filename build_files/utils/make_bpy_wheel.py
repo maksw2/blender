@@ -27,6 +27,9 @@ NOTE:
 Some type annotations are quoted to avoid errors in Python 3.9.
 These can be unquoted eventually.
 """
+__all__ = (
+    "main",
+)
 
 import argparse
 import make_utils
@@ -37,7 +40,9 @@ import string
 import setuptools
 import sys
 
-from collections.abc import (
+from typing import (
+    Tuple,
+    # Proxies for `collections.abc`
     Iterator,
     Sequence,
 )
@@ -47,7 +52,7 @@ from collections.abc import (
 
 long_description = """# Blender
 
-[Blender](https://www.blender.org) is the free and open source 3D creation suite. It supports the entirety of the 3D pipeline—modeling, rigging, animation, simulation, rendering, compositing and motion tracking, even video editing.
+[Blender](https://www.blender.org) is the free and open source 3D creation suite. It supports the entirety of the 3D pipeline: modeling, rigging, animation, simulation, rendering, compositing and motion tracking, even video editing.
 
 This package provides Blender as a Python module for use in studio pipelines, web services, scientific research, and more.
 
@@ -95,7 +100,7 @@ def find_dominating_file(
 # ------------------------------------------------------------------------------
 # CMake Cache Access
 
-def cmake_cache_var_iter(filepath_cmake_cache: str) -> Iterator[tuple[str, str, str]]:
+def cmake_cache_var_iter(filepath_cmake_cache: str) -> Iterator[Tuple[str, str, str]]:
     re_cache = re.compile(r"([A-Za-z0-9_\-]+)?:?([A-Za-z0-9_\-]+)?=(.*)$")
     with open(filepath_cmake_cache, "r", encoding="utf-8") as cache_file:
         for l in cache_file:
@@ -195,7 +200,16 @@ def main() -> None:
         machine = cmake_cache_var_or_exit(filepath_cmake_cache, "CMAKE_OSX_ARCHITECTURES")
         platform_tag = "macosx_%d_%d_%s" % (target_major, target_minor, machine)
     elif sys.platform == "win32":
-        platform_tag = "win_%s" % (platform.machine().lower())
+        # Workaround for Python process running in a virtualized environment on Windows-on-Arm:
+        # use the actual processor architecture instead of the the virtualized one.
+        #
+        # The win_arm64 matches the behavior when native WoA Python is used, and also matches
+        # sysconfig.get_platform() from a native Python build (although it returns win-arm64 with a
+        # dash and not underscore).
+        if "ARM" in os.environ.get("PROCESSOR_IDENTIFIER", ""):
+            platform_tag = "win_arm64"
+        else:
+            platform_tag = "win_%s" % (platform.machine().lower())
     elif sys.platform == "linux":
         glibc = os.confstr("CS_GNU_LIBC_VERSION")
         if glibc is None:
@@ -231,7 +245,12 @@ def main() -> None:
     setuptools.setup(
         name="bpy",
         version=blender_version_str,
-        install_requires=["cython", "numpy", "requests", "zstandard"],
+
+        # `bpy` is not compatible with `numpy` 2+, as the VFX reference platform uses
+        # 1.26 at the moment. This fix amended the install requirement package to specify
+        # `numpy>=1.26,<2.0` to mitigate this issue.
+        install_requires=["cython", "numpy>=1.26,<2.0", "requests", "zstandard"],
+
         python_requires="==%d.%d.*" % (python_version_number[0], python_version_number[1]),
         packages=["bpy"],
         package_data={"": package_files("bpy")},

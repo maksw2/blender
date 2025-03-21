@@ -2,7 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_lib.glsl"
+#include "infos/overlay_armature_info.hh"
+
+FRAGMENT_SHADER_CREATE_INFO(overlay_armature_shape_wire)
+
 #include "select_lib.glsl"
 
 /**
@@ -31,12 +34,6 @@ float edge_step(float dist)
 
 void main()
 {
-#ifndef NO_GEOM
-  float wire_width = geometry_out.wire_width;
-  float4 finalColor = geometry_out.finalColor;
-  float edgeCoord = geometry_noperspective_out.edgeCoord;
-#endif
-
   float half_size = (do_smooth_wire ? wire_width - 0.5 : wire_width) / 2.0;
 
   float dist = abs(edgeCoord) - half_size;

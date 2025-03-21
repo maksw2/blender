@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "DNA_windowmanager_enums.h" /* Own enums. */
+
 #include "DNA_listBase.h"
 #include "DNA_screen_types.h" /* for #ScrAreaMap */
 #include "DNA_xr_types.h"     /* for #XrSessionSettings */
@@ -24,11 +26,14 @@ using std_mutex_type = std::mutex;
 /** Workaround to forward-declare C++ type in C header. */
 #ifdef __cplusplus
 namespace blender::bke {
-class WindowManagerRuntime;
-}
+struct WindowManagerRuntime;
+struct WindowRuntime;
+}  // namespace blender::bke
 using WindowManagerRuntimeHandle = blender::bke::WindowManagerRuntime;
+using WindowRuntimeHandle = blender::bke::WindowRuntime;
 #else   // __cplusplus
 typedef struct WindowManagerRuntimeHandle WindowManagerRuntimeHandle;
+typedef struct WindowRuntimeHandle WindowRuntimeHandle;
 #endif  // __cplusplus
 
 /* Defined here: */
@@ -170,22 +175,6 @@ typedef struct wmWindowManager {
 
   /** Operator registry. */
   ListBase operators;
-
-  /**
-   * Refresh/redraw #wmNotifier structs.
-   * \note Once in the queue, notifiers should be considered read-only.
-   * With the exception of clearing notifiers for data which has been removed,
-   * see: #NOTE_CATEGORY_TAG_CLEARED.
-   */
-  ListBase notifier_queue;
-  /**
-   * For duplicate detection.
-   * \note keep in sync with `notifier_queue` adding/removing elements must also update this set.
-   */
-  struct GSet *notifier_queue_set;
-
-  /** The current notifier in the `notifier_queue` being handled (clear instead of freeing). */
-  const struct wmNotifier *notifier_current;
 
   /** Available/pending extensions updates. */
   int extensions_updates;
@@ -395,8 +384,6 @@ typedef struct wmWindow {
   char ime_data_is_composing;
   char _pad1[7];
 
-  /** All events #wmEvent (ghost level events were handled). */
-  ListBase event_queue;
   /** Window+screen handlers, handled last. */
   ListBase handlers;
   /** Priority handlers, handled first. */
@@ -420,6 +407,8 @@ typedef struct wmWindow {
    */
   uint64_t eventstate_prev_press_time_ms;
 
+  void *_pad2;
+  WindowRuntimeHandle *runtime;
 } wmWindow;
 
 #ifdef ime_data
@@ -651,57 +640,3 @@ typedef struct wmOperator {
   short flag;
   char _pad[6];
 } wmOperator;
-
-/**
- * Operator type return flags: exec(), invoke() modal(), return values.
- */
-enum {
-  OPERATOR_RUNNING_MODAL = (1 << 0),
-  OPERATOR_CANCELLED = (1 << 1),
-  OPERATOR_FINISHED = (1 << 2),
-  /** Add this flag if the event should pass through. */
-  OPERATOR_PASS_THROUGH = (1 << 3),
-  /** In case operator got executed outside WM code (like via file-select). */
-  OPERATOR_HANDLED = (1 << 4),
-  /**
-   * Used for operators that act indirectly (eg. popup menu).
-   * \note this isn't great design (using operators to trigger UI) avoid where possible.
-   */
-  OPERATOR_INTERFACE = (1 << 5),
-};
-#define OPERATOR_FLAGS_ALL \
-  (OPERATOR_RUNNING_MODAL | OPERATOR_CANCELLED | OPERATOR_FINISHED | OPERATOR_PASS_THROUGH | \
-   OPERATOR_HANDLED | OPERATOR_INTERFACE | 0)
-
-/* sanity checks for debug mode only */
-#define OPERATOR_RETVAL_CHECK(ret) \
-  (void)ret, BLI_assert(ret != 0 && (ret & OPERATOR_FLAGS_ALL) == ret)
-
-/** #wmOperator.flag */
-enum {
-  /**
-   * Low level flag so exec() operators can tell if they were invoked, use with care.
-   * Typically this shouldn't make any difference, but it rare cases its needed (see smooth-view).
-   */
-  OP_IS_INVOKE = (1 << 0),
-  /** So we can detect if an operators exec() call is activated by adjusting the last action. */
-  OP_IS_REPEAT = (1 << 1),
-  /**
-   * So we can detect if an operators exec() call is activated from #SCREEN_OT_repeat_last.
-   *
-   * This difference can be important because previous settings may be used,
-   * even with #PROP_SKIP_SAVE the repeat last operator will use the previous settings.
-   * Unlike #OP_IS_REPEAT the selection (and context generally) may be different each time.
-   * See #60777 for an example of when this is needed.
-   */
-  OP_IS_REPEAT_LAST = (1 << 2),
-
-  /** When the cursor is grabbed */
-  OP_IS_MODAL_GRAB_CURSOR = (1 << 3),
-
-  /**
-   * Allow modal operators to have the region under the cursor for their context
-   * (the region-type is maintained to prevent errors).
-   */
-  OP_IS_MODAL_CURSOR_REGION = (1 << 4),
-};

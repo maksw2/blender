@@ -44,7 +44,11 @@
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
+#include "MOV_read.hh"
+
 #include "clip_intern.hh" /* own include */
+
+using blender::StringRefNull;
 
 /* Panels */
 
@@ -72,7 +76,7 @@ void ED_clip_buttons_register(ARegionType *art)
 {
   PanelType *pt;
 
-  pt = MEM_cnew<PanelType>("spacetype clip panel metadata");
+  pt = MEM_callocN<PanelType>("spacetype clip panel metadata");
   STRNCPY(pt->idname, "CLIP_PT_metadata");
   STRNCPY(pt->label, N_("Metadata"));
   STRNCPY(pt->category, "Footage");
@@ -85,17 +89,22 @@ void ED_clip_buttons_register(ARegionType *art)
 
 /********************* MovieClip Template ************************/
 
-void uiTemplateMovieClip(
-    uiLayout *layout, bContext *C, PointerRNA *ptr, const char *propname, bool compact)
+void uiTemplateMovieClip(uiLayout *layout,
+                         bContext *C,
+                         PointerRNA *ptr,
+                         const blender::StringRefNull propname,
+                         bool compact)
 {
   if (!ptr->data) {
     return;
   }
 
-  PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
+  PropertyRNA *prop = RNA_struct_find_property(ptr, propname.c_str());
   if (!prop) {
-    printf(
-        "%s: property not found: %s.%s\n", __func__, RNA_struct_identifier(ptr->type), propname);
+    printf("%s: property not found: %s.%s\n",
+           __func__,
+           RNA_struct_identifier(ptr->type),
+           propname.c_str());
     return;
   }
 
@@ -103,7 +112,7 @@ void uiTemplateMovieClip(
     printf("%s: expected pointer property for %s.%s\n",
            __func__,
            RNA_struct_identifier(ptr->type),
-           propname);
+           propname.c_str());
     return;
   }
 
@@ -135,16 +144,18 @@ void uiTemplateMovieClip(
 
 /********************* Track Template ************************/
 
-void uiTemplateTrack(uiLayout *layout, PointerRNA *ptr, const char *propname)
+void uiTemplateTrack(uiLayout *layout, PointerRNA *ptr, const StringRefNull propname)
 {
   if (!ptr->data) {
     return;
   }
 
-  PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
+  PropertyRNA *prop = RNA_struct_find_property(ptr, propname.c_str());
   if (!prop) {
-    printf(
-        "%s: property not found: %s.%s\n", __func__, RNA_struct_identifier(ptr->type), propname);
+    printf("%s: property not found: %s.%s\n",
+           __func__,
+           RNA_struct_identifier(ptr->type),
+           propname.c_str());
     return;
   }
 
@@ -152,7 +163,7 @@ void uiTemplateTrack(uiLayout *layout, PointerRNA *ptr, const char *propname)
     printf("%s: expected pointer property for %s.%s\n",
            __func__,
            RNA_struct_identifier(ptr->type),
-           propname);
+           propname.c_str());
     return;
   }
 
@@ -364,7 +375,7 @@ static void marker_block_handler(bContext *C, void *arg_cb, int event)
 
 void uiTemplateMarker(uiLayout *layout,
                       PointerRNA *ptr,
-                      const char *propname,
+                      const StringRefNull propname,
                       PointerRNA *userptr,
                       PointerRNA *trackptr,
                       bool compact)
@@ -373,10 +384,12 @@ void uiTemplateMarker(uiLayout *layout,
     return;
   }
 
-  PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
+  PropertyRNA *prop = RNA_struct_find_property(ptr, propname.c_str());
   if (!prop) {
-    printf(
-        "%s: property not found: %s.%s\n", __func__, RNA_struct_identifier(ptr->type), propname);
+    printf("%s: property not found: %s.%s\n",
+           __func__,
+           RNA_struct_identifier(ptr->type),
+           propname.c_str());
     return;
   }
 
@@ -384,7 +397,7 @@ void uiTemplateMarker(uiLayout *layout,
     printf("%s: expected pointer property for %s.%s\n",
            __func__,
            RNA_struct_identifier(ptr->type),
-           propname);
+           propname.c_str());
     return;
   }
 
@@ -396,7 +409,7 @@ void uiTemplateMarker(uiLayout *layout,
   int clip_framenr = BKE_movieclip_remap_scene_to_clip_frame(clip, user->framenr);
   MovieTrackingMarker *marker = BKE_tracking_marker_get(track, clip_framenr);
 
-  MarkerUpdateCb *cb = MEM_cnew<MarkerUpdateCb>("uiTemplateMarker update_cb");
+  MarkerUpdateCb *cb = MEM_callocN<MarkerUpdateCb>("uiTemplateMarker update_cb");
   cb->compact = compact;
   cb->clip = clip;
   cb->user = user;
@@ -406,9 +419,9 @@ void uiTemplateMarker(uiLayout *layout,
   cb->framenr = user->framenr;
 
   if (compact) {
-    const char *tip;
     uiBlock *block = uiLayoutGetBlock(layout);
 
+    blender::StringRef tip;
     if (cb->marker_flag & MARKER_DISABLED) {
       tip = TIP_("Marker is disabled at current frame");
     }
@@ -479,7 +492,7 @@ void uiTemplateMarker(uiLayout *layout,
     UI_block_func_handle_set(block, marker_block_handler, cb);
     UI_block_funcN_set(block, marker_update_cb, cb, nullptr);
 
-    const char *tip;
+    blender::StringRef tip;
     int step = 100;
     int digits = 2;
 
@@ -710,17 +723,19 @@ void uiTemplateMarker(uiLayout *layout,
 
 void uiTemplateMovieclipInformation(uiLayout *layout,
                                     PointerRNA *ptr,
-                                    const char *propname,
+                                    const StringRefNull propname,
                                     PointerRNA *userptr)
 {
   if (!ptr->data) {
     return;
   }
 
-  PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
+  PropertyRNA *prop = RNA_struct_find_property(ptr, propname.c_str());
   if (!prop) {
-    printf(
-        "%s: property not found: %s.%s\n", __func__, RNA_struct_identifier(ptr->type), propname);
+    printf("%s: property not found: %s.%s\n",
+           __func__,
+           RNA_struct_identifier(ptr->type),
+           propname.c_str());
     return;
   }
 
@@ -728,7 +743,7 @@ void uiTemplateMovieclipInformation(uiLayout *layout,
     printf("%s: expected pointer property for %s.%s\n",
            __func__,
            RNA_struct_identifier(ptr->type),
-           propname);
+           propname.c_str());
     return;
   }
 
@@ -777,11 +792,9 @@ void uiTemplateMovieclipInformation(uiLayout *layout,
     }
 
     if (clip->anim != nullptr) {
-      short frs_sec;
-      float frs_sec_base;
-      if (IMB_anim_get_fps(clip->anim, true, &frs_sec, &frs_sec_base)) {
-        ofs += BLI_snprintf_rlen(
-            str + ofs, sizeof(str) - ofs, RPT_(", %.2f fps"), float(frs_sec) / frs_sec_base);
+      float fps = MOV_get_fps(clip->anim);
+      if (fps > 0.0f) {
+        ofs += BLI_snprintf_rlen(str + ofs, sizeof(str) - ofs, RPT_(", %.2f fps"), fps);
       }
     }
   }

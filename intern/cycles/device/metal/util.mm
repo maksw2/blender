@@ -12,9 +12,9 @@
 #  include "util/time.h"
 
 #  include <IOKit/IOKitLib.h>
+#  include <ctime>
 #  include <pwd.h>
 #  include <sys/shm.h>
-#  include <time.h>
 
 CCL_NAMESPACE_BEGIN
 
@@ -36,7 +36,7 @@ int MetalInfo::get_apple_gpu_core_count(id<MTLDevice> device)
     io_service_t gpu_service = IOServiceGetMatchingService(
         kIOMainPortDefault, IORegistryEntryIDMatching(device.registryID));
     if (CFNumberRef numberRef = (CFNumberRef)IORegistryEntryCreateCFProperty(
-            gpu_service, CFSTR("gpu-core-count"), 0, 0))
+            gpu_service, CFSTR("gpu-core-count"), nullptr, 0))
     {
       if (CFGetTypeID(numberRef) == CFNumberGetTypeID()) {
         CFNumberGetValue(numberRef, kCFNumberSInt32Type, &core_count);
@@ -53,10 +53,10 @@ AppleGPUArchitecture MetalInfo::get_apple_gpu_architecture(id<MTLDevice> device)
   if (strstr(device_name, "M1")) {
     return APPLE_M1;
   }
-  else if (strstr(device_name, "M2")) {
+  if (strstr(device_name, "M2")) {
     return get_apple_gpu_core_count(device) <= 10 ? APPLE_M2 : APPLE_M2_BIG;
   }
-  else if (strstr(device_name, "M3")) {
+  if (strstr(device_name, "M3")) {
     return APPLE_M3;
   }
   return APPLE_UNKNOWN;
@@ -64,7 +64,7 @@ AppleGPUArchitecture MetalInfo::get_apple_gpu_architecture(id<MTLDevice> device)
 
 int MetalInfo::optimal_sort_partition_elements()
 {
-  if (auto str = getenv("CYCLES_METAL_SORT_PARTITION_ELEMENTS")) {
+  if (auto *str = getenv("CYCLES_METAL_SORT_PARTITION_ELEMENTS")) {
     return atoi(str);
   }
 
@@ -75,7 +75,7 @@ int MetalInfo::optimal_sort_partition_elements()
   return 65536;
 }
 
-vector<id<MTLDevice>> const &MetalInfo::get_usable_devices()
+const vector<id<MTLDevice>> &MetalInfo::get_usable_devices()
 {
   static vector<id<MTLDevice>> usable_devices;
   static bool already_enumerated = false;
@@ -95,7 +95,9 @@ vector<id<MTLDevice>> const &MetalInfo::get_usable_devices()
           strstr(device_name_char, "Apple"))
       {
         /* TODO: Implement a better way to identify device vendor instead of relying on name. */
-        usable = true;
+        /* We only support Apple Silicon GPUs which all have unified memory, but explicitly check
+         * just in case it ever changes. */
+        usable = [device hasUnifiedMemory];
       }
     }
 
@@ -119,24 +121,15 @@ vector<id<MTLDevice>> const &MetalInfo::get_usable_devices()
 id<MTLBuffer> MetalBufferPool::get_buffer(id<MTLDevice> device,
                                           id<MTLCommandBuffer> command_buffer,
                                           NSUInteger length,
-                                          MTLResourceOptions options,
                                           const void *pointer,
                                           Stats &stats)
 {
   id<MTLBuffer> buffer = nil;
-
-  MTLStorageMode storageMode = MTLStorageMode((options & MTLResourceStorageModeMask) >>
-                                              MTLResourceStorageModeShift);
-  MTLCPUCacheMode cpuCacheMode = MTLCPUCacheMode((options & MTLResourceCPUCacheModeMask) >>
-                                                 MTLResourceCPUCacheModeShift);
-
   {
     thread_scoped_lock lock(buffer_mutex);
     /* Find an unused buffer with matching size and storage mode. */
     for (MetalBufferListEntry &bufferEntry : temp_buffers) {
-      if (bufferEntry.buffer.length == length && storageMode == bufferEntry.buffer.storageMode &&
-          cpuCacheMode == bufferEntry.buffer.cpuCacheMode && bufferEntry.command_buffer == nil)
-      {
+      if (bufferEntry.buffer.length == length && bufferEntry.command_buffer == nil) {
         buffer = bufferEntry.buffer;
         bufferEntry.command_buffer = command_buffer;
         break;
@@ -145,7 +138,7 @@ id<MTLBuffer> MetalBufferPool::get_buffer(id<MTLDevice> device,
     if (!buffer) {
       /* Create a new buffer and add it to the pool. Typically this pool will only grow to a
        * handful of entries. */
-      buffer = [device newBufferWithLength:length options:options];
+      buffer = [device newBufferWithLength:length options:MTLResourceStorageModeShared];
       stats.mem_alloc(buffer.allocatedSize);
       total_temp_mem_size += buffer.allocatedSize;
       temp_buffers.push_back(MetalBufferListEntry{buffer, command_buffer});
@@ -155,9 +148,6 @@ id<MTLBuffer> MetalBufferPool::get_buffer(id<MTLDevice> device,
   /* Copy over data */
   if (pointer) {
     memcpy(buffer.contents, pointer, length);
-    if (buffer.storageMode == MTLStorageModeManaged) {
-      [buffer didModifyRange:NSMakeRange(0, length)];
-    }
   }
 
   return buffer;

@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 4.4.0 Alpha (b'62b2bb48e8bf')\n"
+"Project-Id-Version: Blender 4.4.0 Release Candidate (b'f896f7ffc32a')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-12-02 16:18+0000\n"
+"POT-Creation-Date: 2025-03-17 16:18+0000\n"
 "PO-Revision-Date: 2024-11-09 15:56+0000\n"
 "Last-Translator: leif larsen <linuxdk1978@gmail.com>\n"
 "Language-Team: Danish <https://translate.blender.org/projects/blender-ui/ui/da/>\n"
@@ -61,10 +61,6 @@ msgstr "F-curves"
 
 msgid "Action F-Curves"
 msgstr "Handlings F-kurver"
-
-
-msgid "Collection of action F-Curves"
-msgstr "Samling af handlings F-kurver"
 
 
 msgid "Action Group"
@@ -243,30 +239,6 @@ msgid "Collection of action groups"
 msgstr "Samling af handlingsgrupper"
 
 
-msgid "Influence"
-msgstr "Indflydelse"
-
-
-msgid "Mix Mode"
-msgstr "Blandingstilstand"
-
-
-msgid "Replace"
-msgstr "Udskift"
-
-
-msgid "Add"
-msgstr "Tilføj"
-
-
-msgid "Subtract"
-msgstr "Fratrække"
-
-
-msgid "Multiply"
-msgstr "Gange"
-
-
 msgid "Strips"
 msgstr "stimmel"
 
@@ -297,6 +269,10 @@ msgstr "Indeks for aktive poséringsmarkører"
 
 msgid "Active"
 msgstr "Aktiv"
+
+
+msgid "Show Expanded"
+msgstr "Vis udvidet"
 
 
 msgctxt "ID"
@@ -419,10 +395,6 @@ msgid "World"
 msgstr "verden"
 
 
-msgid "Show Expanded"
-msgstr "Vis udvidet"
-
-
 msgid "Keyframe"
 msgstr "Nøglebillede"
 
@@ -517,14 +489,6 @@ msgstr "Fordel hukommelse på tværs af enheder"
 
 msgid "Make more room for large scenes to fit by distributing memory across interconnected devices (e.g. via NVLink) rather than duplicating it"
 msgstr "Giv mere plads til, at store scener kan passe ved at distribuere hukommelse på tværs af sammenkoblede enheder (f.eks. via NVLink) i stedet for at duplikere det"
-
-
-msgid "HIP RT (Experimental)"
-msgstr "HIP RT (eksperimentel)"
-
-
-msgid "HIP RT enables AMD hardware ray tracing on RDNA2 and above, with shader fallback on older cards. This feature is experimental and some scenes may render incorrectly"
-msgstr "HIP RT muliggør AMD hardware ray tracing på RDNA2 og derover, med shader fallback på ældre kort. Denne funktion er eksperimentel, og nogle scener kan gengives forkert"
 
 
 msgid "Embree on GPU"
@@ -723,6 +687,10 @@ msgid "Method used for combining Active Action's result with result of NLA stack
 msgstr "Metode brugt til at kombinere Active Actions resultat med resultat af NLA stak"
 
 
+msgid "Replace"
+msgstr "Udskift"
+
+
 msgid "The strip values replace the accumulated results by amount specified by influence"
 msgstr "Stripværdierne erstatter de akkumulerede resultater med mængde specificeret ved indflydelse"
 
@@ -735,12 +703,24 @@ msgid "The strip values are combined with accumulated results by appropriately u
 msgstr "Stripværdierne kombineres med akkumulerede resultater ved passende at bruge addition, multiplikation eller quaternion matematik baseret på kanaltype"
 
 
+msgid "Add"
+msgstr "Tilføj"
+
+
 msgid "Weighted result of strip is added to the accumulated results"
 msgstr "Det vægtede resultat af strimlen føjes til de akkumulerede resultater"
 
 
+msgid "Subtract"
+msgstr "Fratrække"
+
+
 msgid "Weighted result of strip is removed from the accumulated results"
 msgstr "Det vægtede resultat af strimlen fjernes fra de akkumulerede resultater"
+
+
+msgid "Multiply"
+msgstr "Gange"
 
 
 msgid "Weighted result of strip is multiplied with the accumulated results"
@@ -2296,46 +2276,6 @@ msgid "Light Probes"
 msgstr "Lyssonder"
 
 
-msgid "Armature"
-msgstr "Armatur"
-
-
-msgid "Camera"
-msgstr "Kamera"
-
-
-msgid "Image"
-msgstr "Billede"
-
-
-msgid "Key"
-msgstr "Nøgle"
-
-
-msgid "Material"
-msgstr "Materiale"
-
-
-msgid "Mesh"
-msgstr "Maske"
-
-
-msgid "Movie Clip"
-msgstr "Film klip"
-
-
-msgid "Scene"
-msgstr "Scene"
-
-
-msgid "Sound"
-msgstr "Lyd"
-
-
-msgid "Text"
-msgstr "Tekst"
-
-
 msgid "Level"
 msgstr "Niveau"
 
@@ -2388,8 +2328,8 @@ msgid "Mode"
 msgstr "tilstand"
 
 
-msgid "Direction"
-msgstr "Retning"
+msgid "Material"
+msgstr "Materiale"
 
 
 msgid "All"
@@ -2472,6 +2412,10 @@ msgid "Crop"
 msgstr "Beskær"
 
 
+msgid "Image"
+msgstr "Billede"
+
+
 msgid "Image displayed and edited in this space"
 msgstr "Billedet vises og redigeres i dette rum"
 
@@ -2514,6 +2458,10 @@ msgstr "Baggrunds kilde"
 
 msgid "Data source used for background"
 msgstr "Datakilde brugt til baggrund"
+
+
+msgid "Movie Clip"
+msgstr "Film klip"
 
 
 msgid "Camera Clip"
@@ -2584,6 +2532,10 @@ msgid "Temperature"
 msgstr "Temperatur"
 
 
+msgid "Influence"
+msgstr "Indflydelse"
+
+
 msgid "Disable"
 msgstr "Deaktivere"
 
@@ -2628,6 +2580,14 @@ msgid "Locked Track"
 msgstr "Låst spor"
 
 
+msgid "Armature"
+msgstr "Armatur"
+
+
+msgid "Mix Mode"
+msgstr "Blandingstilstand"
+
+
 msgid "Target object"
 msgstr "mål objekt"
 
@@ -2652,6 +2612,10 @@ msgid "Up Axis"
 msgstr "Op akse"
 
 
+msgid "Camera"
+msgstr "Kamera"
+
+
 msgid "Bone"
 msgstr "Knogle"
 
@@ -2670,6 +2634,10 @@ msgstr "Lokation"
 
 msgid "Depth"
 msgstr "Dybte"
+
+
+msgid "Scene"
+msgstr "Scene"
 
 
 msgid "Invert"
@@ -2737,6 +2705,10 @@ msgid "Local"
 msgstr "Lokal"
 
 
+msgid "Direction"
+msgstr "Retning"
+
+
 msgid "Blur"
 msgstr "Sløring"
 
@@ -2765,6 +2737,10 @@ msgid "Max"
 msgstr "Maximum"
 
 
+msgid "Mesh"
+msgstr "Maske"
+
+
 msgid "Angular Velocity"
 msgstr "Vinkelhastighed"
 
@@ -2784,6 +2760,10 @@ msgstr "Reference afstand"
 msgctxt "Sound"
 msgid "Pitch"
 msgstr "Toneleje"
+
+
+msgid "Sound"
+msgstr "Lyd"
 
 
 msgid "Blend"
@@ -2840,6 +2820,14 @@ msgstr "Maksimal vinkel"
 
 msgid "Min Angle"
 msgstr "Minimum vinkel"
+
+
+msgid "Text"
+msgstr "Tekst"
+
+
+msgid "Key"
+msgstr "Nøgle"
 
 
 msgid "File"
@@ -3070,10 +3058,6 @@ msgid "Legacy Compute Device Type"
 msgstr "Forældere beregningstyrper"
 
 
-msgid "Password"
-msgstr "Kodeord"
-
-
 msgid "Gray Scale"
 msgstr "Gråskala"
 
@@ -3148,14 +3132,6 @@ msgstr "Tiden er gået"
 
 msgid "Sharpen"
 msgstr "Skarpere"
-
-
-msgid "ON"
-msgstr "Til"
-
-
-msgid "OFF"
-msgstr "Fra"
 
 
 msgid "Keyframe not in F-Curve"
@@ -3260,6 +3236,14 @@ msgstr "W3"
 
 msgid "W4"
 msgstr "W4"
+
+
+msgid "ON"
+msgstr "Til"
+
+
+msgid "OFF"
+msgstr "Fra"
 
 
 msgid "unsupported format"

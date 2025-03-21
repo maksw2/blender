@@ -2,8 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "NOD_rna_define.hh"
-
 #include "UI_interface.hh"
 #include "UI_resources.hh"
 
@@ -16,6 +14,7 @@
 
 #include "BLO_read_write.hh"
 
+#include "BKE_library.hh"
 #include "BKE_screen.hh"
 
 #include "node_geometry_util.hh"
@@ -64,7 +63,7 @@ static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryAttributeCapture *data = MEM_cnew<NodeGeometryAttributeCapture>(__func__);
+  NodeGeometryAttributeCapture *data = MEM_callocN<NodeGeometryAttributeCapture>(__func__);
   data->domain = int8_t(AttrDomain::Point);
   node->storage = data;
 }
@@ -77,7 +76,7 @@ static void node_layout_ex(uiLayout *layout, bContext *C, PointerRNA *ptr)
   uiItemR(layout, ptr, "domain", UI_ITEM_NONE, "", ICON_NONE);
 
   if (uiLayout *panel = uiLayoutPanel(
-          C, layout, "capture_attribute_items", false, TIP_("Capture Items")))
+          C, layout, "capture_attribute_items", false, IFACE_("Capture Items")))
   {
     socket_items::ui::draw_items_list_with_operators<CaptureAttributeItemsAccessor>(
         C, panel, tree, node);
@@ -85,7 +84,7 @@ static void node_layout_ex(uiLayout *layout, bContext *C, PointerRNA *ptr)
         tree, node, [&](PointerRNA *item_ptr) {
           uiLayoutSetPropSep(panel, true);
           uiLayoutSetPropDecorate(panel, false);
-          uiItemR(panel, item_ptr, "data_type", UI_ITEM_NONE, nullptr, ICON_NONE);
+          uiItemR(panel, item_ptr, "data_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
         });
   }
 }
@@ -218,8 +217,8 @@ static void node_free_storage(bNode *node)
 static void node_copy_storage(bNodeTree * /*dst_tree*/, bNode *dst_node, const bNode *src_node)
 {
   const NodeGeometryAttributeCapture &src_storage = node_storage(*src_node);
-  NodeGeometryAttributeCapture *dst_storage = MEM_cnew<NodeGeometryAttributeCapture>(__func__,
-                                                                                     src_storage);
+  NodeGeometryAttributeCapture *dst_storage = MEM_dupallocN<NodeGeometryAttributeCapture>(
+      __func__, src_storage);
   dst_node->storage = dst_storage;
 
   socket_items::copy_array<CaptureAttributeItemsAccessor>(*src_node, *dst_node);
@@ -249,11 +248,16 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-
-  geo_node_type_base(
-      &ntype, GEO_NODE_CAPTURE_ATTRIBUTE, "Capture Attribute", NODE_CLASS_ATTRIBUTE);
+  geo_node_type_base(&ntype, "GeometryNodeCaptureAttribute", GEO_NODE_CAPTURE_ATTRIBUTE);
+  ntype.ui_name = "Capture Attribute";
+  ntype.ui_description =
+      "Store the result of a field on a geometry and output the data as a node socket. Allows "
+      "remembering or interpolating data as the geometry changes, such as positions before "
+      "deformation";
+  ntype.enum_name_legacy = "CAPTURE_ATTRIBUTE";
+  ntype.nclass = NODE_CLASS_ATTRIBUTE;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryAttributeCapture", node_free_storage, node_copy_storage);
+      ntype, "NodeGeometryAttributeCapture", node_free_storage, node_copy_storage);
   ntype.initfunc = node_init;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
@@ -262,7 +266,7 @@ static void node_register()
   ntype.draw_buttons_ex = node_layout_ex;
   ntype.register_operators = node_operators;
   ntype.gather_link_search_ops = node_gather_link_searches;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

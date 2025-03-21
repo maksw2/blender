@@ -177,11 +177,13 @@ struct _mtl_sampler {
      * in the texture. */
     ushort aligned_width;
 
-    int2 to_internal_coord(IntCoord coord) const
+    /* Convert 2D coordinates to the backing 2D texture coordinates. */
+    int2 to_internal_coord(thread TextureT * /*texture*/, IntCoord coord) const
     {
       return coord.xy;
     }
-    uint to_linear_coord(IntCoord coord) const
+    /* Convert 2D coordinates to the memory location in the 2D texture memory buffer. */
+    uint to_linear_coord(thread TextureT * /*texture*/, IntCoord coord) const
     {
       return coord.x + coord.y * aligned_width;
     }
@@ -190,7 +192,22 @@ struct _mtl_sampler {
   template<typename U> struct AtomicEmulation<U, 3, true> {
     /** Buffer to do atomic operations on. */
     device U *buffer;
-    /** Required to pixel location inside the backing texture 2D space, and texture size query. */
+    /**
+     * Required for pixel location inside the backing texture 2D space, and texture size query.
+     *
+     * IMPORTANT: Note that the slices are not contiguous in the backing texture as we simply use
+     * it for linear storage.
+     * For instance, for a [2,2,2] texture store in a [6x4] backing texture:
+     *
+     * \code{.unparsed}
+     * 001122
+     * 334455
+     * 667788
+     * xxxxxx
+     * \endcode
+     *
+     * The numbers are rows in the 3D texture.
+     */
     ushort3 texture_size;
     /* Aligned width matches the number of buffer elements in bytes_per_row. This may be greater
      * than the texture's native width to satisfy device alignment rules. We need to use the padded
@@ -198,14 +215,26 @@ struct _mtl_sampler {
      * in the texture. */
     ushort aligned_width;
 
-    int2 to_internal_coord(IntCoord coord) const
+    /* Convert 3D coordinates to the backing 2D texture coordinates. */
+    int2 to_internal_coord(thread TextureT *texture, IntCoord coord) const
     {
-      return int2(coord.x, coord.y + texture_size.y * coord.z);
+      /* Index of a pixel in the data array. Assuming data layout is scan-line. */
+      uint linear_pixel = uint(coord.x) + uint(coord.y) * texture_size.x +
+                          uint(coord.z) * (texture_size.x * texture_size.y);
+
+      uint backing_tex_width = texture->get_width();
+      /* Coordinate inside the backing texture. */
+      uint y = linear_pixel / backing_tex_width;
+      /* Avoid use of modulo operator for speed. */
+      uint x = linear_pixel - y * backing_tex_width;
+      return int2(x, y);
     }
-    uint to_linear_coord(IntCoord coord) const
+
+    /* Convert 3D coordinates to the memory location in the 2D texture memory buffer. */
+    uint to_linear_coord(thread TextureT *texture, IntCoord coord) const
     {
-      uint row = coord.y + coord.z * texture_size.y;
-      return coord.x + row * aligned_width;
+      uint2 co = uint2(to_internal_coord(texture, coord));
+      return co.x + co.y * uint(aligned_width);
     }
   };
 
@@ -350,29 +379,29 @@ struct _mtl_sampler {
 #undef NON_ARRAY_FN
 
 #ifndef MTL_SUPPORTS_TEXTURE_ATOMICS
-  /* Atomic samplers only support `textureFetch` as the texture layout doesn't allow filtering. */
+  /* Atomic samplers only support `texelFetch` as the texture layout doesn't allow filtering. */
 
 #  define ATOMIC_FN template<bool At = Atomic, ENABLE_IF(At == true)>
 
   ATOMIC_FN DataVec fetch(IntCoord coord) const
   {
-    int2 coord_2d = atomic.to_internal_coord(coord);
+    int2 coord_2d = atomic.to_internal_coord(texture, coord);
     return texture->sample(_mtl_fetch_samp, float2(coord_2d));
   }
   ATOMIC_FN DataVec fetch(IntCoord coord, level lod, IntDeriv offset = {0}) const
   {
-    int2 coord_2d = atomic.to_internal_coord(coord);
+    int2 coord_2d = atomic.to_internal_coord(texture, coord);
     return texture->sample(_mtl_fetch_samp, float2(coord_2d), lod, offset);
   }
 
   ATOMIC_FN DataVec load(IntCoord coord) const
   {
-    int2 coord_2d = atomic.to_internal_coord(coord);
+    int2 coord_2d = atomic.to_internal_coord(texture, coord);
     return texture->read(uint2(coord_2d), 0);
   }
   ATOMIC_FN void store(DataVec data, IntCoord coord) const
   {
-    int2 coord_2d = atomic.to_internal_coord(coord);
+    int2 coord_2d = atomic.to_internal_coord(texture, coord);
     texture->write(data, uint2(coord_2d), 0);
   }
 
@@ -380,31 +409,31 @@ struct _mtl_sampler {
 
   AtomicT atomic_min(IntCoord coord, AtomicT data) const
   {
-    return atomicMin(atomic.buffer[atomic.to_linear_coord(coord)], data);
+    return atomicMin(atomic.buffer[atomic.to_linear_coord(texture, coord)], data);
   }
   AtomicT atomic_max(IntCoord coord, AtomicT data) const
   {
-    return atomicMax(atomic.buffer[atomic.to_linear_coord(coord)], data);
+    return atomicMax(atomic.buffer[atomic.to_linear_coord(texture, coord)], data);
   }
   AtomicT atomic_add(IntCoord coord, AtomicT data) const
   {
-    return atomicAdd(atomic.buffer[atomic.to_linear_coord(coord)], data);
+    return atomicAdd(atomic.buffer[atomic.to_linear_coord(texture, coord)], data);
   }
   AtomicT atomic_and(IntCoord coord, AtomicT data) const
   {
-    return atomicAnd(atomic.buffer[atomic.to_linear_coord(coord)], data);
+    return atomicAnd(atomic.buffer[atomic.to_linear_coord(texture, coord)], data);
   }
   AtomicT atomic_or(IntCoord coord, AtomicT data) const
   {
-    return atomicOr(atomic.buffer[atomic.to_linear_coord(coord)], data);
+    return atomicOr(atomic.buffer[atomic.to_linear_coord(texture, coord)], data);
   }
   AtomicT atomic_xor(IntCoord coord, AtomicT data) const
   {
-    return atomicXor(atomic.buffer[atomic.to_linear_coord(coord)], data);
+    return atomicXor(atomic.buffer[atomic.to_linear_coord(texture, coord)], data);
   }
   AtomicT atomic_exchange(IntCoord coord, AtomicT data) const
   {
-    return atomicExchange(atomic.buffer[atomic.to_linear_coord(coord)], data);
+    return atomicExchange(atomic.buffer[atomic.to_linear_coord(texture, coord)], data);
   }
 
 #else
@@ -639,30 +668,51 @@ void imageStoreFast(SamplerT texture, IntCoord coord, DataVec data)
 
 IMAGE_FN AtomicT imageAtomicMin(SamplerT texture, IntCoord coord, AtomicT data)
 {
+  if (any(UintCoord(coord) >= UintCoord(texture.size()))) {
+    return AtomicT(0);
+  }
   return texture.atomic_min(coord, data);
 }
 IMAGE_FN AtomicT imageAtomicMax(SamplerT texture, IntCoord coord, AtomicT data)
 {
+  if (any(UintCoord(coord) >= UintCoord(texture.size()))) {
+    return AtomicT(0);
+  }
   return texture.atomic_max(coord, data);
 }
 IMAGE_FN AtomicT imageAtomicAdd(SamplerT texture, IntCoord coord, AtomicT data)
 {
+  if (any(UintCoord(coord) >= UintCoord(texture.size()))) {
+    return AtomicT(0);
+  }
   return texture.atomic_add(coord, data);
 }
 IMAGE_FN AtomicT imageAtomicAnd(SamplerT texture, IntCoord coord, AtomicT data)
 {
+  if (any(UintCoord(coord) >= UintCoord(texture.size()))) {
+    return AtomicT(0);
+  }
   return texture.atomic_and(coord, data);
 }
 IMAGE_FN AtomicT imageAtomicOr(SamplerT texture, IntCoord coord, AtomicT data)
 {
+  if (any(UintCoord(coord) >= UintCoord(texture.size()))) {
+    return AtomicT(0);
+  }
   return texture.atomic_or(coord, data);
 }
 IMAGE_FN AtomicT imageAtomicXor(SamplerT texture, IntCoord coord, AtomicT data)
 {
+  if (any(UintCoord(coord) >= UintCoord(texture.size()))) {
+    return AtomicT(0);
+  }
   return texture.atomic_xor(coord, data);
 }
 IMAGE_FN AtomicT imageAtomicExchange(SamplerT texture, IntCoord coord, AtomicT data)
 {
+  if (any(UintCoord(coord) >= UintCoord(texture.size()))) {
+    return AtomicT(0);
+  }
   return texture.atomic_exchange(coord, data);
 }
 
@@ -826,77 +876,6 @@ template<int N, int M> inline matrix<float, N, M> operator-(matrix<float, N, M> 
 {
   return a * -1.0;
 }
-
-/* SSBO Vertex Fetch Mode. */
-#ifdef MTL_SSBO_VERTEX_FETCH
-/**
- * Enabled when geometry is passed via raw buffer bindings, rather than using
- * vertex assembly in the vertex-descriptor.
- *
- *  To describe the layout of input attribute data, we will generate uniforms (defaulting to 0)
- * with the names per unique input attribute with name `attr`:
- *
- * - uniform_ssbo_stride_##attr  -- Representing the stride between element.
- * - uniform_ssbo_offset_##attr  -- Representing the base offset within the vertex.
- * - uniform_ssbo_fetchmode_##attr - Whether using per-vertex (=0) or per-instance fetch (=1).
- * - uniform_ssbo_vbo_id_##attr - buffer binding index for VBO with data for this attribute.
- * - uniform_ssbo_type_##attr - The type of data in the currently bound buffer.
- *
- * If the uniform_ssbo_type_* does not match with the desired type, then it is the responsibility
- * of the shader to perform the conversion. Types should always be read as the raw attribute type,
- * and then converted. e.g. If the uniform_ssbo_type_* is `int`, but we want to read it to be
- * normalized to a float.
- * The implementation should query the attribute type using vertex_fetch_get_attr_type(attr_name):
- *
- * \code{.cc}
- * float fweight = 0.0;
- * if(vertex_fetch_get_attr_type(in_weight) == GPU_SHADER_ATTR_TYPE_INT) {
- *   int iweight = vertex_fetch_attribute(gl_VertexID, in_weight, int);
- *   fweight = (float)iweight/(float)INT32_MAX;
- * } else {
- *   fweight = = vertex_fetch_attribute(gl_VertexID, in_weight, float);
- * }
- * \endcode
- *
- * Note: These uniforms are generated as part of the same data block used for regular uniforms
- * and attribute data is written prior to each draw call, depending on the configuration of
- * the vertex descriptor for an MTLBatch or MTLImmedaite call. */
-#  define PPCAT_NX(A, B) A##B
-#  define PPCAT(A, B) PPCAT_NX(A, B)
-
-#  define RESOLVE_VERTEX(v_id) \
-    ((UNIFORM_SSBO_USES_INDEXED_RENDERING_STR > 0) ? \
-         (((UNIFORM_SSBO_INDEX_MODE_U16_STR > 0) ? MTL_INDEX_DATA_U16[v_id] : \
-                                                   MTL_INDEX_DATA_U32[v_id]) + \
-          UNIFORM_SSBO_INDEX_BASE_STR) : \
-         v_id)
-#  define ATTR_TYPE(attr) PPCAT(SSBO_ATTR_TYPE_, attr)
-#  define vertex_fetch_attribute_raw(n, attr, type) \
-    (reinterpret_cast<constant type *>( \
-        &MTL_VERTEX_DATA[PPCAT(UNIFORM_SSBO_VBO_ID_STR, attr)] \
-                        [(PPCAT(UNIFORM_SSBO_STRIDE_STR, attr) * \
-                          ((PPCAT(UNIFORM_SSBO_FETCHMODE_STR, attr)) ? gl_InstanceID : n)) + \
-                         PPCAT(UNIFORM_SSBO_OFFSET_STR, attr)]))[0]
-#  define vertex_fetch_attribute(n, attr, type) \
-    vertex_fetch_attribute_raw(RESOLVE_VERTEX(n), attr, type)
-#  define vertex_id_from_index_id(n) RESOLVE_VERTEX(n)
-#  define vertex_fetch_get_input_prim_type() UNIFORM_SSBO_INPUT_PRIM_TYPE_STR
-#  define vertex_fetch_get_input_vert_count() UNIFORM_SSBO_INPUT_VERT_COUNT_STR
-#  define vertex_fetch_get_attr_type(attr) PPCAT(UNIFORM_SSBO_TYPE_STR, attr)
-#  define vertex_fetch_get_index_base() UNIFORM_SSBO_INDEX_BASE_STR
-
-/* Must mirror GPU_primitive.hh. */
-#  define GPU_PRIM_POINTS 0
-#  define GPU_PRIM_LINES 1
-#  define GPU_PRIM_TRIS 2
-#  define GPU_PRIM_LINE_STRIP 3
-#  define GPU_PRIM_LINE_LOOP 4
-#  define GPU_PRIM_TRI_STRIP 5
-#  define GPU_PRIM_TRI_FAN 6
-#  define GPU_PRIM_LINES_ADJ 7
-#  define GPU_PRIM_TRIS_ADJ 8
-#  define GPU_PRIM_LINE_STRIP_ADJ 9
-#endif
 
 /* Common Functions. */
 #define dFdx(x) dfdx(x)
@@ -1097,11 +1076,6 @@ template<typename T> vec<T, 2> mix(vec<T, 2> a, vec<T, 2> b, bool2 mask) SELECT;
 
 #undef SELECT
 
-template<typename T, int Size> bool is_zero(vec<T, Size> a)
-{
-  return all(a == vec<T, Size>(0));
-}
-
 #define in
 #define out thread
 #define inout thread
@@ -1141,6 +1115,23 @@ RESHAPE(float4x4, float3x3, m[0].x, m[0].y, m[0].z, 0, m[1].x, m[1].y, m[1].z, 0
 /* TODO(fclem): Remove. Use Transform instead. */
 RESHAPE(float3x3, float3x4, m[0].xyz, m[1].xyz, m[2].xyz)
 #undef RESHAPE
+
+#define METAL_CONSTRUCTOR_1(class_name, t1, m1) \
+  class_name() = default; \
+  class_name(t1 m1##_) : m1(m1##_){};
+
+#define METAL_CONSTRUCTOR_2(class_name, t1, m1, t2, m2) \
+  class_name() = default; \
+  class_name(t1 m1##_, t2 m2##_) : m1(m1##_), m2(m2##_){};
+
+#define METAL_CONSTRUCTOR_3(class_name, t1, m1, t2, m2, t3, m3) \
+  class_name() = default; \
+  class_name(t1 m1##_, t2 m2##_, t3 m3##_) : m1(m1##_), m2(m2##_), m3(m3##_){};
+
+#define METAL_CONSTRUCTOR_4(class_name, t1, m1, t2, m2, t3, m3, t4, m4) \
+  class_name() = default; \
+  class_name(t1 m1##_, t2 m2##_, t3 m3##_, t4 m4##_) \
+      : m1(m1##_), m2(m2##_), m3(m3##_), m4(m4##_){};
 
 #undef ENABLE_IF
 

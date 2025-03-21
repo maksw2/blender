@@ -6,8 +6,6 @@
 
 #include "BKE_curves.hh"
 
-#include "UI_resources.hh"
-
 #include "node_geometry_util.hh"
 
 namespace blender::nodes::node_geo_curve_endpoint_selection_cc {
@@ -122,13 +120,16 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-
   geo_node_type_base(
-      &ntype, GEO_NODE_CURVE_ENDPOINT_SELECTION, "Endpoint Selection", NODE_CLASS_INPUT);
+      &ntype, "GeometryNodeCurveEndpointSelection", GEO_NODE_CURVE_ENDPOINT_SELECTION);
+  ntype.ui_name = "Endpoint Selection";
+  ntype.ui_description = "Provide a selection for an arbitrary number of endpoints in each spline";
+  ntype.enum_name_legacy = "CURVE_ENDPOINT_SELECTION";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

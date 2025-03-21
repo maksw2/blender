@@ -28,7 +28,6 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_attribute.hh"
-#include "BKE_customdata.hh"
 #include "BKE_global.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_mapping.hh"
@@ -307,7 +306,6 @@ blender::Span<blender::float3> Mesh::corner_normals() const
                                    this->corner_verts(),
                                    this->corner_edges(),
                                    this->corner_to_face_map(),
-                                   this->vert_normals(),
                                    this->face_normals(),
                                    sharp_edges,
                                    sharp_faces,
@@ -630,7 +628,9 @@ void BKE_lnor_space_custom_normal_to_data(const MLoopNorSpace *lnor_space,
   copy_v2_v2_short(r_clnor_data, corner_space_custom_normal_to_data(space, custom_lnor));
 }
 
-namespace blender::bke::mesh {
+namespace blender::bke {
+
+namespace mesh {
 
 struct CornerSplitTaskDataCommon {
   /* Read/write.
@@ -648,7 +648,6 @@ struct CornerSplitTaskDataCommon {
   Span<int2> edge_to_corners;
   Span<int> corner_to_face;
   Span<float3> face_normals;
-  Span<float3> vert_normals;
   Span<short2> clnors_data;
 };
 
@@ -1180,7 +1179,6 @@ void normals_calc_corners(const Span<float3> vert_positions,
                           const Span<int> corner_verts,
                           const Span<int> corner_edges,
                           const Span<int> corner_to_face_map,
-                          const Span<float3> vert_normals,
                           const Span<float3> face_normals,
                           const Span<bool> sharp_edges,
                           const Span<bool> sharp_faces,
@@ -1228,11 +1226,6 @@ void normals_calc_corners(const Span<float3> vert_positions,
   common_data.edge_to_corners = edge_to_corners;
   common_data.corner_to_face = corner_to_face_map;
   common_data.face_normals = face_normals;
-  common_data.vert_normals = vert_normals;
-
-  /* Pre-populate all corner normals as if their verts were all smooth.
-   * This way we don't have to compute those later! */
-  array_utils::gather(vert_normals, corner_verts, r_corner_normals, 1024);
 
   /* This first corner check which edges are actually smooth, and compute edge vectors. */
   build_edge_to_corner_map_with_flip_and_sharp(
@@ -1313,7 +1306,6 @@ static void mesh_normals_corner_custom_set(const Span<float3> positions,
                        corner_verts,
                        corner_edges,
                        corner_to_face,
-                       vert_normals,
                        face_normals,
                        sharp_edges,
                        sharp_faces,
@@ -1434,7 +1426,6 @@ static void mesh_normals_corner_custom_set(const Span<float3> positions,
                          corner_verts,
                          corner_edges,
                          corner_to_face,
-                         vert_normals,
                          face_normals,
                          sharp_edges,
                          sharp_faces,
@@ -1538,9 +1529,11 @@ void normals_corner_custom_set_from_verts(const Span<float3> vert_positions,
                                  r_clnors_data);
 }
 
-static void mesh_set_custom_normals(Mesh *mesh, float (*r_custom_nors)[3], const bool use_vertices)
+static void mesh_set_custom_normals(Mesh &mesh,
+                                    MutableSpan<float3> r_custom_nors,
+                                    const bool use_vertices)
 {
-  MutableAttributeAccessor attributes = mesh->attributes_for_write();
+  MutableAttributeAccessor attributes = mesh.attributes_for_write();
   SpanAttributeWriter custom_normals = attributes.lookup_or_add_for_write_span<short2>(
       "custom_normal", AttrDomain::Corner);
   if (!custom_normals) {
@@ -1550,17 +1543,16 @@ static void mesh_set_custom_normals(Mesh *mesh, float (*r_custom_nors)[3], const
       "sharp_edge", AttrDomain::Edge);
   const VArraySpan sharp_faces = *attributes.lookup<bool>("sharp_face", AttrDomain::Face);
 
-  mesh_normals_corner_custom_set(mesh->vert_positions(),
-                                 mesh->edges(),
-                                 mesh->faces(),
-                                 mesh->corner_verts(),
-                                 mesh->corner_edges(),
-                                 mesh->vert_normals(),
-                                 mesh->face_normals(),
+  mesh_normals_corner_custom_set(mesh.vert_positions(),
+                                 mesh.edges(),
+                                 mesh.faces(),
+                                 mesh.corner_verts(),
+                                 mesh.corner_edges(),
+                                 mesh.vert_normals(),
+                                 mesh.face_normals(),
                                  sharp_faces,
                                  use_vertices,
-                                 {reinterpret_cast<float3 *>(r_custom_nors),
-                                  use_vertices ? mesh->verts_num : mesh->corners_num},
+                                 r_custom_nors,
                                  sharp_edges.span,
                                  custom_normals.span);
 
@@ -1568,12 +1560,10 @@ static void mesh_set_custom_normals(Mesh *mesh, float (*r_custom_nors)[3], const
   custom_normals.finish();
 }
 
-}  // namespace blender::bke::mesh
+}  // namespace mesh
 
-static void normalize_vecs(blender::MutableSpan<blender::float3> normals)
+static void normalize_vecs(MutableSpan<float3> normals)
 {
-  using namespace blender;
-
   threading::parallel_for(normals.index_range(), 4096, [&](const IndexRange range) {
     for (const int i : range) {
       normals[i] = math::normalize(normals[i]);
@@ -1581,31 +1571,29 @@ static void normalize_vecs(blender::MutableSpan<blender::float3> normals)
   });
 }
 
-void BKE_mesh_set_custom_normals(Mesh *mesh, float (*r_custom_corner_normals)[3])
+void mesh_set_custom_normals(Mesh &mesh, MutableSpan<float3> corner_normals)
 {
-  normalize_vecs(
-      {reinterpret_cast<blender::float3 *>(r_custom_corner_normals), mesh->corners_num});
-
-  blender::bke::mesh::mesh_set_custom_normals(mesh, r_custom_corner_normals, false);
+  normalize_vecs(corner_normals);
+  mesh::mesh_set_custom_normals(mesh, corner_normals, false);
 }
 
-void BKE_mesh_set_custom_normals_normalized(Mesh *mesh, float (*r_custom_corner_normals)[3])
+void mesh_set_custom_normals_normalized(Mesh &mesh, MutableSpan<float3> corner_normals)
 {
-  blender::bke::mesh::mesh_set_custom_normals(mesh, r_custom_corner_normals, false);
+  mesh::mesh_set_custom_normals(mesh, corner_normals, false);
 }
 
-void BKE_mesh_set_custom_normals_from_verts(Mesh *mesh, float (*r_custom_vert_normals)[3])
+void mesh_set_custom_normals_from_verts(Mesh &mesh, MutableSpan<float3> vert_normals)
 {
-  normalize_vecs({reinterpret_cast<blender::float3 *>(r_custom_vert_normals), mesh->verts_num});
-
-  blender::bke::mesh::mesh_set_custom_normals(mesh, r_custom_vert_normals, true);
+  normalize_vecs(vert_normals);
+  mesh::mesh_set_custom_normals(mesh, vert_normals, true);
 }
 
-void BKE_mesh_set_custom_normals_from_verts_normalized(Mesh *mesh,
-                                                       float (*r_custom_vert_normals)[3])
+void mesh_set_custom_normals_from_verts_normalized(Mesh &mesh, MutableSpan<float3> vert_normals)
 {
-  blender::bke::mesh::mesh_set_custom_normals(mesh, r_custom_vert_normals, true);
+  mesh::mesh_set_custom_normals(mesh, vert_normals, true);
 }
+
+}  // namespace blender::bke
 
 void BKE_mesh_normals_loop_to_vertex(const int numVerts,
                                      const int *corner_verts,
@@ -1613,8 +1601,7 @@ void BKE_mesh_normals_loop_to_vertex(const int numVerts,
                                      const float (*clnors)[3],
                                      float (*r_vert_clnors)[3])
 {
-  int *vert_loops_count = (int *)MEM_calloc_arrayN(
-      size_t(numVerts), sizeof(*vert_loops_count), __func__);
+  int *vert_loops_count = MEM_calloc_arrayN<int>(size_t(numVerts), __func__);
 
   copy_vn_fl((float *)r_vert_clnors, 3 * numVerts, 0.0f);
 

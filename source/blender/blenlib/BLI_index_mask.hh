@@ -5,7 +5,6 @@
 #pragma once
 
 #include <array>
-#include <limits>
 #include <optional>
 #include <variant>
 
@@ -14,6 +13,7 @@
 #include "BLI_index_mask_fwd.hh"
 #include "BLI_index_ranges_builder_fwd.hh"
 #include "BLI_linear_allocator.hh"
+#include "BLI_offset_indices.hh"
 #include "BLI_offset_span.hh"
 #include "BLI_task.hh"
 #include "BLI_unique_sorted_indices.hh"
@@ -199,6 +199,7 @@ class IndexMask : private IndexMaskData {
   /** Construct a mask from the true indices. */
   static IndexMask from_bools(Span<bool> bools, IndexMaskMemory &memory);
   static IndexMask from_bools(const VArray<bool> &bools, IndexMaskMemory &memory);
+  static IndexMask from_bools_inverse(const VArray<bool> &bools, IndexMaskMemory &memory);
   /** Construct a mask from the true indices, but limited by the indices in #universe. */
   static IndexMask from_bools(const IndexMask &universe,
                               Span<bool> bools,
@@ -209,6 +210,14 @@ class IndexMask : private IndexMaskData {
   static IndexMask from_bools(const IndexMask &universe,
                               const VArray<bool> &bools,
                               IndexMaskMemory &memory);
+  static IndexMask from_bools_inverse(const IndexMask &universe,
+                                      const VArray<bool> &bools,
+                                      IndexMaskMemory &memory);
+  /** Construct a mask from the ranges referenced by the offset indices. */
+  template<typename T>
+  static IndexMask from_ranges(OffsetIndices<T> offsets,
+                               const IndexMask &mask,
+                               IndexMaskMemory &memory);
   /**
    * Constructs a mask by repeating the indices in the given mask with a stride.
    * For example, with an input mask containing `{3, 5}` and a stride of 10 the resulting mask
@@ -242,6 +251,8 @@ class IndexMask : private IndexMaskData {
   static IndexMask from_union(const IndexMask &mask_a,
                               const IndexMask &mask_b,
                               IndexMaskMemory &memory);
+  /** Constructs a mask from the union of multiple masks. */
+  static IndexMask from_union(Span<IndexMask> masks, IndexMaskMemory &memory);
   /** Construct a mask from the difference of #mask_a and #mask_b. */
   static IndexMask from_difference(const IndexMask &mask_a,
                                    const IndexMask &mask_b,
@@ -579,6 +590,13 @@ template<typename T> void build_reverse_map(const IndexMask &mask, MutableSpan<T
  */
 int64_t consolidate_index_mask_segments(MutableSpan<IndexMaskSegment> segments,
                                         IndexMaskMemory &memory);
+
+/**
+ * Adds index mask segments to the vector for the given range. Ranges shorter than
+ * #max_segment_size fit into a single segment. Larger ranges are split into multiple segments.
+ */
+template<int64_t N>
+void index_range_to_mask_segments(const IndexRange range, Vector<IndexMaskSegment, N> &r_segments);
 
 /* -------------------------------------------------------------------- */
 /** \name #RawMaskIterator Inline Methods
@@ -1079,6 +1097,40 @@ inline bool operator!=(const IndexMask &a, const IndexMask &b)
 {
   return !(a == b);
 }
+
+template<int64_t N>
+inline void index_range_to_mask_segments(const IndexRange range,
+                                         Vector<IndexMaskSegment, N> &r_segments)
+{
+  const std::array<int16_t, max_segment_size> &static_indices_array = get_static_indices_array();
+
+  const int64_t full_size = range.size();
+  for (int64_t i = 0; i < full_size; i += max_segment_size) {
+    const int64_t size = std::min(i + max_segment_size, full_size) - i;
+    r_segments.append(
+        IndexMaskSegment(range.first() + i, Span(static_indices_array).take_front(size)));
+  }
+}
+
+/**
+ * Return a mask of random points or curves.
+ *
+ * \param mask: (optional) The elements that should be used in the resulting mask.
+ * \param universe_size: The size of the mask.
+ * \param random_seed: The seed for the \a RandomNumberGenerator.
+ * \param probability: Determines how likely a point/curve will be chosen.
+ * If set to 0.0, nothing will be in the mask, if set to 1.0 everything will be in the mask.
+ */
+IndexMask random_mask(const IndexMask &mask,
+                      const int64_t universe_size,
+                      const uint32_t random_seed,
+                      const float probability,
+                      IndexMaskMemory &memory);
+
+IndexMask random_mask(const int64_t universe_size,
+                      const uint32_t random_seed,
+                      const float probability,
+                      IndexMaskMemory &memory);
 
 }  // namespace blender::index_mask
 

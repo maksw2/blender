@@ -33,7 +33,7 @@ static void cmp_node_directional_blur_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_dblur(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeDBlurData *ndbd = MEM_cnew<NodeDBlurData>(__func__);
+  NodeDBlurData *ndbd = MEM_callocN<NodeDBlurData>(__func__);
   node->storage = ndbd;
   ndbd->iter = 1;
   ndbd->center_x = 0.5;
@@ -44,7 +44,7 @@ static void node_composit_buts_dblur(uiLayout *layout, bContext * /*C*/, Pointer
 {
   uiLayout *col;
 
-  uiItemR(layout, ptr, "iterations", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "iterations", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumn(layout, true);
   uiItemL(col, IFACE_("Center:"), ICON_NONE);
@@ -54,16 +54,16 @@ static void node_composit_buts_dblur(uiLayout *layout, bContext * /*C*/, Pointer
   uiItemS(layout);
 
   col = uiLayoutColumn(layout, true);
-  uiItemR(col, ptr, "distance", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "angle", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "distance", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "angle", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
   uiItemS(layout);
 
-  uiItemR(layout, ptr, "spin", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "zoom", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "spin", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(layout, ptr, "zoom", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class DirectionalBlurOperation : public NodeOperation {
  public:
@@ -71,8 +71,10 @@ class DirectionalBlurOperation : public NodeOperation {
 
   void execute() override
   {
-    if (is_identity()) {
-      get_input("Image").pass_through(get_result("Image"));
+    if (this->is_identity()) {
+      const Result &input = this->get_input("Image");
+      Result &output = this->get_result("Image");
+      output.share_data(input);
       return;
     }
 
@@ -257,13 +259,17 @@ void register_node_type_cmp_dblur()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_DBLUR, "Directional Blur", NODE_CLASS_OP_FILTER);
+  cmp_node_type_base(&ntype, "CompositorNodeDBlur", CMP_NODE_DBLUR);
+  ntype.ui_name = "Directional Blur";
+  ntype.ui_description = "Blur an image along a direction";
+  ntype.enum_name_legacy = "DBLUR";
+  ntype.nclass = NODE_CLASS_OP_FILTER;
   ntype.declare = file_ns::cmp_node_directional_blur_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_dblur;
   ntype.initfunc = file_ns::node_composit_init_dblur;
   blender::bke::node_type_storage(
-      &ntype, "NodeDBlurData", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeDBlurData", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

@@ -17,6 +17,23 @@ Some type annotations are quoted to avoid errors in older Python versions.
 These can be unquoted eventually.
 """
 
+__all__ = (
+    "call",
+    "check_output",
+    "command_missing",
+    "git_branch",
+    "git_branch_exists",
+    "git_enable_submodule",
+    "git_get_remote_url",
+    "git_is_remote_repository",
+    "git_remote_exist",
+    "git_set_config",
+    "git_update_submodule",
+    "is_git_submodule_enabled",
+    "parse_blender_version",
+    "remove_directory",
+)
+
 import re
 import os
 import shutil
@@ -225,7 +242,7 @@ def git_update_submodule(git_command: str, submodule_dir: Path) -> bool:
     #
     #   https://github.com/git/git/commit/7a132c628e57b9bceeb88832ea051395c0637b16
     #
-    # Doing "git lfs pull" after checkout with GIT_LFS_SKIP_SMUDGE=true seems to be the
+    # Doing `git lfs pull` after checkout with `GIT_LFS_SKIP_SMUDGE=true` seems to be the
     # valid process. For example, https://www.mankier.com/7/git-lfs-faq
 
     env = {"GIT_LFS_SKIP_SMUDGE": "1"}

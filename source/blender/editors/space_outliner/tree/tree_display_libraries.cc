@@ -10,6 +10,7 @@
 #include "BLI_listbase_wrapper.hh"
 
 #include "BKE_collection.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 
 #include "DNA_collection_types.h"
@@ -66,11 +67,11 @@ ListBase TreeDisplayLibraries::build_tree(const TreeSourceData &source_data)
     TreeStoreElem *tselem = TREESTORE(ten);
     Library *lib = (Library *)tselem->id;
     BLI_assert(!lib || (GS(lib->id.name) == ID_LI));
-    if (!lib || !lib->runtime.parent) {
+    if (!lib || !lib->runtime->parent) {
       continue;
     }
 
-    TreeElement *parent = (TreeElement *)lib->runtime.parent->id.newid;
+    TreeElement *parent = (TreeElement *)lib->runtime->parent->id.newid;
 
     if (tselem->id->tag & ID_TAG_INDIRECT) {
       /* Only remove from 'first level' if lib is not also directly used. */
@@ -98,18 +99,16 @@ TreeElement *TreeDisplayLibraries::add_library_contents(Main &mainvar, ListBase 
 {
   const short filter_id_type = id_filter_get();
 
-  ListBase *lbarray[INDEX_ID_MAX];
-  int tot;
+  Vector<ListBase *> lbarray;
   if (filter_id_type) {
-    lbarray[0] = which_libbase(&mainvar, space_outliner_.filter_id_type);
-    tot = 1;
+    lbarray.append(which_libbase(&mainvar, space_outliner_.filter_id_type));
   }
   else {
-    tot = set_listbasepointers(&mainvar, lbarray);
+    lbarray.extend(BKE_main_lists_get(mainvar));
   }
 
   TreeElement *tenlib = nullptr;
-  for (int a = 0; a < tot; a++) {
+  for (int a = 0; a < lbarray.size(); a++) {
     if (!lbarray[a] || !lbarray[a]->first) {
       continue;
     }

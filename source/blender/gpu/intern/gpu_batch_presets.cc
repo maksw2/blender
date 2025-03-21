@@ -7,9 +7,9 @@
  */
 
 #include "BLI_listbase.h"
+#include "BLI_math_vector.h"
 #include "BLI_math_vector_types.hh"
 #include "BLI_threads.h"
-#include "BLI_utildefines.h"
 
 #include "MEM_guardedalloc.h"
 

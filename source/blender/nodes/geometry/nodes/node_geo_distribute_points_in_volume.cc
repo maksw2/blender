@@ -6,6 +6,8 @@
 #  include <openvdb/openvdb.h>
 #  include <openvdb/tools/Interpolation.h>
 #  include <openvdb/tools/PointScatter.h>
+
+#  include <algorithm>
 #endif
 
 #include "DNA_node_types.h"
@@ -73,7 +75,7 @@ static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryDistributePointsInVolume *data = MEM_cnew<NodeGeometryDistributePointsInVolume>(
+  NodeGeometryDistributePointsInVolume *data = MEM_callocN<NodeGeometryDistributePointsInVolume>(
       __func__);
   data->mode = GEO_NODE_DISTRIBUTE_POINTS_IN_VOLUME_DENSITY_RANDOM;
   node->storage = data;
@@ -134,8 +136,7 @@ static void point_scatter_density_grid(const openvdb::FloatGrid &grid,
                                      double(spacing.z) / grid.voxelSize().z());
 
   /* Abort if spacing is zero. */
-  const double min_spacing = std::min(voxel_spacing.x(),
-                                      std::min(voxel_spacing.y(), voxel_spacing.z()));
+  const double min_spacing = std::min({voxel_spacing.x(), voxel_spacing.y(), voxel_spacing.z()});
   if (std::abs(min_spacing) < 0.0001) {
     return;
   }
@@ -281,20 +282,22 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(&ntype,
-                     GEO_NODE_DISTRIBUTE_POINTS_IN_VOLUME,
-                     "Distribute Points in Volume",
-                     NODE_CLASS_GEOMETRY);
-  blender::bke::node_type_storage(&ntype,
+  geo_node_type_base(
+      &ntype, "GeometryNodeDistributePointsInVolume", GEO_NODE_DISTRIBUTE_POINTS_IN_VOLUME);
+  ntype.ui_name = "Distribute Points in Volume";
+  ntype.ui_description = "Generate points inside a volume";
+  ntype.enum_name_legacy = "DISTRIBUTE_POINTS_IN_VOLUME";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
+  blender::bke::node_type_storage(ntype,
                                   "NodeGeometryDistributePointsInVolume",
                                   node_free_standard_storage,
                                   node_copy_standard_storage);
   ntype.initfunc = node_init;
-  blender::bke::node_type_size(&ntype, 170, 100, 320);
+  blender::bke::node_type_size(ntype, 170, 100, 320);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

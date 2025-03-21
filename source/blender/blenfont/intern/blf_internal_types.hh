@@ -9,7 +9,10 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <mutex>
+
+#include "DNA_vec_types.h"
 
 #include "BLF_api.hh"
 
@@ -19,8 +22,13 @@
 #include "GPU_texture.hh"
 #include "GPU_vertex_buffer.hh"
 
+#include <ft2build.h>
+
 struct ColorManagedDisplay;
 struct FontBLF;
+struct GlyphCacheBLF;
+struct GlyphBLF;
+
 namespace blender::gpu {
 class Batch;
 class VertBuf;
@@ -35,11 +43,11 @@ struct GPUVertBufRaw;
 #define MAKE_DVAR_TAG(a, b, c, d) \
   ((uint32_t(a) << 24u) | (uint32_t(b) << 16u) | (uint32_t(c) << 8u) | (uint32_t(d)))
 
-#define BLF_VARIATION_AXIS_WEIGHT MAKE_DVAR_TAG('w', 'g', 'h', 't')  /* 'wght' weight axis. */
-#define BLF_VARIATION_AXIS_SLANT MAKE_DVAR_TAG('s', 'l', 'n', 't')   /* 'slnt' slant axis. */
-#define BLF_VARIATION_AXIS_WIDTH MAKE_DVAR_TAG('w', 'd', 't', 'h')   /* 'wdth' width axis. */
-#define BLF_VARIATION_AXIS_SPACING MAKE_DVAR_TAG('s', 'p', 'a', 'c') /* 'spac' spacing axis. */
-#define BLF_VARIATION_AXIS_OPTSIZE MAKE_DVAR_TAG('o', 'p', 's', 'z') /* 'opsz' optical size. */
+#define BLF_VARIATION_AXIS_WEIGHT MAKE_DVAR_TAG('w', 'g', 'h', 't')  /* `wght` weight axis. */
+#define BLF_VARIATION_AXIS_SLANT MAKE_DVAR_TAG('s', 'l', 'n', 't')   /* `slnt` slant axis. */
+#define BLF_VARIATION_AXIS_WIDTH MAKE_DVAR_TAG('w', 'd', 't', 'h')   /* `wdth` width axis. */
+#define BLF_VARIATION_AXIS_SPACING MAKE_DVAR_TAG('s', 'p', 'a', 'c') /* `spac` spacing axis. */
+#define BLF_VARIATION_AXIS_OPTSIZE MAKE_DVAR_TAG('o', 'p', 's', 'z') /* `opsz` optical size. */
 
 /* -------------------------------------------------------------------- */
 /** \name Sub-Pixel Offset & Utilities
@@ -52,7 +60,7 @@ struct GPUVertBufRaw;
  * This is an internal type that represents sub-pixel positioning,
  * users of this type are to use `ft_pix_*` functions to keep scaling/rounding in one place.
  */
-typedef int32_t ft_pix;
+using ft_pix = int32_t;
 
 /* Macros copied from `include/freetype/internal/ftobjs.h`. */
 
@@ -72,7 +80,7 @@ inline int ft_pix_to_int_floor(ft_pix v)
 
 inline int ft_pix_to_int_ceil(ft_pix v)
 {
-  return int(FT_PIX_CEIL(v) >> 6);
+  return (FT_PIX_CEIL(v) >> 6);
 }
 
 inline ft_pix ft_pix_from_int(int v)
@@ -341,6 +349,7 @@ struct FontBLF {
 
   /** The width to wrap the text, see #BLF_WORD_WRAP. */
   int wrap_width;
+  BLFWrapMode wrap_mode;
 
   /** Font size. */
   float size;

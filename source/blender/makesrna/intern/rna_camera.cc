@@ -14,7 +14,6 @@
 
 #include "BLT_translation.hh"
 
-#include "RNA_access.hh"
 #include "RNA_define.hh"
 
 #include "rna_internal.hh"
@@ -28,6 +27,7 @@
 
 #  include "BKE_camera.h"
 #  include "BKE_object.hh"
+#  include "BKE_report.hh"
 
 #  include "DEG_depsgraph.hh"
 #  include "DEG_depsgraph_build.hh"
@@ -105,7 +105,7 @@ static void rna_Camera_background_images_remove(Camera *cam,
   }
 
   BKE_camera_background_image_remove(cam, bgpic);
-  RNA_POINTER_INVALIDATE(bgpic_ptr);
+  bgpic_ptr->invalidate();
 
   WM_main_add_notifier(NC_CAMERA | ND_DRAW_RENDER_VIEWPORT, cam);
 }
@@ -190,7 +190,7 @@ static bool rna_Camera_background_images_override_apply(
 
 static void rna_Camera_dof_update(Main *bmain, Scene *scene, PointerRNA * /*ptr*/)
 {
-  SEQ_relations_invalidate_scene_strips(bmain, scene);
+  blender::seq::relations_invalidate_scene_strips(bmain, scene);
   WM_main_add_notifier(NC_SCENE | ND_SEQUENCER, scene);
 }
 
@@ -687,6 +687,7 @@ void RNA_def_camera(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_ui_text(prop, "Field of View", "Camera lens field of view");
   RNA_def_property_float_funcs(prop, "rna_Camera_angle_get", "rna_Camera_angle_set", nullptr);
+  RNA_def_property_float_default(prop, 0.6911504f);
   RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Camera_update");
 
   prop = RNA_def_property(srna, "clip_start", PROP_FLOAT, PROP_DISTANCE);

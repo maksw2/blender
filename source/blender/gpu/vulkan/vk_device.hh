@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include <atomic>
+
+#include "BLI_task.h"
+#include "BLI_threads.h"
 #include "BLI_utility_mixins.hh"
 #include "BLI_vector.hh"
 
@@ -25,6 +29,37 @@
 namespace blender::gpu {
 class VKBackend;
 
+struct VKExtensions {
+  /** Does the device support VkPhysicalDeviceVulkan12Features::shaderOutputViewportIndex. */
+  bool shader_output_viewport_index = false;
+  /** Does the device support VkPhysicalDeviceVulkan12Features::shaderOutputLayer. */
+  bool shader_output_layer = false;
+  /**
+   * Does the device support
+   * VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR::fragmentShaderBarycentric.
+   */
+  bool fragment_shader_barycentric = false;
+  /**
+   * Does the device support VK_KHR_dynamic_rendering enabled.
+   */
+  bool dynamic_rendering = false;
+
+  /**
+   * Does the device support VK_KHR_dynamic_rendering_local_read enabled.
+   */
+  bool dynamic_rendering_local_read = false;
+
+  /**
+   * Does the device support VK_EXT_dynamic_rendering_unused_attachments.
+   */
+  bool dynamic_rendering_unused_attachments = false;
+
+  /**
+   * Does the device support logic ops.
+   */
+  bool logic_ops = false;
+};
+
 /* TODO: Split into VKWorkarounds and VKExtensions to remove the negating when an extension isn't
  * supported. */
 struct VKWorkarounds {
@@ -36,18 +71,6 @@ struct VKWorkarounds {
    */
   bool not_aligned_pixel_formats = false;
 
-  /**
-   * Is the workaround for devices that don't support
-   * #VkPhysicalDeviceVulkan12Features::shaderOutputViewportIndex enabled.
-   */
-  bool shader_output_viewport_index = false;
-
-  /**
-   * Is the workaround for devices that don't support
-   * #VkPhysicalDeviceVulkan12Features::shaderOutputLayer enabled.
-   */
-  bool shader_output_layer = false;
-
   struct {
     /**
      * Is the workaround enabled for devices that don't support using VK_FORMAT_R8G8B8_* as vertex
@@ -55,29 +78,6 @@ struct VKWorkarounds {
      */
     bool r8g8b8 = false;
   } vertex_formats;
-
-  /**
-   * Is the workaround for devices that don't support
-   * #VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR::fragmentShaderBarycentric enabled.
-   * If set to true, the backend would inject a geometry shader to produce barycentric coordinates.
-   */
-  bool fragment_shader_barycentric = false;
-
-  /**
-   * Is the workarounds for devices that don't support VK_KHR_dynamic_rendering enabled.
-   */
-  bool dynamic_rendering = false;
-
-  /**
-   * Is the workarounds for devices that don't support VK_EXT_dynamic_rendering_unused_attachments
-   * enabled.
-   */
-  bool dynamic_rendering_unused_attachments = false;
-
-  /**
-   * Is the workarounds for devices that don't support Logic Ops enabled.
-   */
-  bool logic_ops = false;
 };
 
 /**
@@ -144,6 +144,35 @@ class VKDevice : public NonCopyable {
   VkQueue vk_queue_ = VK_NULL_HANDLE;
   std::mutex *queue_mutex_ = nullptr;
 
+  /**
+   * Lifetime of the device.
+   *
+   * Used for de-initialization of the command builder thread.
+   */
+  enum Lifetime {
+    UNINITIALIZED,
+    RUNNING,
+    DEINITIALIZING,
+    DESTROYED,
+  };
+  Lifetime lifetime = Lifetime::UNINITIALIZED;
+  /**
+   * Task pool for render graph submission.
+   *
+   * Multiple threads in Blender can build a render graph. Building the command buffer for a render
+   * graph is faster when doing it in serial. Submission pool ensures that only one task is
+   * building at a time (background_serial).
+   */
+  TaskPool *submission_pool_ = nullptr;
+  /**
+   * All created render graphs.
+   */
+  Vector<render_graph::VKRenderGraph *> render_graphs_;
+  ThreadQueue *submitted_render_graphs_ = nullptr;
+  ThreadQueue *unused_render_graphs_ = nullptr;
+  VkSemaphore vk_timeline_semaphore_ = VK_NULL_HANDLE;
+  std::atomic<uint_least64_t> timeline_value_ = 0;
+
   VKSamplers samplers_;
   VKDescriptorSetLayouts descriptor_set_layouts_;
 
@@ -176,6 +205,7 @@ class VKDevice : public NonCopyable {
 
   /* Workarounds */
   VKWorkarounds workarounds_;
+  VKExtensions extensions_;
 
   std::string glsl_patch_;
   Vector<VKThreadData *> thread_data_;
@@ -304,9 +334,38 @@ class VKDevice : public NonCopyable {
   {
     return workarounds_;
   }
+  const VKExtensions &extensions_get() const
+  {
+    return extensions_;
+  }
 
   const char *glsl_patch_get() const;
   void init_glsl_patch();
+
+  /* -------------------------------------------------------------------- */
+  /** \name Render graph
+   * \{ */
+  static void submission_runner(TaskPool *__restrict pool, void *task_data);
+  render_graph::VKRenderGraph *render_graph_new();
+
+  TimelineValue render_graph_submit(render_graph::VKRenderGraph *render_graph,
+                                    VKDiscardPool &context_discard_pool,
+                                    bool submit_to_device,
+                                    bool wait_for_completion);
+  void wait_for_timeline(TimelineValue timeline);
+
+  /**
+   * Retrieve the last finished submission timeline.
+   */
+  TimelineValue submission_finished_timeline_get() const
+  {
+    BLI_assert(vk_timeline_semaphore_ != VK_NULL_HANDLE);
+    TimelineValue current_timeline;
+    vkGetSemaphoreCounterValue(vk_device_, vk_timeline_semaphore_, &current_timeline);
+    return current_timeline;
+  }
+
+  /** \} */
 
   /* -------------------------------------------------------------------- */
   /** \name Resource management
@@ -317,6 +376,7 @@ class VKDevice : public NonCopyable {
    */
   VKThreadData &current_thread_data();
 
+#if 0
   /**
    * Get the discard pool for the current thread.
    *
@@ -332,6 +392,7 @@ class VKDevice : public NonCopyable {
    * function without trying to reacquire resources mutex making a deadlock.
    */
   VKDiscardPool &discard_pool_for_current_thread(bool thread_safe = false);
+#endif
 
   void context_register(VKContext &context);
   void context_unregister(VKContext &context);
@@ -340,8 +401,6 @@ class VKDevice : public NonCopyable {
   void memory_statistics_get(int *r_total_mem_kb, int *r_free_mem_kb) const;
   static void debug_print(std::ostream &os, const VKDiscardPool &discard_pool);
   void debug_print();
-
-  void free_command_pool_buffers(VkCommandPool vk_command_pool);
 
   /** \} */
 
@@ -352,6 +411,8 @@ class VKDevice : public NonCopyable {
   void init_physical_device_extensions();
   void init_debug_callbacks();
   void init_memory_allocator();
+  void init_submission_pool();
+  void deinit_submission_pool();
   /**
    * Initialize the functions struct with extension specific function pointer.
    */

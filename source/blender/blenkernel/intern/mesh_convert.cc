@@ -13,7 +13,6 @@
 #include "DNA_curve_types.h"
 #include "DNA_key_types.h"
 #include "DNA_material_types.h"
-#include "DNA_meta_types.h"
 #include "DNA_object_types.h"
 #include "DNA_pointcloud_types.h"
 #include "DNA_scene_types.h"
@@ -36,7 +35,7 @@
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mball.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_runtime.hh"
@@ -359,14 +358,14 @@ struct VertLink {
 
 static void prependPolyLineVert(ListBase *lb, uint index)
 {
-  VertLink *vl = MEM_cnew<VertLink>("VertLink");
+  VertLink *vl = MEM_callocN<VertLink>("VertLink");
   vl->index = index;
   BLI_addhead(lb, vl);
 }
 
 static void appendPolyLineVert(ListBase *lb, uint index)
 {
-  VertLink *vl = MEM_cnew<VertLink>("VertLink");
+  VertLink *vl = MEM_callocN<VertLink>("VertLink");
   vl->index = index;
   BLI_addtail(lb, vl);
 }
@@ -384,7 +383,7 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh, ListBase *nurblist, const int 
   ListBase edges = {nullptr, nullptr};
 
   /* get boundary edges */
-  edge_users = (int *)MEM_calloc_arrayN(mesh_edges.size(), sizeof(int), __func__);
+  edge_users = MEM_calloc_arrayN<int>(size_t(mesh_edges.size()), __func__);
   for (const int i : polys.index_range()) {
     for (const int edge : corner_edges.slice(polys[i])) {
       edge_users[edge]++;
@@ -394,7 +393,7 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh, ListBase *nurblist, const int 
   /* create edges from all faces (so as to find edges not in any faces) */
   for (const int i : mesh_edges.index_range()) {
     if (edge_users[i] == edge_users_test) {
-      EdgeLink *edl = MEM_cnew<EdgeLink>("EdgeLink");
+      EdgeLink *edl = MEM_callocN<EdgeLink>("EdgeLink");
       edl->edge = &mesh_edges[i];
 
       BLI_addtail(&edges, edl);
@@ -475,7 +474,7 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh, ListBase *nurblist, const int 
         VertLink *vl;
 
         /* create new 'nurb' within the curve */
-        nu = static_cast<Nurb *>(MEM_callocN(sizeof(Nurb), __func__));
+        nu = MEM_callocN<Nurb>(__func__);
 
         nu->pntsu = faces_num;
         nu->pntsv = 1;
@@ -483,7 +482,7 @@ void BKE_mesh_to_curve_nurblist(const Mesh *mesh, ListBase *nurblist, const int 
         nu->flagu = CU_NURB_ENDPOINT | (closed ? CU_NURB_CYCLIC : 0); /* endpoint */
         nu->resolu = 12;
 
-        nu->bp = (BPoint *)MEM_calloc_arrayN(faces_num, sizeof(BPoint), "bpoints");
+        nu->bp = MEM_calloc_arrayN<BPoint>(size_t(faces_num), "bpoints");
 
         /* add points */
         vl = (VertLink *)polyline.first;
@@ -547,7 +546,7 @@ void BKE_mesh_to_pointcloud(Main *bmain, Depsgraph *depsgraph, Scene * /*scene*/
 
   PointCloud *pointcloud = BKE_pointcloud_add(bmain, ob->id.name + 2);
 
-  CustomData_free(&pointcloud->pdata, pointcloud->totpoint);
+  CustomData_free(&pointcloud->pdata);
   pointcloud->totpoint = mesh_eval->verts_num;
   CustomData_merge(
       &mesh_eval->vert_data, &pointcloud->pdata, CD_MASK_PROP_ALL, mesh_eval->verts_num);
@@ -767,14 +766,14 @@ static Mesh *mesh_new_from_mball_object(Object *object)
   return BKE_mesh_copy_for_eval(*mesh_eval);
 }
 
-static Mesh *mesh_new_from_mesh(Object *object, const Mesh *mesh)
+static Mesh *mesh_new_from_mesh(Object *object, const Mesh *mesh, const bool ensure_subdivision)
 {
   /* While we could copy this into the new mesh,
    * add the data to 'mesh' so future calls to this function don't need to re-convert the data. */
   if (mesh->runtime->wrapper_type == ME_WRAPPER_TYPE_BMESH) {
     BKE_mesh_wrapper_ensure_mdata(const_cast<Mesh *>(mesh));
   }
-  else {
+  else if (ensure_subdivision) {
     mesh = BKE_mesh_wrapper_ensure_subdivision(const_cast<Mesh *>(mesh));
   }
 
@@ -788,10 +787,11 @@ static Mesh *mesh_new_from_mesh(Object *object, const Mesh *mesh)
 
 static Mesh *mesh_new_from_mesh_object_with_layers(Depsgraph *depsgraph,
                                                    Object *object,
-                                                   const bool preserve_origindex)
+                                                   const bool preserve_origindex,
+                                                   const bool ensure_subdivision)
 {
   if (DEG_is_original_id(&object->id)) {
-    return mesh_new_from_mesh(object, (Mesh *)object->data);
+    return mesh_new_from_mesh(object, (Mesh *)object->data, ensure_subdivision);
   }
 
   if (depsgraph == nullptr) {
@@ -815,13 +815,14 @@ static Mesh *mesh_new_from_mesh_object_with_layers(Depsgraph *depsgraph,
     mask.pmask |= CD_MASK_ORIGINDEX;
   }
   Mesh *result = blender::bke::mesh_create_eval_final(depsgraph, scene, &object_for_eval, &mask);
-  return BKE_mesh_wrapper_ensure_subdivision(result);
+  return (ensure_subdivision) ? BKE_mesh_wrapper_ensure_subdivision(result) : result;
 }
 
 static Mesh *mesh_new_from_mesh_object(Depsgraph *depsgraph,
                                        Object *object,
                                        const bool preserve_all_data_layers,
-                                       const bool preserve_origindex)
+                                       const bool preserve_origindex,
+                                       const bool use_subdivision)
 {
   /* This function tries to reevaluate the object from the original data. If the original object
    * was not a mesh object, this won't work because it uses mesh object evaluation which assumes
@@ -829,7 +830,8 @@ static Mesh *mesh_new_from_mesh_object(Depsgraph *depsgraph,
   if (!(object->runtime->data_orig && GS(object->runtime->data_orig->name) != ID_ME) &&
       (preserve_all_data_layers || preserve_origindex))
   {
-    return mesh_new_from_mesh_object_with_layers(depsgraph, object, preserve_origindex);
+    return mesh_new_from_mesh_object_with_layers(
+        depsgraph, object, preserve_origindex, use_subdivision);
   }
   const Mesh *mesh_input = (const Mesh *)object->data;
   /* If we are in edit mode, use evaluated mesh from edit structure, matching to what
@@ -839,13 +841,14 @@ static Mesh *mesh_new_from_mesh_object(Depsgraph *depsgraph,
       mesh_input = editmesh_eval_final;
     }
   }
-  return mesh_new_from_mesh(object, mesh_input);
+  return mesh_new_from_mesh(object, mesh_input, use_subdivision);
 }
 
 Mesh *BKE_mesh_new_from_object(Depsgraph *depsgraph,
                                Object *object,
                                const bool preserve_all_data_layers,
-                               const bool preserve_origindex)
+                               const bool preserve_origindex,
+                               const bool ensure_subdivision)
 {
   Mesh *new_mesh = nullptr;
   switch (object->type) {
@@ -859,7 +862,7 @@ Mesh *BKE_mesh_new_from_object(Depsgraph *depsgraph,
       break;
     case OB_MESH:
       new_mesh = mesh_new_from_mesh_object(
-          depsgraph, object, preserve_all_data_layers, preserve_origindex);
+          depsgraph, object, preserve_all_data_layers, preserve_origindex, ensure_subdivision);
       break;
     default:
       /* Object does not have geometry data. */
@@ -905,7 +908,7 @@ static int foreach_libblock_make_usercounts_callback(LibraryIDLinkCallbackData *
     return IDWALK_RET_NOP;
   }
 
-  const int cb_flag = cb_data->cb_flag;
+  const LibraryForeachIDCallbackFlag cb_flag = cb_data->cb_flag;
   if (cb_flag & IDWALK_CB_USER) {
     id_us_plus(*id_p);
   }
@@ -924,7 +927,7 @@ Mesh *BKE_mesh_new_from_object_to_bmain(Main *bmain,
 {
   BLI_assert(ELEM(object->type, OB_FONT, OB_CURVES_LEGACY, OB_SURF, OB_MBALL, OB_MESH));
 
-  Mesh *mesh = BKE_mesh_new_from_object(depsgraph, object, preserve_all_data_layers, false);
+  Mesh *mesh = BKE_mesh_new_from_object(depsgraph, object, preserve_all_data_layers, false, true);
   if (mesh == nullptr) {
     /* Unable to convert the object to a mesh, return an empty one. */
     Mesh *mesh_in_bmain = BKE_mesh_add(bmain, ((ID *)object->data)->name + 2);
@@ -1032,7 +1035,7 @@ static void move_shapekey_layers_to_keyblocks(const Mesh &mesh,
     MEM_SAFE_FREE(kb->data);
 
     kb->totelem = mesh.verts_num;
-    kb->data = MEM_malloc_arrayN(kb->totelem, sizeof(float3), __func__);
+    kb->data = MEM_malloc_arrayN(size_t(kb->totelem), sizeof(float3), __func__);
     MutableSpan<float3> kb_coords(static_cast<float3 *>(kb->data), kb->totelem);
     if (kb->uid == actshape_uid) {
       mesh.attributes().lookup<float3>("position").varray.materialize(kb_coords);
@@ -1046,7 +1049,7 @@ static void move_shapekey_layers_to_keyblocks(const Mesh &mesh,
     if (kb->totelem != mesh.verts_num) {
       MEM_SAFE_FREE(kb->data);
       kb->totelem = mesh.verts_num;
-      kb->data = MEM_cnew_array<float3>(kb->totelem, __func__);
+      kb->data = MEM_calloc_arrayN<float3>(size_t(kb->totelem), __func__);
       CLOG_ERROR(&LOG, "Data for shape key '%s' on mesh missing from evaluated mesh ", kb->name);
     }
   }
@@ -1128,7 +1131,8 @@ void BKE_mesh_nomain_to_meshkey(Mesh *mesh_src, Mesh *mesh_dst, KeyBlock *kb)
   if (kb->data) {
     MEM_freeN(kb->data);
   }
-  kb->data = MEM_malloc_arrayN(mesh_dst->key->elemsize, mesh_dst->verts_num, "kb->data");
+  kb->data = MEM_malloc_arrayN(
+      size_t(mesh_dst->verts_num), size_t(mesh_dst->key->elemsize), "kb->data");
   kb->totelem = totvert;
   MutableSpan(static_cast<float3 *>(kb->data), kb->totelem).copy_from(mesh_src->vert_positions());
 }

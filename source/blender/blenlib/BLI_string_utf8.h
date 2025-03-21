@@ -11,15 +11,19 @@
 #include "BLI_compiler_attrs.h"
 #include "BLI_sys_types.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 char *BLI_strncpy_utf8(char *__restrict dst, const char *__restrict src, size_t dst_maxncpy)
     ATTR_NONNULL(1, 2);
 size_t BLI_strncpy_utf8_rlen(char *__restrict dst,
                              const char *__restrict src,
                              size_t dst_maxncpy) ATTR_WARN_UNUSED_RESULT ATTR_NONNULL(1, 2);
+/**
+ * A version of #BLI_strncpy_utf8_rlen that doesn't null terminate the string.
+ * \note Useful for C++ APIs that don't null terminate strings.
+ */
+size_t BLI_strncpy_utf8_rlen_unterminated(char *__restrict dst,
+                                          const char *__restrict src,
+                                          size_t dst_maxncpy);
+
 /**
  * Find first UTF-8 invalid byte in given \a str, of \a length bytes.
  *
@@ -191,6 +195,9 @@ char32_t BLI_str_utf32_char_to_upper(char32_t wc);
  */
 char32_t BLI_str_utf32_char_to_lower(char32_t wc);
 
+bool BLI_str_utf32_char_is_breaking_space(char32_t codepoint);
+bool BLI_str_utf32_char_is_optional_break(char32_t codepoint, char32_t codepoint_prev);
+
 /**
  * \warning can return -1 on bad chars.
  */
@@ -255,7 +262,3 @@ int BLI_str_utf8_offset_from_column_with_tabs(const char *str,
 #define STRNCPY_UTF8_RLEN(dst, src) BLI_strncpy_utf8_rlen(dst, src, ARRAY_SIZE(dst))
 
 /** \} */
-
-#ifdef __cplusplus
-}
-#endif

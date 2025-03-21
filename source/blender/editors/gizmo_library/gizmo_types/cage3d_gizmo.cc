@@ -16,6 +16,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_math_matrix.h"
+#include "BLI_math_vector.h"
 #include "BLI_math_vector_types.hh"
 
 #include "BKE_context.hh"
@@ -24,7 +25,6 @@
 #include "GPU_immediate_util.hh"
 #include "GPU_matrix.hh"
 #include "GPU_select.hh"
-#include "GPU_shader.hh"
 #include "GPU_state.hh"
 
 #include "RNA_access.hh"
@@ -441,7 +441,7 @@ static void gizmo_cage3d_setup(wmGizmo *gz)
       WM_GIZMO_DRAW_NO_SCALE;
 }
 
-static int gizmo_cage3d_invoke(bContext *C, wmGizmo *gz, const wmEvent *event)
+static wmOperatorStatus gizmo_cage3d_invoke(bContext *C, wmGizmo *gz, const wmEvent *event)
 {
   RectTransformInteraction *data = static_cast<RectTransformInteraction *>(
       MEM_callocN(sizeof(RectTransformInteraction), "cage_interaction"));
@@ -460,10 +460,10 @@ static int gizmo_cage3d_invoke(bContext *C, wmGizmo *gz, const wmEvent *event)
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int gizmo_cage3d_modal(bContext *C,
-                              wmGizmo *gz,
-                              const wmEvent *event,
-                              eWM_GizmoFlagTweak /*tweak_flag*/)
+static wmOperatorStatus gizmo_cage3d_modal(bContext *C,
+                                           wmGizmo *gz,
+                                           const wmEvent *event,
+                                           eWM_GizmoFlagTweak /*tweak_flag*/)
 {
   if (event->type != MOUSEMOVE) {
     return OPERATOR_RUNNING_MODAL;

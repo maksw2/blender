@@ -4,8 +4,6 @@
 
 #include "node_geometry_util.hh"
 
-#include "NOD_rna_define.hh"
-
 #include "RNA_enum_types.hh"
 
 #include "UI_interface.hh"
@@ -28,7 +26,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryTransformGizmo *storage = MEM_cnew<NodeGeometryTransformGizmo>(__func__);
+  NodeGeometryTransformGizmo *storage = MEM_callocN<NodeGeometryTransformGizmo>(__func__);
   storage->flag = (GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_X |
                    GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_Y |
                    GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_Z |
@@ -67,15 +65,17 @@ static void node_layout_ex(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, GEO_NODE_GIZMO_TRANSFORM, "Transform Gizmo", NODE_CLASS_INTERFACE);
-  bke::node_type_storage(&ntype,
-                         "NodeGeometryTransformGizmo",
-                         node_free_standard_storage,
-                         node_copy_standard_storage);
+  geo_node_type_base(&ntype, "GeometryNodeGizmoTransform", GEO_NODE_GIZMO_TRANSFORM);
+  ntype.ui_name = "Transform Gizmo";
+  ntype.ui_description = "Show a transform gizmo in the viewport";
+  ntype.enum_name_legacy = "GIZMO_TRANSFORM";
+  ntype.nclass = NODE_CLASS_INTERFACE;
+  bke::node_type_storage(
+      ntype, "NodeGeometryTransformGizmo", node_free_standard_storage, node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.draw_buttons_ex = node_layout_ex;
   ntype.initfunc = node_init;
-  bke::node_register_type(&ntype);
+  bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

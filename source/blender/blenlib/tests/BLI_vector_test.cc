@@ -7,7 +7,7 @@
 #include "testing/testing.h"
 #include <forward_list>
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 namespace blender::tests {
 
@@ -468,6 +468,69 @@ TEST(vector, ExtendArray)
   EXPECT_EQ(a[1], 4);
 }
 
+TEST(vector, ExtendMoveFromSmallVector)
+{
+  Vector<Vector<uint64_t, 0>> a = {
+      {1, 2, 3, 4, 5},
+      {6, 7, 8},
+  };
+  Vector<Vector<uint64_t, 0>> b = {
+      {9, 10, 11, 12},
+      {13, 14, 15, 16},
+  };
+  const Vector<Vector<uint64_t, 0>> c = {
+      {1, 2, 3, 4, 5},
+      {6, 7, 8},
+      {9, 10, 11, 12},
+      {13, 14, 15, 16},
+  };
+
+  a.extend(std::move(b));
+
+  EXPECT_EQ(a, c);
+  EXPECT_TRUE(b.is_empty());
+}
+
+TEST(vector, ExtendMoveFromUniquePtrVector)
+{
+  Vector<int *> ptr_vec;
+
+  Vector<std::unique_ptr<int>> a;
+  a.append(std::make_unique<int>(0));
+  a.append(std::make_unique<int>(1));
+  a.append(std::make_unique<int>(2));
+
+  for (std::unique_ptr<int> &i : a) {
+    ptr_vec.append(i.get());
+  }
+
+  Vector<std::unique_ptr<int>> b;
+  b.append(std::make_unique<int>(7));
+  b.append(std::make_unique<int>(8));
+  b.append(std::make_unique<int>(9));
+  b.append(std::make_unique<int>(20));
+
+  for (std::unique_ptr<int> &i : b) {
+    ptr_vec.append(i.get());
+  }
+
+  ASSERT_EQ(a.size(), 3);
+  ASSERT_EQ(b.size(), 4);
+
+  a.extend(std::move(b));
+
+  std::array<int, 7> values = {0, 1, 2, 7, 8, 9, 20};
+
+  ASSERT_EQ(size_t(a.size()), values.size());
+  ASSERT_TRUE(b.is_empty());
+  ASSERT_EQ(a.size(), ptr_vec.size());
+
+  for (int64_t i = 0; i < a.size(); i++) {
+    ASSERT_EQ(*a[i], values[size_t(i)]);
+    ASSERT_EQ(a[i].get(), ptr_vec[i]);
+  }
+}
+
 TEST(vector, Last)
 {
   Vector<int> a{3, 5, 7};
@@ -881,7 +944,7 @@ TEST(vector, RecursiveStructure)
 TEST(vector, FromRaw)
 {
   VectorData<int, GuardedAllocator> data;
-  data.data = MEM_cnew_array<int>(30, __func__);
+  data.data = MEM_calloc_arrayN<int>(30, __func__);
   data.size = 10;
   data.capacity = 30;
 

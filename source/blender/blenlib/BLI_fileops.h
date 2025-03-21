@@ -22,10 +22,6 @@
 #include "BLI_fileops_types.h"
 #include "BLI_utildefines.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #ifndef PATH_MAX
 #  define PATH_MAX 4096
 #endif
@@ -230,8 +226,14 @@ char *BLI_current_working_dir(char *dir, size_t maxncpy) ATTR_WARN_UNUSED_RESULT
 
 /**
  * Get the user's home directory, i.e.
- * - Unix: `$HOME`
+ * - Unix: `$HOME` or #passwd::pw_dir.
  * - Windows: `%userprofile%`
+ *
+ * \return The home directory or null when it cannot be accessed.
+ *
+ * \note By convention, failure to access home means any derived directories fail as well
+ * instead of attempting to create a fallback such as `/`, `/tmp`, `C:\` ... etc.
+ * Although there may be rare cases where a fallback is appropriate.
  */
 const char *BLI_dir_home(void);
 
@@ -450,7 +452,3 @@ void BLI_get_short_name(char short_name[256], const char *filepath);
 #endif
 
 /** \} */
-
-#ifdef __cplusplus
-}
-#endif

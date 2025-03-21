@@ -8,17 +8,15 @@
  * Internal and external APIs for #AssetShelfSettings.
  */
 
-#include <type_traits>
-
 #include "AS_asset_catalog_path.hh"
 
 #include "DNA_screen_types.h"
+#include "DNA_userdef_types.h"
 
 #include "BLO_read_write.hh"
 
 #include "BLI_listbase.h"
 #include "BLI_string.h"
-#include "BLI_string_ref.hh"
 
 #include "BKE_asset.hh"
 #include "BKE_preferences.h"

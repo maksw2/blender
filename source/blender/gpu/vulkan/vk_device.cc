@@ -37,6 +37,9 @@ void VKDevice::deinit()
   if (!is_initialized()) {
     return;
   }
+  lifetime = Lifetime::DEINITIALIZING;
+
+  deinit_submission_pool();
 
   dummy_buffer.free();
   samplers_.free();
@@ -52,8 +55,14 @@ void VKDevice::deinit()
   pipelines.write_to_disk();
   pipelines.free_data();
   descriptor_set_layouts_.deinit();
+  orphaned_data.deinit(*this);
   vmaDestroyAllocator(mem_allocator_);
   mem_allocator_ = VK_NULL_HANDLE;
+
+  while (!render_graphs_.is_empty()) {
+    render_graph::VKRenderGraph *render_graph = render_graphs_.pop_last();
+    MEM_delete<render_graph::VKRenderGraph>(render_graph);
+  }
 
   debugging_tools_.deinit(vk_instance_);
 
@@ -64,25 +73,25 @@ void VKDevice::deinit()
   vk_queue_ = VK_NULL_HANDLE;
   vk_physical_device_properties_ = {};
   glsl_patch_.clear();
+  lifetime = Lifetime::DESTROYED;
 }
 
 bool VKDevice::is_initialized() const
 {
-  return vk_device_ != VK_NULL_HANDLE;
+  return lifetime == Lifetime::RUNNING;
 }
 
 void VKDevice::init(void *ghost_context)
 {
   BLI_assert(!is_initialized());
-  void *queue_mutex = nullptr;
-  GHOST_GetVulkanHandles((GHOST_ContextHandle)ghost_context,
-                         &vk_instance_,
-                         &vk_physical_device_,
-                         &vk_device_,
-                         &vk_queue_family_,
-                         &vk_queue_,
-                         &queue_mutex);
-  queue_mutex_ = static_cast<std::mutex *>(queue_mutex);
+  GHOST_VulkanHandles handles = {};
+  GHOST_GetVulkanHandles((GHOST_ContextHandle)ghost_context, &handles);
+  vk_instance_ = handles.instance;
+  vk_physical_device_ = handles.physical_device;
+  vk_device_ = handles.device;
+  vk_queue_family_ = handles.graphic_queue_family;
+  vk_queue_ = handles.queue;
+  queue_mutex_ = static_cast<std::mutex *>(handles.queue_mutex);
 
   init_physical_device_properties();
   init_physical_device_memory_properties();
@@ -102,6 +111,13 @@ void VKDevice::init(void *ghost_context)
   debug::object_label(vk_handle(), "LogicalDevice");
   debug::object_label(queue_get(), "GenericQueue");
   init_glsl_patch();
+
+  resources.use_dynamic_rendering = extensions_.dynamic_rendering;
+  resources.use_dynamic_rendering_local_read = extensions_.dynamic_rendering_local_read;
+  orphaned_data.timeline_ = timeline_value_ + 1;
+
+  init_submission_pool();
+  lifetime = Lifetime::RUNNING;
 }
 
 void VKDevice::init_functions()
@@ -195,8 +211,10 @@ void VKDevice::init_memory_allocator()
 void VKDevice::init_dummy_buffer()
 {
   dummy_buffer.create(sizeof(float4x4),
-                      GPU_USAGE_DEVICE_ONLY,
-                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                      VkMemoryPropertyFlags(0),
+                      VmaAllocationCreateFlags(0));
   debug::object_label(dummy_buffer.vk_handle(), "DummyBuffer");
   /* Default dummy buffer. Set the 4th element to 1 to fix missing orcos. */
   float data[16] = {
@@ -224,13 +242,7 @@ void VKDevice::init_glsl_patch()
     ss << "#extension GL_ARB_shader_stencil_export: enable\n";
     ss << "#define GPU_ARB_shader_stencil_export 1\n";
   }
-  if (!workarounds_.shader_output_layer) {
-    ss << "#define gpu_Layer gl_Layer\n";
-  }
-  if (!workarounds_.shader_output_viewport_index) {
-    ss << "#define gpu_ViewportIndex gl_ViewportIndex\n";
-  }
-  if (!workarounds_.fragment_shader_barycentric) {
+  if (extensions_.fragment_shader_barycentric) {
     ss << "#extension GL_EXT_fragment_shader_barycentric : require\n";
     ss << "#define gpu_BaryCoord gl_BaryCoordEXT\n";
     ss << "#define gpu_BaryCoordNoPersp gl_BaryCoordNoPerspEXT\n";
@@ -390,6 +402,7 @@ VKThreadData &VKDevice::current_thread_data()
   return *thread_data;
 }
 
+#if 0
 VKDiscardPool &VKDevice::discard_pool_for_current_thread(bool thread_safe)
 {
   std::unique_lock lock(resources.mutex, std::defer_lock);
@@ -407,6 +420,7 @@ VKDiscardPool &VKDevice::discard_pool_for_current_thread(bool thread_safe)
 
   return orphaned_data;
 }
+#endif
 
 void VKDevice::context_register(VKContext &context)
 {
@@ -415,6 +429,7 @@ void VKDevice::context_register(VKContext &context)
 
 void VKDevice::context_unregister(VKContext &context)
 {
+  orphaned_data.move_data(context.discard_pool, timeline_value_ + 1);
   contexts_.remove(contexts_.first_index_of(std::reference_wrapper(context)));
 }
 Span<std::reference_wrapper<VKContext>> VKDevice::contexts_get() const
@@ -499,27 +514,14 @@ void VKDevice::debug_print()
     os << "ThreadData" << (is_main ? " (main-thread)" : "") << ")\n";
     os << " Rendering_depth: " << thread_data->rendering_depth << "\n";
     for (int resource_pool_index : IndexRange(thread_data->resource_pools.size())) {
-      const VKResourcePool &resource_pool = thread_data->resource_pools[resource_pool_index];
       const bool is_active = thread_data->resource_pool_index == resource_pool_index;
       os << " Resource Pool (index=" << resource_pool_index << (is_active ? " active" : "")
          << ")\n";
-      debug_print(os, resource_pool.discard_pool);
     }
   }
-  os << "Orphaned data\n";
+  os << "Discard pool\n";
   debug_print(os, orphaned_data);
   os << "\n";
-}
-
-void VKDevice::free_command_pool_buffers(VkCommandPool vk_command_pool)
-{
-  std::scoped_lock mutex(resources.mutex);
-  for (VKThreadData *thread_data : thread_data_) {
-    for (VKResourcePool &resource_pool : thread_data->resource_pools) {
-      resource_pool.discard_pool.free_command_pool_buffers(vk_command_pool, *this);
-    }
-  }
-  orphaned_data.free_command_pool_buffers(vk_command_pool, *this);
 }
 
 /** \} */

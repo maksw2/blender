@@ -2,8 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_extra_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_motion_path_point)
+
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
 
 #define pointSize mpathPointSettings.x
 #define frameCurrent mpathPointSettings.y
@@ -12,7 +16,7 @@
 
 void main()
 {
-  gl_Position = drw_view.winmat * (drw_view.viewmat * (camera_space_matrix * vec4(pos, 1.0)));
+  gl_Position = drw_view().winmat * (drw_view().viewmat * (camera_space_matrix * vec4(pos, 1.0)));
   gl_PointSize = float(pointSize + 2);
 
   int frame = gl_VertexID + cacheStart;
@@ -47,7 +51,7 @@ void main()
 
   if (showKeyFrames) {
     /* Overrides the color to highlight points that are keyframes. */
-    if ((flag & MOTIONPATH_VERT_KEY) != 0u) {
+    if ((uint(flag) & MOTIONPATH_VERT_KEY) != 0u) {
       gl_PointSize = float(pointSize + 5);
       finalColor = colorVertexSelect;
       /* Bias more to get these on top of regular points */

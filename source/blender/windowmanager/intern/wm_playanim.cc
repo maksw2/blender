@@ -12,8 +12,8 @@
  * this could be made into its own module, alongside creator.
  */
 
+#include <algorithm>
 #include <cerrno>
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
@@ -44,6 +44,9 @@
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
+#include "MOV_read.hh"
+#include "MOV_util.hh"
+
 #include "BKE_image.hh"
 
 #include "BIF_glutil.hh"
@@ -56,8 +59,10 @@
 #include "GPU_matrix.hh"
 #include "GPU_state.hh"
 
-#include "BLF_api.hh"
 #include "DNA_scene_types.h"
+#include "DNA_userdef_types.h"
+
+#include "BLF_api.hh"
 #include "GHOST_C-api.h"
 
 #include "DEG_depsgraph.hh"
@@ -132,7 +137,6 @@ static bool buffer_from_filepath(const char *filepath,
         size_read);
   }
   else {
-    close(file);
     *r_size = size;
     if (r_mem) {
       *r_mem = mem;
@@ -340,7 +344,7 @@ struct PlayAnimPict {
   /** The allocated error message to show if the file cannot be loaded. */
   char *error_message;
   ImBuf *ibuf;
-  ImBufAnim *anim;
+  MovieReader *anim;
   int frame;
   int IB_flags;
 
@@ -457,7 +461,7 @@ static ImBuf *ibuf_from_picture(PlayAnimPict *pic)
     ibuf = pic->ibuf;
   }
   else if (pic->anim) {
-    ibuf = IMB_anim_absolute(pic->anim, pic->frame, IMB_TC_NONE, IMB_PROXY_NONE);
+    ibuf = MOV_decode_frame(pic->anim, pic->frame, IMB_TC_NONE, IMB_PROXY_NONE);
   }
   else if (pic->mem) {
     /* Use correct color-space here. */
@@ -845,30 +849,30 @@ static void build_pict_list_from_anim(ListBase &picsbase,
                                       const int frame_offset)
 {
   /* OCIO_TODO: support different input color space. */
-  ImBufAnim *anim = IMB_open_anim(filepath_first, IB_rect, 0, nullptr);
+  MovieReader *anim = MOV_open_file(filepath_first, IB_byte_data, 0, nullptr);
   if (anim == nullptr) {
     CLOG_WARN(&LOG, "couldn't open anim '%s'", filepath_first);
     return;
   }
 
-  ImBuf *ibuf = IMB_anim_absolute(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
+  ImBuf *ibuf = MOV_decode_frame(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
   if (ibuf) {
     playanim_toscreen_on_load(ghost_data, display_ctx, nullptr, ibuf);
     IMB_freeImBuf(ibuf);
   }
 
-  for (int pic = 0; pic < IMB_anim_get_duration(anim, IMB_TC_NONE); pic++) {
-    PlayAnimPict *picture = static_cast<PlayAnimPict *>(MEM_callocN(sizeof(PlayAnimPict), "Pict"));
+  for (int pic = 0; pic < MOV_get_duration_frames(anim, IMB_TC_NONE); pic++) {
+    PlayAnimPict *picture = MEM_callocN<PlayAnimPict>("Pict");
     picture->anim = anim;
     picture->frame = pic + frame_offset;
-    picture->IB_flags = IB_rect;
+    picture->IB_flags = IB_byte_data;
     picture->filepath = BLI_sprintfN("%s : %4.d", filepath_first, pic + 1);
     BLI_addtail(&picsbase, picture);
   }
 
   const PlayAnimPict *picture = static_cast<const PlayAnimPict *>(picsbase.last);
   if (!(picture && picture->anim == anim)) {
-    IMB_close_anim(anim);
+    MOV_close(anim);
     CLOG_WARN(&LOG, "no frames added for: '%s'", filepath_first);
   }
 }
@@ -926,10 +930,9 @@ static void build_pict_list_from_image_sequence(ListBase &picsbase,
       size = 0;
     }
 
-    PlayAnimPict *picture = static_cast<PlayAnimPict *>(
-        MEM_callocN(sizeof(PlayAnimPict), "picture"));
+    PlayAnimPict *picture = MEM_callocN<PlayAnimPict>("picture");
     picture->size = size;
-    picture->IB_flags = IB_rect;
+    picture->IB_flags = IB_byte_data;
     picture->mem = static_cast<uchar *>(mem);
     picture->filepath = BLI_strdup(filepath);
     picture->error_message = error_message;
@@ -1009,7 +1012,7 @@ static void build_pict_list(ListBase &picsbase,
   const int frame_offset = picture_last ? (picture_last->frame + 1) : 0;
 
   bool do_image_load = false;
-  if (IMB_isanim(filepath_first)) {
+  if (MOV_is_movie_file(filepath_first)) {
     build_pict_list_from_anim(picsbase, ghost_data, display_ctx, filepath_first, frame_offset);
 
     if (picsbase.last == picture_last) {
@@ -1560,7 +1563,7 @@ static bool ghost_event_proc(GHOST_EventHandle ghost_event, GHOST_TUserDataPtr p
       if (ddd->dataType == GHOST_kDragnDropTypeFilenames) {
         const GHOST_TStringArray *stra = static_cast<const GHOST_TStringArray *>(ddd->data);
         ps.argc_next = stra->count;
-        ps.argv_next = static_cast<char **>(MEM_mallocN(sizeof(char **) * ps.argc_next, __func__));
+        ps.argv_next = MEM_malloc_arrayN<char *>(size_t(ps.argc_next), __func__);
         for (int i = 0; i < stra->count; i++) {
           ps.argv_next[i] = BLI_strdup(reinterpret_cast<const char *>(stra->strings[i]));
         }
@@ -1666,7 +1669,8 @@ static void playanim_window_zoom(PlayState &ps, const float zoom_offset)
 
 static bool playanim_window_font_scale_from_dpi(PlayState &ps)
 {
-  const float scale = (GHOST_GetDPIHint(ps.ghost_data.window) / 96.0f);
+  const float scale = (GHOST_GetDPIHint(ps.ghost_data.window) *
+                       GHOST_GetNativePixelSize(ps.ghost_data.window) / 96.0f);
   const float font_size_base = 11.0f; /* Font size un-scaled. */
   const int font_size = int((font_size_base * scale) + 0.5f);
   bool changed = false;
@@ -1717,9 +1721,7 @@ static bool wm_main_playanim_intern(int argc, const char **argv, PlayArgs *args_
   ps.font_id = -1;
 
   IMB_init();
-#ifdef WITH_FFMPEG
-  IMB_ffmpeg_init();
-#endif
+  MOV_init();
 
   STRNCPY(ps.display_ctx.display_settings.display_device,
           IMB_colormanagement_role_colorspace_name_get(COLOR_ROLE_DEFAULT_BYTE));
@@ -1809,12 +1811,12 @@ static bool wm_main_playanim_intern(int argc, const char **argv, PlayArgs *args_
 
   const char *filepath = argv[0];
 
-  if (IMB_isanim(filepath)) {
+  if (MOV_is_movie_file(filepath)) {
     /* OCIO_TODO: support different input color spaces. */
-    ImBufAnim *anim = IMB_open_anim(filepath, IB_rect, 0, nullptr);
+    MovieReader *anim = MOV_open_file(filepath, IB_byte_data, 0, nullptr);
     if (anim) {
-      ibuf = IMB_anim_absolute(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
-      IMB_close_anim(anim);
+      ibuf = MOV_decode_frame(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
+      MOV_close(anim);
       anim = nullptr;
     }
   }
@@ -1825,7 +1827,7 @@ static bool wm_main_playanim_intern(int argc, const char **argv, PlayArgs *args_
 
   if (ibuf == nullptr) {
     /* OCIO_TODO: support different input color space. */
-    ibuf = IMB_loadiffname(filepath, IB_rect, nullptr);
+    ibuf = IMB_loadiffname(filepath, IB_byte_data, nullptr);
   }
 
   if (ibuf == nullptr) {
@@ -1923,14 +1925,9 @@ static bool wm_main_playanim_intern(int argc, const char **argv, PlayArgs *args_
 #ifdef WITH_AUDASPACE
   g_audaspace.source = AUD_Sound_file(filepath);
   if (!BLI_listbase_is_empty(&ps.picsbase)) {
-    const ImBufAnim *anim_movie = static_cast<PlayAnimPict *>(ps.picsbase.first)->anim;
+    const MovieReader *anim_movie = static_cast<PlayAnimPict *>(ps.picsbase.first)->anim;
     if (anim_movie) {
-      short frs_sec = 25;
-      float frs_sec_base = 1.0;
-
-      IMB_anim_get_fps(anim_movie, true, &frs_sec, &frs_sec_base);
-
-      g_playanim.fps_movie = double(frs_sec) / double(frs_sec_base);
+      g_playanim.fps_movie = MOV_get_fps(anim_movie);
       /* Enforce same fps for movie as sound. */
       g_playanim.swap_time = ps.frame_step / g_playanim.fps_movie;
     }
@@ -1981,9 +1978,7 @@ static bool wm_main_playanim_intern(int argc, const char **argv, PlayArgs *args_
         ps.picture = ps.picture->prev;
       }
     }
-    if (g_playanim.total_time > 0.0) {
-      g_playanim.total_time = 0.0;
-    }
+    g_playanim.total_time = std::min(g_playanim.total_time, 0.0);
 
 #ifdef WITH_AUDASPACE
     if (g_audaspace.playback_handle) {
@@ -2099,7 +2094,7 @@ static bool wm_main_playanim_intern(int argc, const char **argv, PlayArgs *args_
   while ((ps.picture = static_cast<PlayAnimPict *>(BLI_pophead(&ps.picsbase)))) {
     if (ps.picture->anim) {
       if ((ps.picture->next == nullptr) || (ps.picture->next->anim != ps.picture->anim)) {
-        IMB_close_anim(ps.picture->anim);
+        MOV_close(ps.picture->anim);
       }
     }
 
@@ -2150,8 +2145,7 @@ static bool wm_main_playanim_intern(int argc, const char **argv, PlayArgs *args_
   BLF_exit();
 
   /* NOTE: Must happen before GPU Context destruction as GPU resources are released via
-   * Color Management module.
-   * NOTE: there is no #IMB_ffmpeg_exit. */
+   * Color Management module. */
   IMB_exit();
 
   if (ps.ghost_data.gpu_context) {

@@ -10,14 +10,16 @@
 #include "IO_types.hh"
 
 #include <Alembic/AbcGeom/ILight.h>
+#include <Alembic/AbcGeom/INuPatch.h>
 #include <Alembic/AbcMaterial/IMaterial.h>
 
-#include "abc_axis_conversion.h"
 #include "abc_reader_archive.h"
 #include "abc_reader_camera.h"
 #include "abc_reader_curves.h"
 #include "abc_reader_mesh.h"
-#include "abc_reader_nurbs.h"
+#ifdef USE_NURBS
+#  include "abc_reader_nurbs.h"
+#endif
 #include "abc_reader_points.h"
 #include "abc_reader_transform.h"
 #include "abc_util.h"
@@ -92,7 +94,7 @@ BLI_INLINE CacheArchiveHandle *handle_from_archive(ArchiveReader *archive)
  */
 static void add_object_path(ListBase *object_paths, const IObject &object)
 {
-  CacheObjectPath *abc_path = MEM_cnew<CacheObjectPath>("CacheObjectPath");
+  CacheObjectPath *abc_path = MEM_callocN<CacheObjectPath>("CacheObjectPath");
   STRNCPY(abc_path->path, object.getFullName().c_str());
   BLI_addtail(object_paths, abc_path);
 }
@@ -492,6 +494,7 @@ static void import_file(ImportJobData *data, const char *filepath, float progres
 
   data->archives.append(archive);
   data->settings.cache_file = cache_file;
+  data->settings.blender_archive_version_prior_44 = archive->is_blender_archive_version_prior_44();
 
   *data->do_update = true;
   *data->progress += 0.05f * progress_factor;
@@ -697,7 +700,8 @@ static void import_endjob(void *user_data)
       data->import_ok = !data->was_cancelled;
       break;
     case ABC_ARCHIVE_FAIL:
-      WM_report(RPT_ERROR, "Could not open Alembic archive for reading, see console for detail");
+      WM_global_report(RPT_ERROR,
+                       "Could not open Alembic archive for reading, see console for detail");
       break;
   }
 
@@ -839,12 +843,12 @@ void ABC_read_geometry(CacheReader *reader,
   }
 
   ISampleSelector sample_sel = sample_selector_for_time(params->time);
-  return abc_reader->read_geometry(geometry_set,
-                                   sample_sel,
-                                   params->read_flags,
-                                   params->velocity_name,
-                                   params->velocity_scale,
-                                   r_err_str);
+  abc_reader->read_geometry(geometry_set,
+                            sample_sel,
+                            params->read_flags,
+                            params->velocity_name,
+                            params->velocity_scale,
+                            r_err_str);
 }
 
 bool ABC_mesh_topology_changed(CacheReader *reader,
@@ -899,6 +903,7 @@ CacheReader *CacheReader_open_alembic_object(CacheArchiveHandle *handle,
 
   ImportSettings settings;
   settings.is_sequence = is_sequence;
+  settings.blender_archive_version_prior_44 = archive->is_blender_archive_version_prior_44();
   AbcObjectReader *abc_reader = create_reader(iobject, settings);
   if (abc_reader == nullptr) {
     /* This object is not supported */

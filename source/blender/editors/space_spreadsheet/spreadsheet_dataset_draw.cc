@@ -6,7 +6,6 @@
 
 #include "BLI_string.h"
 
-#include "DNA_collection_types.h"
 #include "DNA_curves_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_pointcloud_types.h"
@@ -15,7 +14,6 @@
 
 #include "BKE_context.hh"
 #include "BKE_curves.hh"
-#include "BKE_geometry_set_instances.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_instances.hh"
 #include "BKE_volume.hh"
@@ -142,7 +140,7 @@ class RootGeometryViewItem : public InstancesTreeViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_GEOMETRY_SET);
+    uiItemL(&row, label_, ICON_GEOMETRY_SET);
   }
 };
 
@@ -167,7 +165,7 @@ class InstanceReferenceViewItem : public InstancesTreeViewItem {
     if (name.is_empty()) {
       name = IFACE_("(Geometry)");
     }
-    uiItemL(&row, name.c_str(), icon);
+    uiItemL(&row, name, icon);
     draw_count(*this, user_count_);
   }
 
@@ -242,7 +240,7 @@ class MeshViewItem : public DataSetViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_MESH_DATA);
+    uiItemL(&row, label_, ICON_MESH_DATA);
   }
 };
 
@@ -265,7 +263,7 @@ class MeshDomainViewItem : public DataSetViewItem {
   void build_row(uiLayout &row) override
   {
     const BIFIconID icon = mesh_domain_to_icon(domain_);
-    uiItemL(&row, label_.c_str(), icon);
+    uiItemL(&row, label_, icon);
 
     const int count = mesh_ ? mesh_->attributes().domain_size(domain_) : 0;
     draw_count(*this, count);
@@ -281,7 +279,7 @@ class CurvesViewItem : public DataSetViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_CURVE_DATA);
+    uiItemL(&row, label_, ICON_CURVE_DATA);
   }
 };
 
@@ -305,7 +303,7 @@ class CurvesDomainViewItem : public DataSetViewItem {
   void build_row(uiLayout &row) override
   {
     const BIFIconID icon = curves_domain_to_icon(domain_);
-    uiItemL(&row, label_.c_str(), icon);
+    uiItemL(&row, label_, icon);
 
     const int count = curves_ ? curves_->geometry.wrap().attributes().domain_size(domain_) : 0;
     draw_count(*this, count);
@@ -321,7 +319,7 @@ class GreasePencilViewItem : public DataSetViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_OUTLINER_DATA_GREASEPENCIL);
+    uiItemL(&row, label_, ICON_OUTLINER_DATA_GREASEPENCIL);
   }
 };
 
@@ -344,7 +342,7 @@ class GreasePencilLayersViewItem : public DataSetViewItem {
   void build_row(uiLayout &row) override
   {
     const int count = grease_pencil_ ? grease_pencil_->layers().size() : 0;
-    uiItemL(&row, label_.c_str(), ICON_OUTLINER_DATA_GP_LAYER);
+    uiItemL(&row, label_, ICON_OUTLINER_DATA_GP_LAYER);
     draw_count(*this, count);
   }
 };
@@ -366,7 +364,7 @@ class GreasePencilLayerViewItem : public DataSetViewItem {
     if (name.is_empty()) {
       name = IFACE_("(Layer)");
     }
-    uiItemL(&row, name.c_str(), ICON_CURVE_DATA);
+    uiItemL(&row, name, ICON_CURVE_DATA);
   }
 };
 
@@ -394,7 +392,7 @@ class GreasePencilLayerCurvesDomainViewItem : public DataSetViewItem {
   void build_row(uiLayout &row) override
   {
     const BIFIconID icon = curves_domain_to_icon(domain_);
-    uiItemL(&row, label_.c_str(), icon);
+    uiItemL(&row, label_, icon);
 
     const bke::greasepencil::Drawing *drawing = grease_pencil_.get_eval_drawing(
         grease_pencil_.layer(layer_index_));
@@ -412,7 +410,7 @@ class PointCloudViewItem : public DataSetViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_POINTCLOUD_DATA);
+    uiItemL(&row, label_, ICON_POINTCLOUD_DATA);
   }
 };
 
@@ -434,7 +432,7 @@ class PointsViewItem : public DataSetViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_POINTCLOUD_POINT);
+    uiItemL(&row, label_, ICON_POINTCLOUD_POINT);
     const int count = pointcloud_ ? pointcloud_->totpoint : 0;
     draw_count(*this, count);
   }
@@ -458,7 +456,7 @@ class VolumeGridsViewItem : public DataSetViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_VOLUME_DATA);
+    uiItemL(&row, label_, ICON_VOLUME_DATA);
     const int count = volume_ ? BKE_volume_num_grids(volume_) : 0;
     draw_count(*this, count);
   }
@@ -482,7 +480,7 @@ class InstancesViewItem : public DataSetViewItem {
 
   void build_row(uiLayout &row) override
   {
-    uiItemL(&row, label_.c_str(), ICON_EMPTY_AXIS);
+    uiItemL(&row, label_, ICON_EMPTY_AXIS);
     const int count = instances_ ? instances_->instances_num() : 0;
     draw_count(*this, count);
   }
@@ -600,11 +598,11 @@ GeometryInstancesTreeView &InstancesTreeViewItem::get_tree() const
 void InstancesTreeViewItem::get_parent_instance_ids(
     Vector<SpreadsheetInstanceID> &r_instance_ids) const
 {
-  if (auto *reference_item = dynamic_cast<const InstanceReferenceViewItem *>(this)) {
+  if (const auto *reference_item = dynamic_cast<const InstanceReferenceViewItem *>(this)) {
     r_instance_ids.append({reference_item->reference_index()});
   }
   this->foreach_parent([&](const ui::AbstractTreeViewItem &item) {
-    if (auto *reference_item = dynamic_cast<const InstanceReferenceViewItem *>(&item)) {
+    if (const auto *reference_item = dynamic_cast<const InstanceReferenceViewItem *>(&item)) {
       r_instance_ids.append({reference_item->reference_index()});
     }
   });
@@ -639,7 +637,8 @@ void InstancesTreeViewItem::on_activate(bContext &C)
   SpaceSpreadsheet &sspreadsheet = *CTX_wm_space_spreadsheet(&C);
 
   MEM_SAFE_FREE(sspreadsheet.instance_ids);
-  sspreadsheet.instance_ids = MEM_cnew_array<SpreadsheetInstanceID>(instance_ids.size(), __func__);
+  sspreadsheet.instance_ids = MEM_calloc_arrayN<SpreadsheetInstanceID>(instance_ids.size(),
+                                                                       __func__);
   sspreadsheet.instance_ids_num = instance_ids.size();
   initialized_copy_n(instance_ids.data(), instance_ids.size(), sspreadsheet.instance_ids);
 
@@ -654,7 +653,7 @@ void DataSetViewItem::on_activate(bContext &C)
       if (data_id) {
         return;
       }
-      if (auto *data_set_view_item = dynamic_cast<const DataSetViewItem *>(&item)) {
+      if (const auto *data_set_view_item = dynamic_cast<const DataSetViewItem *>(&item)) {
         data_id = data_set_view_item->get_geometry_data_id();
       }
     });
@@ -673,7 +672,7 @@ void DataSetViewItem::on_activate(bContext &C)
   if (data_id->layer_index) {
     sspreadsheet.active_layer_index = *data_id->layer_index;
   }
-  PointerRNA ptr = RNA_pointer_create(&screen.id, &RNA_SpaceSpreadsheet, &sspreadsheet);
+  PointerRNA ptr = RNA_pointer_create_discrete(&screen.id, &RNA_SpaceSpreadsheet, &sspreadsheet);
   /* These updates also make sure that the attribute domain is set properly based on the
    * component type. */
   RNA_property_update(&C, &ptr, RNA_struct_find_property(&ptr, "attribute_domain"));

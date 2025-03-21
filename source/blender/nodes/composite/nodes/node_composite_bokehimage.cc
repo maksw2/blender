@@ -6,13 +6,10 @@
  * \ingroup cmpnodes
  */
 
-#include "BLI_math_base.h"
 #include "BLI_math_vector_types.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
-
-#include "GPU_shader.hh"
 
 #include "COM_bokeh_kernel.hh"
 #include "COM_node_operation.hh"
@@ -32,7 +29,7 @@ static void cmp_node_bokehimage_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_bokehimage(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeBokehImage *data = MEM_cnew<NodeBokehImage>(__func__);
+  NodeBokehImage *data = MEM_callocN<NodeBokehImage>(__func__);
   data->angle = 0.0f;
   data->flaps = 5;
   data->rounding = 0.0f;
@@ -43,20 +40,29 @@ static void node_composit_init_bokehimage(bNodeTree * /*ntree*/, bNode *node)
 
 static void node_composit_buts_bokehimage(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "flaps", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "angle", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(
-      layout, ptr, "rounding", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "flaps", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(layout, ptr, "angle", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(layout,
+          ptr,
+          "rounding",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
   uiItemR(layout,
           ptr,
           "catadioptric",
           UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
-          nullptr,
+          std::nullopt,
           ICON_NONE);
-  uiItemR(layout, ptr, "shift", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(layout,
+          ptr,
+          "shift",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class BokehImageOperation : public NodeOperation {
  public:
@@ -98,14 +104,18 @@ void register_node_type_cmp_bokehimage()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_BOKEHIMAGE, "Bokeh Image", NODE_CLASS_INPUT);
+  cmp_node_type_base(&ntype, "CompositorNodeBokehImage", CMP_NODE_BOKEHIMAGE);
+  ntype.ui_name = "Bokeh Image";
+  ntype.ui_description = "Generate image with bokeh shape for use with the Bokeh Blur filter node";
+  ntype.enum_name_legacy = "BOKEHIMAGE";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::cmp_node_bokehimage_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_bokehimage;
   ntype.flag |= NODE_PREVIEW;
   ntype.initfunc = file_ns::node_composit_init_bokehimage;
   blender::bke::node_type_storage(
-      &ntype, "NodeBokehImage", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeBokehImage", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

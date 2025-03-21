@@ -17,6 +17,7 @@
 
 #include "openjpeg.h"
 
+#include <algorithm>
 #include <cstring>
 
 #define JP2_FILEHEADER_SIZE 12
@@ -417,9 +418,7 @@ static ImBuf *imb_load_jp2_stream(opj_stream_t *stream,
   }
 
   i = image->numcomps;
-  if (i > 4) {
-    i = 4;
-  }
+  i = std::min<uint>(i, 4);
 
   while (i) {
     i--;
@@ -436,7 +435,7 @@ static ImBuf *imb_load_jp2_stream(opj_stream_t *stream,
     float_divs[i] = (1 << image->comps[i].prec) - 1;
   }
 
-  ibuf = IMB_allocImBuf(w, h, planes, use_float ? IB_rectfloat : IB_rect);
+  ibuf = IMB_allocImBuf(w, h, planes, use_float ? IB_float_data : IB_byte_data);
 
   if (ibuf == nullptr) {
     goto finally;
@@ -553,8 +552,8 @@ static ImBuf *imb_load_jp2_stream(opj_stream_t *stream,
     }
   }
 
-  if (flags & IB_rect) {
-    IMB_rect_from_float(ibuf);
+  if (flags & IB_byte_data) {
+    IMB_byte_from_float(ibuf);
   }
 
 finally:
@@ -694,9 +693,7 @@ static void cinema_setup_encoder(opj_cparameters_t *parameters,
   switch (parameters->cp_cinema) {
     case OPJ_CINEMA2K_24:
     case OPJ_CINEMA2K_48:
-      if (parameters->numresolution > 6) {
-        parameters->numresolution = 6;
-      }
+      parameters->numresolution = std::min(parameters->numresolution, 6);
       if (!((image->comps[0].w == 2048) || (image->comps[0].h == 1080))) {
         fprintf(stdout,
                 "Image coordinates %u x %u is not 2K compliant.\nJPEG Digital Cinema Profile-3 "
@@ -845,7 +842,7 @@ static opj_image_t *ibuftoimage(ImBuf *ibuf, opj_cparameters_t *parameters)
       }
     }
     if (parameters->cp_cinema) {
-      img_fol.rates = (float *)MEM_mallocN(parameters->tcp_numlayers * sizeof(float), "jp2_rates");
+      img_fol.rates = MEM_malloc_arrayN<float>(size_t(parameters->tcp_numlayers), "jp2_rates");
       for (i = 0; i < parameters->tcp_numlayers; i++) {
         img_fol.rates[i] = parameters->tcp_rates[i];
       }

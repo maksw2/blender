@@ -5,6 +5,7 @@
 #include "workbench_private.hh"
 
 #include "BLI_jitter_2d.h"
+#include "BLI_math_geom.h"
 #include "BLI_smaa_textures.h"
 
 namespace blender::workbench {
@@ -193,7 +194,13 @@ void AntiAliasingPass::sync(const SceneState &scene_state, SceneResources &resou
 
 void AntiAliasingPass::setup_view(View &view, const SceneState &scene_state)
 {
+  const View &default_view = View::default_get();
+  const float4x4 &viewmat = default_view.viewmat();
+  float4x4 winmat = default_view.winmat();
+  float4x4 persmat = default_view.persmat();
+
   if (!enabled_) {
+    view.sync(viewmat, winmat);
     return;
   }
 
@@ -221,14 +228,6 @@ void AntiAliasingPass::setup_view(View &view, const SceneState &scene_state)
 
   setup_taa_weights(sample_offset, weights_, weights_sum_);
 
-  /* TODO(@pragma37): New API equivalent? */
-  const DRWView *default_view = DRW_view_default_get();
-  float4x4 winmat, viewmat, persmat;
-  /* Construct new matrices from transform delta */
-  DRW_view_winmat_get(default_view, winmat.ptr(), false);
-  DRW_view_viewmat_get(default_view, viewmat.ptr(), false);
-  DRW_view_persmat_get(default_view, persmat.ptr(), false);
-
   window_translate_m4(winmat.ptr(),
                       persmat.ptr(),
                       sample_offset.x / scene_state.resolution.x,
@@ -237,7 +236,8 @@ void AntiAliasingPass::setup_view(View &view, const SceneState &scene_state)
   view.sync(viewmat, winmat);
 }
 
-void AntiAliasingPass::draw(Manager &manager,
+void AntiAliasingPass::draw(const DRWContext *draw_ctx,
+                            Manager &manager,
                             View &view,
                             const SceneState &scene_state,
                             SceneResources &resources,
@@ -267,7 +267,7 @@ void AntiAliasingPass::draw(Manager &manager,
         sample0_depth_in_front_tx_.free();
       }
     }
-    else if (!DRW_state_is_scene_render() || last_sample) {
+    else if (!draw_ctx->is_scene_render() || last_sample) {
       /* Copy back the saved depth buffer for correct overlays. */
       GPU_texture_copy(resources.depth_tx, sample0_depth_tx_);
       if (sample0_depth_in_front_tx_.is_valid()) {
@@ -301,7 +301,7 @@ void AntiAliasingPass::draw(Manager &manager,
                         GPU_RG8,
                         GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT);
 
-  if (!DRW_state_is_image_render() || last_sample) {
+  if (!draw_ctx->is_image_render() || last_sample) {
     /* After a certain point SMAA is no longer necessary. */
     if (smaa_mix_factor_ > 0.0f) {
       smaa_edge_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(smaa_edge_tx_));

@@ -14,15 +14,15 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_alloca.h"
 #include "BLI_bit_vector.hh"
-#include "BLI_blenlib.h"
-#include "BLI_dynstr.h"
 #include "BLI_listbase.h"
 #include "BLI_listbase_wrapper.hh"
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector.h"
 #include "BLI_math_vector_types.hh"
+#include "BLI_set.hh"
+#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
 
@@ -31,7 +31,6 @@
 #include "DNA_anim_types.h"
 #include "DNA_light_types.h"
 #include "DNA_material_types.h"
-#include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
@@ -47,10 +46,9 @@
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_nla.hh"
 #include "BKE_node.hh"
-#include "BKE_report.hh"
 #include "BKE_texture.h"
 
 #include "ANIM_action.hh"
@@ -67,8 +65,6 @@
 #include "BLO_read_write.hh"
 
 #include "nla_private.h"
-
-#include "atomic_ops.h"
 
 #include "CLG_log.h"
 
@@ -137,7 +133,7 @@ KeyingSet *BKE_keyingset_add(
   KeyingSet *ks;
 
   /* allocate new KeyingSet */
-  ks = static_cast<KeyingSet *>(MEM_callocN(sizeof(KeyingSet), "KeyingSet"));
+  ks = MEM_callocN<KeyingSet>("KeyingSet");
 
   STRNCPY_UTF8(ks->idname, (idname) ? idname : (name) ? name : DATA_("KeyingSet"));
   STRNCPY_UTF8(ks->name, (name) ? name : (idname) ? idname : DATA_("Keying Set"));
@@ -192,7 +188,7 @@ KS_Path *BKE_keyingset_add_path(KeyingSet *ks,
   }
 
   /* allocate a new KeyingSet Path */
-  ksp = static_cast<KS_Path *>(MEM_callocN(sizeof(KS_Path), "KeyingSet Path"));
+  ksp = MEM_callocN<KS_Path>("KeyingSet Path");
 
   /* just store absolute info */
   ksp->id = id;
@@ -956,7 +952,7 @@ static void nlastrip_evaluate_controls(NlaStrip *strip,
   if (strip->fcurves.first) {
 
     /* create RNA-pointer needed to set values */
-    PointerRNA strip_ptr = RNA_pointer_create(nullptr, &RNA_NlaStrip, strip);
+    PointerRNA strip_ptr = RNA_pointer_create_discrete(nullptr, &RNA_NlaStrip, strip);
 
     /* execute these settings as per normal */
     Vector<FCurve *> strip_fcurves = listbase_to_vector<FCurve>(strip->fcurves);
@@ -1128,7 +1124,7 @@ NlaEvalStrip *nlastrips_ctime_get_strip(ListBase *list,
   }
 
   /* add to list of strips we need to evaluate */
-  nes = static_cast<NlaEvalStrip *>(MEM_callocN(sizeof(NlaEvalStrip), "NlaEvalStrip"));
+  nes = MEM_callocN<NlaEvalStrip>("NlaEvalStrip");
 
   nes->strip = estrip;
   nes->strip_mode = side;
@@ -1241,8 +1237,8 @@ static void nlaeval_snapshot_init(NlaEvalSnapshot *snapshot,
 {
   snapshot->base = base;
   snapshot->size = std::max(16, nlaeval->num_channels);
-  snapshot->channels = static_cast<NlaEvalChannelSnapshot **>(
-      MEM_callocN(sizeof(*snapshot->channels) * snapshot->size, "NlaEvalSnapshot::channels"));
+  snapshot->channels = MEM_calloc_arrayN<NlaEvalChannelSnapshot *>(size_t(snapshot->size),
+                                                                   "NlaEvalSnapshot::channels");
 }
 
 /* Retrieve the individual channel snapshot. */
@@ -1430,7 +1426,7 @@ static void nlaevalchan_get_default_values(NlaEvalChannel *nec, float *r_values)
 
     switch (RNA_property_type(prop)) {
       case PROP_BOOLEAN:
-        tmp_bool = static_cast<bool *>(MEM_malloc_arrayN(length, sizeof(*tmp_bool), __func__));
+        tmp_bool = MEM_malloc_arrayN<bool>(size_t(length), __func__);
         RNA_property_boolean_get_default_array(ptr, prop, tmp_bool);
         for (int i = 0; i < length; i++) {
           r_values[i] = float(tmp_bool[i]);
@@ -1438,7 +1434,7 @@ static void nlaevalchan_get_default_values(NlaEvalChannel *nec, float *r_values)
         MEM_freeN(tmp_bool);
         break;
       case PROP_INT:
-        tmp_int = static_cast<int *>(MEM_malloc_arrayN(length, sizeof(*tmp_int), __func__));
+        tmp_int = MEM_malloc_arrayN<int>(size_t(length), __func__);
         RNA_property_int_get_default_array(ptr, prop, tmp_int);
         for (int i = 0; i < length; i++) {
           r_values[i] = float(tmp_int[i]);
@@ -3134,13 +3130,17 @@ void nladata_flush_channels(PointerRNA *ptr,
 
 /* ---------------------- */
 
+using ActionAndSlot = std::pair<bAction *, animrig::slot_handle_t>;
+using ActionAndSlotSet = Set<ActionAndSlot>;
+
 static void nla_eval_domain_action(PointerRNA *ptr,
                                    NlaEvalData *channels,
                                    bAction *act,
                                    const animrig::slot_handle_t slot_handle,
-                                   GSet *touched_actions)
+                                   ActionAndSlotSet &touched_actions)
 {
-  if (!BLI_gset_add(touched_actions, act)) {
+  const ActionAndSlot action_and_slot(act, slot_handle);
+  if (!touched_actions.add(action_and_slot)) {
     return;
   }
 
@@ -3171,7 +3171,7 @@ static void nla_eval_domain_action(PointerRNA *ptr,
 static void nla_eval_domain_strips(PointerRNA *ptr,
                                    NlaEvalData *channels,
                                    ListBase *strips,
-                                   GSet *touched_actions)
+                                   ActionAndSlotSet &touched_actions)
 {
   LISTBASE_FOREACH (NlaStrip *, strip, strips) {
     /* Check strip's action. */
@@ -3191,7 +3191,7 @@ static void nla_eval_domain_strips(PointerRNA *ptr,
  */
 static void animsys_evaluate_nla_domain(PointerRNA *ptr, NlaEvalData *channels, AnimData *adt)
 {
-  GSet *touched_actions = BLI_gset_ptr_new(__func__);
+  ActionAndSlotSet touched_actions;
 
   /* Include domain of Action Track. */
   if ((adt->flag & ADT_NLA_EDIT_ON) == 0) {
@@ -3205,25 +3205,11 @@ static void animsys_evaluate_nla_domain(PointerRNA *ptr, NlaEvalData *channels, 
 
   /* NLA Data - Animation Data for Strips */
   LISTBASE_FOREACH (NlaTrack *, nlt, &adt->nla_tracks) {
-    /* solo and muting are mutually exclusive... */
-    if (adt->flag & ADT_NLA_SOLO_TRACK) {
-      /* skip if there is a solo track, but this isn't it */
-      if ((nlt->flag & NLATRACK_SOLO) == 0) {
-        continue;
-      }
-      /* else - mute doesn't matter */
+    if (!BKE_nlatrack_is_enabled(*adt, *nlt)) {
+      continue;
     }
-    else {
-      /* no solo tracks - skip track if muted */
-      if (nlt->flag & NLATRACK_MUTED) {
-        continue;
-      }
-    }
-
     nla_eval_domain_strips(ptr, channels, &nlt->strips, touched_actions);
   }
-
-  BLI_gset_free(touched_actions, nullptr);
 }
 
 /* ---------------------- */
@@ -3330,21 +3316,7 @@ static bool is_nlatrack_evaluatable(const AnimData *adt, const NlaTrack *nlt)
     return false;
   }
 
-  /* Solo and muting are mutually exclusive. */
-  if (adt->flag & ADT_NLA_SOLO_TRACK) {
-    /* Skip if there is a solo track, but this isn't it. */
-    if ((nlt->flag & NLATRACK_SOLO) == 0) {
-      return false;
-    }
-  }
-  else {
-    /* Skip track if muted. */
-    if (nlt->flag & NLATRACK_MUTED) {
-      return false;
-    }
-  }
-
-  return true;
+  return BKE_nlatrack_is_enabled(*adt, *nlt);
 }
 
 /**
@@ -3767,7 +3739,7 @@ NlaKeyframingContext *BKE_animsys_get_nla_keyframing_context(
 
   if (ctx == nullptr) {
     /* Allocate and evaluate a new context. */
-    ctx = static_cast<NlaKeyframingContext *>(MEM_callocN(sizeof(*ctx), "NlaKeyframingContext"));
+    ctx = MEM_callocN<NlaKeyframingContext>("NlaKeyframingContext");
     ctx->adt = adt;
 
     nlaeval_init(&ctx->lower_eval_data);
@@ -4203,8 +4175,7 @@ void BKE_animsys_update_driver_array(ID *id)
     BLI_assert(!adt->driver_array);
 
     int num_drivers = BLI_listbase_count(&adt->drivers);
-    adt->driver_array = static_cast<FCurve **>(
-        MEM_mallocN(sizeof(FCurve *) * num_drivers, "adt->driver_array"));
+    adt->driver_array = MEM_malloc_arrayN<FCurve *>(size_t(num_drivers), "adt->driver_array");
 
     int driver_index = 0;
     LISTBASE_FOREACH (FCurve *, fcu, &adt->drivers) {

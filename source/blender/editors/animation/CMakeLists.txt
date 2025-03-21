@@ -3,13 +3,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set(INC
+  ../asset
   ../include
-  ../../blenkernel
-  ../../blentranslation
-  ../../gpu
+  ../../asset_system
   ../../makesrna
-  ../../sequencer
-  ../../windowmanager
   ../../../../extern/fmtlib/include
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
@@ -19,6 +16,7 @@ set(INC_SYS
 )
 
 set(SRC
+  anim_asset_ops.cc
   anim_channels_defines.cc
   anim_channels_edit.cc
   anim_deps.cc
@@ -39,16 +37,21 @@ set(SRC
   time_scrub_ui.cc
 
   anim_intern.hh
+  keyframes_general_intern.hh
 )
 
 set(LIB
-  bf_blenkernel
+  PRIVATE bf::blenkernel
   PRIVATE bf::animrig
   PRIVATE bf::blenlib
+  PRIVATE bf::blentranslation
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
+  PRIVATE bf::gpu
   PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
+  PRIVATE bf::sequencer
+  PRIVATE bf::windowmanager
 )
 
 if(WITH_PYTHON)
@@ -63,6 +66,7 @@ add_dependencies(bf_editor_animation bf_rna)
 if(WITH_GTESTS)
   set(TEST_SRC
     anim_filter_test.cc
+    keyframes_general_test.cc
     keyframes_keylist_test.cc
   )
   set(TEST_INC

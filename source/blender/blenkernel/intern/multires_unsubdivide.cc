@@ -14,7 +14,7 @@
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
 #include "DNA_modifier_types.h"
-#include "DNA_scene_types.h"
+#include "DNA_object_types.h"
 
 #include "BLI_gsqueue.h"
 #include "BLI_math_vector.h"
@@ -338,8 +338,7 @@ static bool unsubdivide_tag_disconnected_mesh_element(BMesh *bm, int *elem_id, i
  */
 static int unsubdivide_init_elem_ids(BMesh *bm, int *elem_id)
 {
-  bool *visited_verts = static_cast<bool *>(
-      MEM_calloc_arrayN(bm->totvert, sizeof(bool), "visited vertices"));
+  bool *visited_verts = MEM_calloc_arrayN<bool>(size_t(bm->totvert), "visited vertices");
   int current_id = 0;
   for (int i = 0; i < bm->totvert; i++) {
     if (!visited_verts[i]) {
@@ -446,7 +445,7 @@ static bool multires_unsubdivide_single_level(BMesh *bm)
   BM_mesh_elem_table_ensure(bm, BM_VERT);
 
   /* Build disconnected elements IDs. Each disconnected mesh element is evaluated separately. */
-  int *elem_id = static_cast<int *>(MEM_calloc_arrayN(bm->totvert, sizeof(int), " ELEM ID"));
+  int *elem_id = MEM_calloc_arrayN<int>(size_t(bm->totvert), " ELEM ID");
   const int tot_ids = unsubdivide_init_elem_ids(bm, elem_id);
 
   bool valid_tag_found = true;
@@ -649,8 +648,7 @@ static void store_grid_data(MultiresUnsubdivideContext *context,
   const int grid_size = BKE_ccg_gridsize(context->num_original_levels);
   const int face_grid_size = BKE_ccg_gridsize(context->num_original_levels + 1);
   const int face_grid_area = face_grid_size * face_grid_size;
-  float(*face_grid)[3] = static_cast<float(*)[3]>(
-      MEM_calloc_arrayN(face_grid_area, sizeof(float[3]), "face_grid"));
+  float(*face_grid)[3] = MEM_calloc_arrayN<float[3]>(size_t(face_grid_area), "face_grid");
 
   for (int i = 0; i < face.size(); i++) {
     const int loop_index = face[i];
@@ -704,8 +702,8 @@ static void multires_unsubdivide_extract_single_grid_from_face_edge(
   const int unsubdiv_grid_size = grid->grid_size = BKE_ccg_gridsize(context->num_total_levels);
   BLI_assert(grid->grid_co == nullptr);
   grid->grid_size = unsubdiv_grid_size;
-  grid->grid_co = static_cast<float(*)[3]>(MEM_calloc_arrayN(
-      unsubdiv_grid_size * unsubdiv_grid_size, sizeof(float[3]), "grids coordinates"));
+  grid->grid_co = MEM_calloc_arrayN<float[3]>(
+      size_t(unsubdiv_grid_size) * size_t(unsubdiv_grid_size), "grids coordinates");
 
   /* Get the vertex on the corner of the grid. This vertex was tagged previously as it also exist
    * on the base mesh. */
@@ -872,13 +870,13 @@ static void multires_unsubdivide_free_original_datalayers(Mesh *mesh)
   const int l_layer_index = CustomData_get_named_layer_index(
       &mesh->corner_data, CD_PROP_INT32, lname);
   if (l_layer_index != -1) {
-    CustomData_free_layer(&mesh->corner_data, CD_PROP_INT32, mesh->corners_num, l_layer_index);
+    CustomData_free_layer(&mesh->corner_data, CD_PROP_INT32, l_layer_index);
   }
 
   const int v_layer_index = CustomData_get_named_layer_index(
       &mesh->vert_data, CD_PROP_INT32, vname);
   if (v_layer_index != -1) {
-    CustomData_free_layer(&mesh->vert_data, CD_PROP_INT32, mesh->verts_num, v_layer_index);
+    CustomData_free_layer(&mesh->vert_data, CD_PROP_INT32, v_layer_index);
   }
 }
 
@@ -973,16 +971,14 @@ static void multires_unsubdivide_extract_grids(MultiresUnsubdivideContext *conte
   BMesh *bm_original_mesh = context->bm_original_mesh;
 
   context->num_grids = base_mesh->corners_num;
-  context->base_mesh_grids = static_cast<MultiresUnsubdivideGrid *>(
-      MEM_calloc_arrayN(base_mesh->corners_num, sizeof(MultiresUnsubdivideGrid), "grids"));
+  context->base_mesh_grids = MEM_calloc_arrayN<MultiresUnsubdivideGrid>(
+      size_t(base_mesh->corners_num), "grids");
 
   /* Based on the existing indices in the data-layers, generate two vertex indices maps. */
   /* From vertex index in original to vertex index in base and from vertex index in base to vertex
    * index in original. */
-  int *orig_to_base_vmap = static_cast<int *>(
-      MEM_calloc_arrayN(bm_original_mesh->totvert, sizeof(int), "orig vmap"));
-  int *base_to_orig_vmap = static_cast<int *>(
-      MEM_calloc_arrayN(base_mesh->verts_num, sizeof(int), "base vmap"));
+  int *orig_to_base_vmap = MEM_calloc_arrayN<int>(size_t(bm_original_mesh->totvert), "orig vmap");
+  int *base_to_orig_vmap = MEM_calloc_arrayN<int>(size_t(base_mesh->verts_num), "base vmap");
 
   context->base_to_orig_vmap = static_cast<const int *>(
       CustomData_get_layer_named(&base_mesh->vert_data, CD_PROP_INT32, vname));
@@ -1177,7 +1173,7 @@ static void multires_create_grids_in_unsubdivided_base_mesh(MultiresUnsubdivideC
 {
   /* Free the current MDISPS and create a new ones. */
   if (CustomData_has_layer(&base_mesh->corner_data, CD_MDISPS)) {
-    CustomData_free_layers(&base_mesh->corner_data, CD_MDISPS, base_mesh->corners_num);
+    CustomData_free_layers(&base_mesh->corner_data, CD_MDISPS);
   }
   MDisps *mdisps = static_cast<MDisps *>(CustomData_add_layer(
       &base_mesh->corner_data, CD_MDISPS, CD_SET_DEFAULT, base_mesh->corners_num));
@@ -1189,8 +1185,7 @@ static void multires_create_grids_in_unsubdivided_base_mesh(MultiresUnsubdivideC
 
   /* Allocate the MDISPS grids and copy the extracted data from context. */
   for (int i = 0; i < totloop; i++) {
-    float(*disps)[3] = static_cast<float(*)[3]>(
-        MEM_calloc_arrayN(totdisp, sizeof(float[3]), __func__));
+    float(*disps)[3] = MEM_calloc_arrayN<float[3]>(size_t(totdisp), __func__);
 
     if (mdisps[i].disps) {
       MEM_freeN(mdisps[i].disps);

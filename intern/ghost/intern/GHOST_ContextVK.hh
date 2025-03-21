@@ -44,14 +44,15 @@
 #  define GHOST_OPENGL_VK_RESET_NOTIFICATION_STRATEGY 0
 #endif
 
-typedef enum {
+enum GHOST_TVulkanPlatformType {
+  GHOST_kVulkanPlatformHeadless = 0,
 #ifdef WITH_GHOST_X11
-  GHOST_kVulkanPlatformX11 = 0,
+  GHOST_kVulkanPlatformX11 = 1,
 #endif
 #ifdef WITH_GHOST_WAYLAND
-  GHOST_kVulkanPlatformWayland = 1,
+  GHOST_kVulkanPlatformWayland = 2,
 #endif
-} GHOST_TVulkanPlatformType;
+};
 
 struct GHOST_ContextVK_WindowInfo {
   int size[2];
@@ -86,7 +87,7 @@ class GHOST_ContextVK : public GHOST_Context {
   /**
    * Destructor.
    */
-  ~GHOST_ContextVK();
+  ~GHOST_ContextVK() override;
 
   /**
    * Swaps front and back buffers of a window.
@@ -123,12 +124,7 @@ class GHOST_ContextVK : public GHOST_Context {
    * Gets the Vulkan context related resource handles.
    * \return  A boolean success indicator.
    */
-  GHOST_TSuccess getVulkanHandles(void *r_instance,
-                                  void *r_physical_device,
-                                  void *r_device,
-                                  uint32_t *r_graphic_queue_family,
-                                  void *r_queue,
-                                  void **r_queue_mutex) override;
+  GHOST_TSuccess getVulkanHandles(GHOST_VulkanHandles &r_handles) override;
 
   GHOST_TSuccess getVulkanSwapChainFormat(GHOST_VulkanSwapChainData *r_swap_chain_data) override;
 

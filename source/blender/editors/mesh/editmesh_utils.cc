@@ -260,6 +260,25 @@ bool EDBM_op_call_silentf(BMEditMesh *em, const char *fmt, ...)
  * Make/Clear/Free functions.
  * \{ */
 
+/**
+ * Return a 1-based index compatible with #Object::shapenr,
+ * ensuring the "Basis" index is *always* returned when the mesh has any shape keys.
+ *
+ * In this case it's important entering and exiting edit-mode both behave
+ * as if the basis shape key is active, see: #42360, #43998.
+ *
+ * \note While this could be handled by versioning, there is still the potential for
+ * the value to become zero at run-time, so clamp it at the point of toggling edit-mode.
+ */
+static int object_shapenr_basis_index_ensured(const Object *ob)
+{
+  const Mesh *mesh = static_cast<const Mesh *>(ob->data);
+  if (UNLIKELY((ob->shapenr == 0) && (mesh->key && !BLI_listbase_is_empty(&mesh->key->block)))) {
+    return 1;
+  }
+  return ob->shapenr;
+}
+
 void EDBM_mesh_make(Object *ob, const int select_mode, const bool add_key_index)
 {
   Mesh *mesh = static_cast<Mesh *>(ob->data);
@@ -274,7 +293,10 @@ void EDBM_mesh_make_from_mesh(Object *ob,
   Mesh *mesh = static_cast<Mesh *>(ob->data);
   BMeshCreateParams create_params{};
   create_params.use_toolflags = true;
-  BMesh *bm = BKE_mesh_to_bmesh(src_mesh, ob, add_key_index, &create_params);
+  /* Clamp the index, so the behavior of enter & exit edit-mode matches, see #43998. */
+  const int shapenr = object_shapenr_basis_index_ensured(ob);
+
+  BMesh *bm = BKE_mesh_to_bmesh(src_mesh, shapenr, add_key_index, &create_params);
 
   if (mesh->runtime->edit_mesh) {
     /* this happens when switching shape keys */
@@ -301,7 +323,7 @@ void EDBM_mesh_load_ex(Main *bmain, Object *ob, bool free_data)
 
   /* Workaround for #42360, 'ob->shapenr' should be 1 in this case.
    * however this isn't synchronized between objects at the moment. */
-  if (UNLIKELY((ob->shapenr == 0) && (mesh->key && !BLI_listbase_is_empty(&mesh->key->block)))) {
+  if (UNLIKELY((ob->shapenr == 0) && (object_shapenr_basis_index_ensured(ob) > 0))) {
     bm->shapenr = 1;
   }
 
@@ -638,7 +660,7 @@ static int bm_uv_edge_select_build_islands(UvElementMap *element_map,
                                            UvElement *islandbuf,
                                            uint *map,
                                            bool uv_selected,
-                                           const BMUVOffsets offsets)
+                                           const BMUVOffsets &offsets)
 {
   BM_uv_element_map_ensure_head_table(element_map);
 
@@ -746,7 +768,7 @@ static void bm_uv_build_islands(UvElementMap *element_map,
       MEM_callocN(sizeof(*island_number) * bm->totface, __func__));
   copy_vn_i(island_number, bm->totface, INVALID_ISLAND);
 
-  const BMUVOffsets uv_offsets = BM_uv_map_get_offsets(bm);
+  const BMUVOffsets uv_offsets = BM_uv_map_offsets_get(bm);
 
   const bool use_uv_edge_connectivity = scene->toolsettings->uv_flag & UV_SYNC_SELECTION ?
                                             scene->toolsettings->selectmode & SCE_SELECT_EDGE :
@@ -979,7 +1001,7 @@ UvElementMap *BM_uv_element_map_create(BMesh *bm,
   BMFace *efa;
   BMIter iter, liter;
 
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(bm);
   if (offsets.uv < 0) {
     return nullptr;
   }
@@ -1916,13 +1938,14 @@ bool BMBVH_EdgeVisible(const BMBVHTree *tree,
 void EDBM_project_snap_verts(
     bContext *C, Depsgraph *depsgraph, ARegion *region, Object *obedit, BMEditMesh *em)
 {
+  using namespace blender::ed;
   BMIter iter;
   BMVert *eve;
 
   ED_view3d_init_mats_rv3d(obedit, static_cast<RegionView3D *>(region->regiondata));
 
   Scene *scene = CTX_data_scene(C);
-  SnapObjectContext *snap_context = ED_transform_snap_object_context_create(scene, 0);
+  transform::SnapObjectContext *snap_context = transform::snap_object_context_create(scene, 0);
 
   eSnapTargetOP target_op = SCE_SNAP_TARGET_NOT_ACTIVE;
   const int snap_flag = scene->toolsettings->snap_flag;
@@ -1940,22 +1963,22 @@ void EDBM_project_snap_verts(
       if (ED_view3d_project_float_object(region, eve->co, mval, V3D_PROJ_TEST_NOP) ==
           V3D_PROJ_RET_OK)
       {
-        SnapObjectParams params{};
+        transform::SnapObjectParams params{};
         params.snap_target_select = target_op;
-        params.edit_mode_type = SNAP_GEOM_FINAL;
-        params.occlusion_test = SNAP_OCCLUSION_AS_SEEM;
-        if (ED_transform_snap_object_project_view3d(snap_context,
-                                                    depsgraph,
-                                                    region,
-                                                    CTX_wm_view3d(C),
-                                                    SCE_SNAP_TO_FACE,
-                                                    &params,
-                                                    nullptr,
-                                                    mval,
-                                                    nullptr,
-                                                    nullptr,
-                                                    co_proj,
-                                                    nullptr))
+        params.edit_mode_type = transform ::SNAP_GEOM_FINAL;
+        params.occlusion_test = transform ::SNAP_OCCLUSION_AS_SEEM;
+        if (transform::snap_object_project_view3d(snap_context,
+                                                  depsgraph,
+                                                  region,
+                                                  CTX_wm_view3d(C),
+                                                  SCE_SNAP_TO_FACE,
+                                                  &params,
+                                                  nullptr,
+                                                  mval,
+                                                  nullptr,
+                                                  nullptr,
+                                                  co_proj,
+                                                  nullptr))
         {
           mul_v3_m4v3(eve->co, obedit->world_to_object().ptr(), co_proj);
         }
@@ -1963,7 +1986,7 @@ void EDBM_project_snap_verts(
     }
   }
 
-  ED_transform_snap_object_context_destroy(snap_context);
+  transform::snap_object_context_destroy(snap_context);
 }
 
 /** \} */

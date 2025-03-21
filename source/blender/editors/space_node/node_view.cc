@@ -9,7 +9,6 @@
 #include "DNA_node_types.h"
 
 #include "BLI_rect.h"
-#include "BLI_string_ref.hh"
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
@@ -90,10 +89,10 @@ bool space_node_view_flag(
   if (snode.edittree) {
     for (const bNode *node : snode.edittree->all_nodes()) {
       if ((node->flag & node_flag) == node_flag) {
-        BLI_rctf_union(&cur_new, &node->runtime->totr);
+        BLI_rctf_union(&cur_new, &node->runtime->draw_bounds);
         tot++;
 
-        if (node->type == NODE_FRAME) {
+        if (node->is_frame()) {
           has_frame = true;
         }
       }
@@ -135,7 +134,7 @@ bool space_node_view_flag(
   return true;
 }
 
-static int node_view_all_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus node_view_all_exec(bContext *C, wmOperator *op)
 {
   ARegion *region = CTX_wm_region(C);
   SpaceNode *snode = CTX_wm_space_node(C);
@@ -172,7 +171,7 @@ void NODE_OT_view_all(wmOperatorType *ot)
 /** \name View Selected Operator
  * \{ */
 
-static int node_view_selected_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus node_view_selected_exec(bContext *C, wmOperator *op)
 {
   ARegion *region = CTX_wm_region(C);
   SpaceNode *snode = CTX_wm_space_node(C);
@@ -212,7 +211,7 @@ struct NodeViewMove {
   float xof_orig, yof_orig;
 };
 
-static int snode_bg_viewmove_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus snode_bg_viewmove_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   SpaceNode *snode = CTX_wm_space_node(C);
   ARegion *region = CTX_wm_region(C);
@@ -261,7 +260,7 @@ static int snode_bg_viewmove_modal(bContext *C, wmOperator *op, const wmEvent *e
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int snode_bg_viewmove_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus snode_bg_viewmove_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Main *bmain = CTX_data_main(C);
   SpaceNode *snode = CTX_wm_space_node(C);
@@ -281,7 +280,7 @@ static int snode_bg_viewmove_invoke(bContext *C, wmOperator *op, const wmEvent *
     return OPERATOR_CANCELLED;
   }
 
-  nvm = MEM_cnew<NodeViewMove>(__func__);
+  nvm = MEM_callocN<NodeViewMove>(__func__);
   op->customdata = nvm;
   nvm->mvalo.x = event->mval[0];
   nvm->mvalo.y = event->mval[1];
@@ -331,7 +330,7 @@ void NODE_OT_backimage_move(wmOperatorType *ot)
 /** \name Background Image Zoom
  * \{ */
 
-static int backimage_zoom_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus backimage_zoom_exec(bContext *C, wmOperator *op)
 {
   SpaceNode *snode = CTX_wm_space_node(C);
   ARegion *region = CTX_wm_region(C);
@@ -370,7 +369,7 @@ void NODE_OT_backimage_zoom(wmOperatorType *ot)
 /** \name Background Image Fit
  * \{ */
 
-static int backimage_fit_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus backimage_fit_exec(bContext *C, wmOperator * /*op*/)
 {
   Main *bmain = CTX_data_main(C);
   SpaceNode *snode = CTX_wm_space_node(C);
@@ -570,7 +569,7 @@ static void sample_apply(bContext *C, wmOperator *op, const wmEvent *event)
   }
 
   if (!ibuf->byte_buffer.data) {
-    IMB_rect_from_float(ibuf);
+    IMB_byte_from_float(ibuf);
   }
 
   /* map the mouse coords to the backdrop image space */
@@ -646,7 +645,7 @@ static void sample_exit(bContext *C, wmOperator *op)
   MEM_freeN(info);
 }
 
-static int sample_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus sample_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   SpaceNode *snode = CTX_wm_space_node(C);
   ARegion *region = CTX_wm_region(C);
@@ -662,7 +661,7 @@ static int sample_invoke(bContext *C, wmOperator *op, const wmEvent *event)
     return OPERATOR_CANCELLED;
   }
 
-  info = MEM_cnew<ImageSampleInfo>("ImageSampleInfo");
+  info = MEM_callocN<ImageSampleInfo>("ImageSampleInfo");
   info->art = region->runtime->type;
   info->draw_handle = ED_region_draw_cb_activate(
       region->runtime->type, sample_draw, info, REGION_DRAW_POST_PIXEL);
@@ -675,7 +674,7 @@ static int sample_invoke(bContext *C, wmOperator *op, const wmEvent *event)
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int sample_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus sample_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   switch (event->type) {
     case LEFTMOUSE:

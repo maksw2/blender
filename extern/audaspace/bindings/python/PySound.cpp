@@ -233,6 +233,8 @@ Sound_write(Sound* self, PyObject* args, PyObject* kwds)
 				container = CONTAINER_OGG;
 			else if(extension == ".wav")
 				container = CONTAINER_WAV;
+			else if(extension == ".aac")
+				container = CONTAINER_AAC;
 			else
 			{
 				PyErr_SetString(AUDError, invalid_container_error);
@@ -264,6 +266,9 @@ Sound_write(Sound* self, PyObject* args, PyObject* kwds)
 				break;
 			case CONTAINER_WAV:
 				codec = CODEC_PCM;
+				break;
+			case CONTAINER_AAC:
+				codec = CODEC_AAC;
 				break;
 			default:
 				PyErr_SetString(AUDError, "Unknown container, cannot select default codec.");
@@ -1918,7 +1923,7 @@ Sound_get_specs(Sound* self, void* nothing)
 }
 
 PyDoc_STRVAR(M_aud_Sound_length_doc,
-			 "The sample specification of the sound as a tuple with rate and channel count.");
+			 "The length attribute returns the duration of the sound in seconds.");
 
 static PyObject *
 Sound_get_length(Sound* self, void* nothing)

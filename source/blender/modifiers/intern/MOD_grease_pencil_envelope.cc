@@ -16,14 +16,11 @@
 #include "BKE_geometry_set.hh"
 #include "BKE_grease_pencil.hh"
 #include "BKE_instances.hh"
-#include "BKE_lib_query.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_modifier.hh"
 #include "BKE_screen.hh"
 
 #include "BLO_read_write.hh"
-
-#include "GEO_realize_instances.hh"
 
 #include "UI_interface.hh"
 #include "UI_resources.hh"
@@ -515,8 +512,8 @@ static void create_envelope_strokes(const EnvelopeInfo &info,
   const int src_points_num = src_curves.points_num();
 
   /* Count envelopes. */
-  Array<int> envelope_curves_by_curve(src_curves_num + 1);
-  Array<int> envelope_points_by_curve(src_curves_num + 1);
+  Array<int> envelope_curves_by_curve(src_curves_num + 1, 0);
+  Array<int> envelope_points_by_curve(src_curves_num + 1, 0);
   curves_mask.foreach_index([&](const int64_t src_curve_i) {
     const IndexRange points = src_curves.points_by_curve()[src_curve_i];
     const int curve_num = curve_envelope_strokes_num(info, points.size(), src_cyclic[src_curve_i]);
@@ -600,21 +597,25 @@ static void create_envelope_strokes(const EnvelopeInfo &info,
             "radius",
             bke::AttrDomain::Point,
             bke::AttributeInitVArray(VArray<float>::ForSingle(0.01f, dst_point_num)));
-    bke::SpanAttributeWriter<float> opacity_writer =
-        dst_attributes.lookup_or_add_for_write_span<float>(
-            "opacity",
-            bke::AttrDomain::Point,
-            bke::AttributeInitVArray(VArray<float>::ForSingle(1.0f, dst_point_num)));
     const IndexRange all_new_points = keep_original ?
                                           IndexRange(src_curves.point_num,
                                                      dst_point_num - src_curves.point_num) :
                                           IndexRange(dst_point_num);
     for (const int point_i : all_new_points) {
       radius_writer.span[point_i] *= info.thickness;
-      opacity_writer.span[point_i] *= info.strength;
     }
     radius_writer.finish();
-    opacity_writer.finish();
+    if (bke::SpanAttributeWriter<float> opacity_writer =
+            dst_attributes.lookup_or_add_for_write_span<float>(
+                "opacity",
+                bke::AttrDomain::Point,
+                bke::AttributeInitVArray(VArray<float>::ForSingle(1.0f, dst_point_num))))
+    {
+      for (const int point_i : all_new_points) {
+        opacity_writer.span[point_i] *= info.strength;
+      }
+      opacity_writer.finish();
+    }
   }
 
   dst_cyclic.finish();
@@ -686,19 +687,19 @@ static void panel_draw(const bContext *C, Panel *panel)
 
   uiLayoutSetPropSep(layout, true);
 
-  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  uiItemR(layout, ptr, "spread", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "thickness", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "spread", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(layout, ptr, "thickness", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   switch (mode) {
     case MOD_GREASE_PENCIL_ENVELOPE_DEFORM:
       break;
     case MOD_GREASE_PENCIL_ENVELOPE_FILLS:
     case MOD_GREASE_PENCIL_ENVELOPE_SEGMENTS:
-      uiItemR(layout, ptr, "strength", UI_ITEM_NONE, nullptr, ICON_NONE);
-      uiItemR(layout, ptr, "mat_nr", UI_ITEM_NONE, nullptr, ICON_NONE);
-      uiItemR(layout, ptr, "skip", UI_ITEM_NONE, nullptr, ICON_NONE);
+      uiItemR(layout, ptr, "strength", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+      uiItemR(layout, ptr, "mat_nr", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+      uiItemR(layout, ptr, "skip", UI_ITEM_NONE, std::nullopt, ICON_NONE);
       break;
   }
 

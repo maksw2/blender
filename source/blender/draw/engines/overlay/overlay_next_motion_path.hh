@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "BKE_paint.hh"
+#include "BLI_string.h"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -45,15 +45,16 @@ class MotionPath : Overlay {
       PassSimple &pass = motion_path_ps_;
       pass.init();
       pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+      pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
       pass.state_set(DRW_STATE_WRITE_COLOR, state.clipping_plane_count);
       {
         PassSimple::Sub &sub = pass.sub("Lines");
-        sub.shader_set(res.shaders.motion_path_line.get());
+        sub.shader_set(res.shaders->motion_path_line.get());
         line_ps_ = &sub;
       }
       {
         PassSimple::Sub &sub = pass.sub("Points");
-        sub.shader_set(res.shaders.motion_path_vert.get());
+        sub.shader_set(res.shaders->motion_path_vert.get());
         vert_ps_ = &sub;
       }
     }

@@ -14,18 +14,19 @@
 
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
+#include "DNA_userdef_types.h"
 
 #include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
-#include "BLI_blenlib.h"
 #include "BLI_endian_defines.h"
 #include "BLI_endian_switch.h"
 #include "BLI_fileops.h"
 #include "BLI_fileops_types.h"
 #include "BLI_listbase.h"
 #include "BLI_path_utils.hh"
+#include "BLI_string.h"
 #include "BLI_threads.h"
 
 #include "BKE_main.hh"
@@ -52,6 +53,8 @@
  * To distinguish 2 blend files with same name, scene->ed->disk_cache_timestamp
  * is used as UID. Blend file can still be copied manually which may cause conflict.
  */
+
+namespace blender::seq {
 
 /* Format string:
  * `<cache type>-<resolution X>x<resolution Y>-<rendersize>%(<view_id>)-<frame no>.dcf`. */
@@ -132,8 +135,7 @@ static DiskCacheFile *seq_disk_cache_add_file_to_list(SeqDiskCache *disk_cache,
                                                       const char *filepath)
 {
 
-  DiskCacheFile *cache_file = static_cast<DiskCacheFile *>(
-      MEM_callocN(sizeof(DiskCacheFile), "SeqDiskCacheFile"));
+  DiskCacheFile *cache_file = MEM_callocN<DiskCacheFile>("SeqDiskCacheFile");
   char dir[FILE_MAXDIR], file[FILE_MAX];
   BLI_path_split_dir_file(filepath, dir, sizeof(dir), file, sizeof(file));
   STRNCPY(cache_file->filepath, filepath);
@@ -276,7 +278,7 @@ static void seq_disk_cache_update_file(SeqDiskCache *disk_cache, const char *fil
 }
 
 /* Path format:
- * <cache dir>/<project name>_seq_cache/<scene name>-<timestamp>/<seq name>/DCACHE_FNAME_FORMAT
+ * <cache dir>/<project name>_seq_cache/<scene name>-<timestamp>/<strip name>/DCACHE_FNAME_FORMAT
  */
 
 static void seq_disk_cache_get_project_dir(SeqDiskCache *disk_cache,
@@ -291,19 +293,19 @@ static void seq_disk_cache_get_project_dir(SeqDiskCache *disk_cache,
 }
 
 static void seq_disk_cache_get_dir(
-    SeqDiskCache *disk_cache, Scene *scene, Sequence *seq, char *dirpath, size_t dirpath_maxncpy)
+    SeqDiskCache *disk_cache, Scene *scene, Strip *strip, char *dirpath, size_t dirpath_maxncpy)
 {
   char scene_name[MAX_ID_NAME + 22]; /* + -%PRId64 */
-  char seq_name[SEQ_NAME_MAXSTR];
+  char strip_name[STRIP_NAME_MAXSTR];
   char project_dir[FILE_MAX];
 
   seq_disk_cache_get_project_dir(disk_cache, project_dir, sizeof(project_dir));
   SNPRINTF(scene_name, "%s-%" PRId64, scene->id.name, disk_cache->timestamp);
-  STRNCPY(seq_name, seq->name);
+  STRNCPY(strip_name, strip->name);
   BLI_path_make_safe_filename(scene_name);
-  BLI_path_make_safe_filename(seq_name);
+  BLI_path_make_safe_filename(strip_name);
 
-  BLI_path_join(dirpath, dirpath_maxncpy, project_dir, scene_name, seq_name);
+  BLI_path_join(dirpath, dirpath_maxncpy, project_dir, scene_name, strip_name);
 }
 
 static void seq_disk_cache_get_file_path(SeqDiskCache *disk_cache,
@@ -311,7 +313,7 @@ static void seq_disk_cache_get_file_path(SeqDiskCache *disk_cache,
                                          char *filepath,
                                          size_t filepath_maxncpy)
 {
-  seq_disk_cache_get_dir(disk_cache, key->context.scene, key->seq, filepath, filepath_maxncpy);
+  seq_disk_cache_get_dir(disk_cache, key->context.scene, key->strip, filepath, filepath_maxncpy);
   int frameno = int(key->frame_index) / DCACHE_IMAGES_PER_FILE;
   char cache_filename[FILE_MAXFILE];
   SNPRINTF(cache_filename,
@@ -369,14 +371,14 @@ static void seq_disk_cache_handle_versioning(SeqDiskCache *disk_cache)
 
 static void seq_disk_cache_delete_invalid_files(SeqDiskCache *disk_cache,
                                                 Scene *scene,
-                                                Sequence *seq,
+                                                Strip *strip,
                                                 int invalidate_types,
                                                 int range_start,
                                                 int range_end)
 {
   DiskCacheFile *next_file, *cache_file = static_cast<DiskCacheFile *>(disk_cache->files.first);
   char cache_dir[FILE_MAX];
-  seq_disk_cache_get_dir(disk_cache, scene, seq, cache_dir, sizeof(cache_dir));
+  seq_disk_cache_get_dir(disk_cache, scene, strip, cache_dir, sizeof(cache_dir));
   BLI_path_slash_ensure(cache_dir, sizeof(cache_dir));
 
   while (cache_file) {
@@ -384,7 +386,7 @@ static void seq_disk_cache_delete_invalid_files(SeqDiskCache *disk_cache,
     if (cache_file->cache_type & invalidate_types) {
       if (STREQ(cache_dir, cache_file->dir)) {
         int timeline_frame_start = seq_cache_frame_index_to_timeline_frame(
-            seq, cache_file->start_frame);
+            strip, cache_file->start_frame);
         if (timeline_frame_start > range_start && timeline_frame_start <= range_end) {
           seq_disk_cache_delete_file(disk_cache, cache_file);
         }
@@ -396,8 +398,8 @@ static void seq_disk_cache_delete_invalid_files(SeqDiskCache *disk_cache,
 
 void seq_disk_cache_invalidate(SeqDiskCache *disk_cache,
                                Scene *scene,
-                               Sequence *seq,
-                               Sequence *seq_changed,
+                               Strip *strip,
+                               Strip *strip_changed,
                                int invalidate_types)
 {
   int start;
@@ -405,10 +407,10 @@ void seq_disk_cache_invalidate(SeqDiskCache *disk_cache,
 
   BLI_mutex_lock(&disk_cache->read_write_mutex);
 
-  start = SEQ_time_left_handle_frame_get(scene, seq_changed) - DCACHE_IMAGES_PER_FILE;
-  end = SEQ_time_right_handle_frame_get(scene, seq_changed);
+  start = time_left_handle_frame_get(scene, strip_changed) - DCACHE_IMAGES_PER_FILE;
+  end = time_right_handle_frame_get(scene, strip_changed);
 
-  seq_disk_cache_delete_invalid_files(disk_cache, scene, seq, invalidate_types, start, end);
+  seq_disk_cache_delete_invalid_files(disk_cache, scene, strip, invalidate_types, start, end);
 
   BLI_mutex_unlock(&disk_cache->read_write_mutex);
 }
@@ -632,13 +634,13 @@ ImBuf *seq_disk_cache_read_file(SeqDiskCache *disk_cache, SeqCacheKey *key)
   if (header.entry[entry_index].size_raw == size_char) {
     expected_size = size_char;
     ibuf = IMB_allocImBuf(
-        key->context.rectx, key->context.recty, 32, IB_rect | IB_uninitialized_pixels);
+        key->context.rectx, key->context.recty, 32, IB_byte_data | IB_uninitialized_pixels);
     IMB_colormanagement_assign_byte_colorspace(ibuf, header.entry[entry_index].colorspace_name);
   }
   else if (header.entry[entry_index].size_raw == size_float) {
     expected_size = size_float;
     ibuf = IMB_allocImBuf(
-        key->context.rectx, key->context.recty, 32, IB_rectfloat | IB_uninitialized_pixels);
+        key->context.rectx, key->context.recty, 32, IB_float_data | IB_uninitialized_pixels);
     IMB_colormanagement_assign_float_colorspace(ibuf, header.entry[entry_index].colorspace_name);
   }
   else {
@@ -666,8 +668,7 @@ ImBuf *seq_disk_cache_read_file(SeqDiskCache *disk_cache, SeqCacheKey *key)
 
 SeqDiskCache *seq_disk_cache_create(Main *bmain, Scene *scene)
 {
-  SeqDiskCache *disk_cache = static_cast<SeqDiskCache *>(
-      MEM_callocN(sizeof(SeqDiskCache), "SeqDiskCache"));
+  SeqDiskCache *disk_cache = MEM_callocN<SeqDiskCache>("SeqDiskCache");
   disk_cache->bmain = bmain;
   BLI_mutex_init(&disk_cache->read_write_mutex);
   seq_disk_cache_handle_versioning(disk_cache);
@@ -683,3 +684,5 @@ void seq_disk_cache_free(SeqDiskCache *disk_cache)
   BLI_mutex_end(&disk_cache->read_write_mutex);
   MEM_freeN(disk_cache);
 }
+
+}  // namespace blender::seq

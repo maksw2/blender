@@ -14,12 +14,15 @@
 #include "BLI_vector.hh"
 
 #include "BKE_context.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
 #include "IMB_imbuf.hh"
+
+#include "MOV_read.hh"
 
 #include "SEQ_render.hh"
 #include "SEQ_thumbnail_cache.hh"
@@ -63,7 +66,7 @@ struct ThumbnailCache {
     explicit Request(const std::string &path,
                      int frame,
                      int stream,
-                     SequenceType type,
+                     StripType type,
                      int64_t logical_time,
                      float time_frame,
                      int ch,
@@ -72,7 +75,7 @@ struct ThumbnailCache {
         : file_path(path),
           frame_index(frame),
           stream_index(stream),
-          seq_type(type),
+          strip_type(type),
           requested_at(logical_time),
           timeline_frame(time_frame),
           channel(ch),
@@ -84,7 +87,7 @@ struct ThumbnailCache {
     std::string file_path;
     int frame_index = 0;  /* Frame index (for movies) or image index (for image sequences). */
     int stream_index = 0; /* Stream index (only for multi-stream movies). */
-    SequenceType seq_type = SEQ_TYPE_IMAGE;
+    StripType strip_type = STRIP_TYPE_IMAGE;
 
     /* The following members are payload and do not contribute to uniqueness. */
     int64_t requested_at = 0;
@@ -95,12 +98,12 @@ struct ThumbnailCache {
 
     uint64_t hash() const
     {
-      return get_default_hash(file_path, frame_index, stream_index, seq_type);
+      return get_default_hash(file_path, frame_index, stream_index, strip_type);
     }
     bool operator==(const Request &o) const
     {
       return frame_index == o.frame_index && stream_index == o.stream_index &&
-             seq_type == o.seq_type && file_path == o.file_path;
+             strip_type == o.strip_type && file_path == o.file_path;
     }
   };
 
@@ -120,8 +123,8 @@ struct ThumbnailCache {
         IMB_freeImBuf(thumb.thumb);
       }
     }
-    map_.clear_and_shrink();
-    requests_.clear_and_shrink();
+    map_.clear();
+    requests_.clear();
     logical_time_ = 0;
   }
 
@@ -155,36 +158,36 @@ static ThumbnailCache *query_thumbnail_cache(Scene *scene)
   return scene->ed->runtime.thumbnail_cache;
 }
 
-bool strip_can_have_thumbnail(const Scene *scene, const Sequence *seq)
+bool strip_can_have_thumbnail(const Scene *scene, const Strip *strip)
 {
-  if (scene == nullptr || scene->ed == nullptr || seq == nullptr) {
+  if (scene == nullptr || scene->ed == nullptr || strip == nullptr) {
     return false;
   }
-  if (!ELEM(seq->type, SEQ_TYPE_MOVIE, SEQ_TYPE_IMAGE)) {
+  if (!ELEM(strip->type, STRIP_TYPE_MOVIE, STRIP_TYPE_IMAGE)) {
     return false;
   }
-  const StripElem *se = seq->strip->stripdata;
+  const StripElem *se = strip->data->stripdata;
   if (se->orig_height == 0 || se->orig_width == 0) {
     return false;
   }
   return true;
 }
 
-static std::string get_path_from_seq(Scene *scene, const Sequence *seq, float timeline_frame)
+static std::string get_path_from_seq(Scene *scene, const Strip *strip, float timeline_frame)
 {
   char filepath[FILE_MAX];
   filepath[0] = 0;
-  switch (seq->type) {
-    case SEQ_TYPE_IMAGE: {
-      const StripElem *s_elem = SEQ_render_give_stripelem(scene, seq, timeline_frame);
+  switch (strip->type) {
+    case STRIP_TYPE_IMAGE: {
+      const StripElem *s_elem = render_give_stripelem(scene, strip, timeline_frame);
       if (s_elem != nullptr) {
-        BLI_path_join(filepath, sizeof(filepath), seq->strip->dirpath, s_elem->filename);
+        BLI_path_join(filepath, sizeof(filepath), strip->data->dirpath, s_elem->filename);
         BLI_path_abs(filepath, ID_BLEND_PATH_FROM_GLOBAL(&scene->id));
       }
     } break;
-    case SEQ_TYPE_MOVIE:
+    case STRIP_TYPE_MOVIE:
       BLI_path_join(
-          filepath, sizeof(filepath), seq->strip->dirpath, seq->strip->stripdata->filename);
+          filepath, sizeof(filepath), strip->data->dirpath, strip->data->stripdata->filename);
       BLI_path_abs(filepath, ID_BLEND_PATH_FROM_GLOBAL(&scene->id));
       break;
   }
@@ -195,25 +198,25 @@ static void image_size_to_thumb_size(int &r_width, int &r_height)
 {
   float aspect = float(r_width) / float(r_height);
   if (r_width > r_height) {
-    r_width = SEQ_THUMB_SIZE;
-    r_height = round_fl_to_int(SEQ_THUMB_SIZE / aspect);
+    r_width = THUMB_SIZE;
+    r_height = round_fl_to_int(THUMB_SIZE / aspect);
   }
   else {
-    r_height = SEQ_THUMB_SIZE;
-    r_width = round_fl_to_int(SEQ_THUMB_SIZE * aspect);
+    r_height = THUMB_SIZE;
+    r_width = round_fl_to_int(THUMB_SIZE * aspect);
   }
 }
 
 static ImBuf *make_thumb_for_image(const Scene *scene, const ThumbnailCache::Request &request)
 {
   ImBuf *ibuf = IMB_thumb_load_image(
-      request.file_path.c_str(), SEQ_THUMB_SIZE, nullptr, IMBThumbLoadFlags::LoadLargeFiles);
+      request.file_path.c_str(), THUMB_SIZE, nullptr, IMBThumbLoadFlags::LoadLargeFiles);
   if (ibuf == nullptr) {
     return nullptr;
   }
   /* Keep only float buffer if we have both byte & float. */
   if (ibuf->float_buffer.data != nullptr && ibuf->byte_buffer.data != nullptr) {
-    imb_freerectImBuf(ibuf);
+    IMB_free_byte_pixels(ibuf);
   }
 
   seq_imbuf_to_sequencer_space(scene, ibuf, false);
@@ -318,9 +321,9 @@ void ThumbGenerationJob::run_fn(void *customdata, wmJobWorkerStatus *worker_stat
     int64_t grain_size = math::max<int64_t>(8, requests.size() / 4);
     threading::parallel_for(requests.index_range(), grain_size, [&](IndexRange range) {
       /* Often the same movie file is chopped into multiple strips next to each other.
-       * Since the requests are sorted by file path and frame index, we can reuse ImBufAnim
+       * Since the requests are sorted by file path and frame index, we can reuse MovieReader
        * objects between them for performance. */
-      ImBufAnim *cur_anim = nullptr;
+      MovieReader *cur_anim = nullptr;
       std::string cur_anim_path;
       int cur_stream = 0;
       for (const int i : range) {
@@ -333,14 +336,14 @@ void ThumbGenerationJob::run_fn(void *customdata, wmJobWorkerStatus *worker_stat
         ++total_thumbs;
 #endif
         ImBuf *thumb = nullptr;
-        if (request.seq_type == SEQ_TYPE_IMAGE) {
+        if (request.strip_type == STRIP_TYPE_IMAGE) {
           /* Load thumbnail for an image. */
 #ifdef DEBUG_PRINT_THUMB_JOB_TIMES
           ++total_images;
 #endif
           thumb = make_thumb_for_image(job->scene_, request);
         }
-        else if (request.seq_type == SEQ_TYPE_MOVIE) {
+        else if (request.strip_type == STRIP_TYPE_MOVIE) {
           /* Load thumbnail for an movie. */
 #ifdef DEBUG_PRINT_THUMB_JOB_TIMES
           ++total_movies;
@@ -349,18 +352,18 @@ void ThumbGenerationJob::run_fn(void *customdata, wmJobWorkerStatus *worker_stat
           /* Are we switching to a different movie file / stream? */
           if (request.file_path != cur_anim_path || request.stream_index != cur_stream) {
             if (cur_anim != nullptr) {
-              IMB_free_anim(cur_anim);
+              MOV_close(cur_anim);
               cur_anim = nullptr;
             }
 
             cur_anim_path = request.file_path;
             cur_stream = request.stream_index;
-            cur_anim = IMB_open_anim(cur_anim_path.c_str(), IB_rect, cur_stream, nullptr);
+            cur_anim = MOV_open_file(cur_anim_path.c_str(), IB_byte_data, cur_stream, nullptr);
           }
 
           /* Decode the movie frame. */
           if (cur_anim != nullptr) {
-            thumb = IMB_anim_absolute(cur_anim, request.frame_index, IMB_TC_NONE, IMB_PROXY_NONE);
+            thumb = MOV_decode_frame(cur_anim, request.frame_index, IMB_TC_NONE, IMB_PROXY_NONE);
             if (thumb != nullptr) {
               seq_imbuf_assign_spaces(job->scene_, thumb);
             }
@@ -393,7 +396,7 @@ void ThumbGenerationJob::run_fn(void *customdata, wmJobWorkerStatus *worker_stat
         }
       }
       if (cur_anim != nullptr) {
-        IMB_free_anim(cur_anim);
+        MOV_close(cur_anim);
         cur_anim = nullptr;
       }
     });
@@ -420,7 +423,7 @@ static ImBuf *query_thumbnail(ThumbnailCache &cache,
                               int frame_index,
                               float timeline_frame,
                               const bContext *C,
-                              const Sequence *seq)
+                              const Strip *strip)
 {
   int64_t cur_time = cache.logical_time_;
   ThumbnailCache::FileEntry *val = cache.map_.lookup_ptr(key);
@@ -438,7 +441,7 @@ static ImBuf *query_thumbnail(ThumbnailCache &cache,
   int64_t best_index = -1;
   int best_score = INT_MAX;
   for (int64_t index = 0; index < val->frames.size(); index++) {
-    if (seq->streamindex != val->frames[index].stream_index) {
+    if (strip->streamindex != val->frames[index].stream_index) {
       continue; /* Different video stream than what we need, ignore. */
     }
     int score = math::abs(frame_index - val->frames[index].frame_index);
@@ -453,16 +456,16 @@ static ImBuf *query_thumbnail(ThumbnailCache &cache,
 
   if (best_score > 0) {
     /* We do not have an exact frame match, add a thumb generation request. */
-    const StripElem *se = seq->strip->stripdata;
+    const StripElem *se = strip->data->stripdata;
     int img_width = se->orig_width;
     int img_height = se->orig_height;
     ThumbnailCache::Request request(key,
                                     frame_index,
-                                    seq->streamindex,
-                                    SequenceType(seq->type),
+                                    strip->streamindex,
+                                    StripType(strip->type),
                                     cur_time,
                                     timeline_frame,
-                                    seq->machine,
+                                    strip->machine,
                                     img_width,
                                     img_height);
     cache.requests_.add(request);
@@ -481,26 +484,26 @@ static ImBuf *query_thumbnail(ThumbnailCache &cache,
 
 ImBuf *thumbnail_cache_get(const bContext *C,
                            Scene *scene,
-                           const Sequence *seq,
+                           const Strip *strip,
                            float timeline_frame)
 {
-  if (!strip_can_have_thumbnail(scene, seq)) {
+  if (!strip_can_have_thumbnail(scene, strip)) {
     return nullptr;
   }
 
   timeline_frame = math::round(timeline_frame);
 
-  const std::string key = get_path_from_seq(scene, seq, timeline_frame);
-  int frame_index = SEQ_give_frame_index(scene, seq, timeline_frame);
-  if (seq->type == SEQ_TYPE_MOVIE) {
-    frame_index += seq->anim_startofs;
+  const std::string key = get_path_from_seq(scene, strip, timeline_frame);
+  int frame_index = give_frame_index(scene, strip, timeline_frame);
+  if (strip->type == STRIP_TYPE_MOVIE) {
+    frame_index += strip->anim_startofs;
   }
 
   ImBuf *res = nullptr;
   {
     std::scoped_lock lock(thumb_cache_mutex);
     ThumbnailCache *cache = ensure_thumbnail_cache(scene);
-    res = query_thumbnail(*cache, key, frame_index, timeline_frame, C, seq);
+    res = query_thumbnail(*cache, key, frame_index, timeline_frame, C, strip);
   }
 
   if (res) {
@@ -509,28 +512,28 @@ ImBuf *thumbnail_cache_get(const bContext *C,
   return res;
 }
 
-void thumbnail_cache_invalidate_strip(Scene *scene, const Sequence *seq)
+void thumbnail_cache_invalidate_strip(Scene *scene, const Strip *strip)
 {
-  if (!strip_can_have_thumbnail(scene, seq)) {
+  if (!strip_can_have_thumbnail(scene, strip)) {
     return;
   }
 
   std::scoped_lock lock(thumb_cache_mutex);
   ThumbnailCache *cache = query_thumbnail_cache(scene);
   if (cache != nullptr) {
-    if (ELEM((seq)->type, SEQ_TYPE_MOVIE, SEQ_TYPE_IMAGE)) {
-      const StripElem *elem = seq->strip->stripdata;
+    if (ELEM((strip)->type, STRIP_TYPE_MOVIE, STRIP_TYPE_IMAGE)) {
+      const StripElem *elem = strip->data->stripdata;
       if (elem != nullptr) {
         int paths_count = 1;
-        if (seq->type == SEQ_TYPE_IMAGE) {
+        if (strip->type == STRIP_TYPE_IMAGE) {
           /* Image strip has array of file names. */
           paths_count = int(MEM_allocN_len(elem) / sizeof(*elem));
         }
         char filepath[FILE_MAX];
-        const char *basepath = seq->scene ? ID_BLEND_PATH_FROM_GLOBAL(&seq->scene->id) :
-                                            BKE_main_blendfile_path_from_global();
+        const char *basepath = strip->scene ? ID_BLEND_PATH_FROM_GLOBAL(&strip->scene->id) :
+                                              BKE_main_blendfile_path_from_global();
         for (int i = 0; i < paths_count; i++, elem++) {
-          BLI_path_join(filepath, sizeof(filepath), seq->strip->dirpath, elem->filename);
+          BLI_path_join(filepath, sizeof(filepath), strip->data->dirpath, elem->filename);
           BLI_path_abs(filepath, basepath);
           cache->remove_entry(filepath);
         }

@@ -2,10 +2,19 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_edit_mode_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_mesh_loop_normal)
+#ifdef GLSL_CPP_STUBS
+#  define LOOP_NORMAL
+#endif
+
+#include "draw_model_lib.glsl"
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
 #include "gpu_shader_attribute_load_lib.glsl"
 #include "gpu_shader_index_load_lib.glsl"
+#include "overlay_common_lib.glsl"
 
 bool test_occlusion()
 {
@@ -15,8 +24,6 @@ bool test_occlusion()
 
 void main()
 {
-  GPU_INTEL_VERTEX_SHADER_WORKAROUND
-
   /* Avoid undefined behavior after return. */
   finalColor = vec4(0.0);
   gl_Position = vec4(0.0);
@@ -36,12 +43,6 @@ void main()
 
   uint in_primitive_id = uint(gl_VertexID) / output_vertex_count_per_input_primitive;
   uint in_primitive_first_vertex = in_primitive_id * input_primitive_vertex_count;
-
-  uint out_vertex_id = uint(gl_VertexID) % ouput_primitive_vertex_count;
-  uint out_primitive_id = (uint(gl_VertexID) / ouput_primitive_vertex_count) %
-                          ouput_primitive_count;
-  uint out_invocation_id = (uint(gl_VertexID) / output_vertex_count_per_invocation) %
-                           ouput_invocation_count;
 
   uint vert_i = gpu_index_load(in_primitive_first_vertex);
 
@@ -65,7 +66,12 @@ void main()
   finalColor = colorNormal;
 
 #elif defined(VERT_NORMAL)
+#  if defined(FLOAT_NORMAL)
+  /* Path for opensubdiv. To be phased out at some point. */
+  nor = gpu_attr_load_float3(vnor, gpu_attr_0, vert_i);
+#  else
   nor = gpu_attr_load_uint_1010102_snorm(vnor, gpu_attr_0, vert_i).xyz;
+#  endif
   finalColor = colorVNormal;
 
 #elif defined(LOOP_NORMAL)
@@ -109,19 +115,20 @@ void main()
   vec3 ls_pos = pos;
 #endif
 
-  vec3 n = normalize(normal_object_to_world(nor));
-  vec3 world_pos = point_object_to_world(ls_pos);
+  vec3 n = normalize(drw_normal_object_to_world(nor));
+  vec3 world_pos = drw_point_object_to_world(ls_pos);
 
   if ((gl_VertexID & 1) == 0) {
     if (isConstantScreenSizeNormals) {
-      bool is_persp = (drw_view.winmat[3][3] == 0.0);
+      bool is_persp = (drw_view().winmat[3][3] == 0.0);
       if (is_persp) {
-        float dist_fac = length(cameraPos - world_pos);
-        float cos_fac = dot(cameraForward, cameraVec(world_pos));
-        world_pos += n * normalScreenSize * dist_fac * cos_fac * pixelFac * sizePixel;
+        float dist_fac = length(drw_view_position() - world_pos);
+        float cos_fac = dot(drw_view_forward(), drw_world_incident_vector(world_pos));
+        world_pos += n * normalScreenSize * dist_fac * cos_fac * globalsBlock.pixel_fac *
+                     sizePixel;
       }
       else {
-        float frustrum_fac = mul_project_m4_v3_zfac(n) * sizePixel;
+        float frustrum_fac = mul_project_m4_v3_zfac(globalsBlock.pixel_fac, n) * sizePixel;
         world_pos += n * normalScreenSize * frustrum_fac;
       }
     }
@@ -130,7 +137,7 @@ void main()
     }
   }
 
-  gl_Position = point_world_to_ndc(world_pos);
+  gl_Position = drw_point_world_to_homogenous(world_pos);
 
   finalColor.a *= (test_occlusion()) ? alpha : 1.0;
 

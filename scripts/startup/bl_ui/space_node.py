@@ -230,7 +230,7 @@ class NODE_MT_editor_menus(Menu):
         layout.menu("NODE_MT_node")
 
 
-class NODE_MT_add(bpy.types.Menu):
+class NODE_MT_add(Menu):
     bl_space_type = 'NODE_EDITOR'
     bl_label = "Add"
     bl_translation_context = i18n_contexts.operator_default
@@ -336,6 +336,7 @@ class NODE_MT_node(Menu):
     def draw(self, context):
         layout = self.layout
         snode = context.space_data
+        group = snode.edit_tree
         is_compositor = snode.tree_type == 'CompositorNodeTree'
 
         layout.operator("transform.translate").view2d_edge_pan = True
@@ -372,11 +373,12 @@ class NODE_MT_node(Menu):
         layout.operator("node.links_detach")
         layout.operator("node.links_mute")
 
-        layout.separator()
-        layout.operator("node.group_make", icon='NODETREE')
-        layout.operator("node.group_insert", text="Insert Into Group")
-        layout.operator("node.group_edit").exit = False
-        layout.operator("node.group_ungroup")
+        if not group or group.bl_use_group_interface:
+            layout.separator()
+            layout.operator("node.group_make", icon='NODETREE')
+            layout.operator("node.group_insert", text="Insert Into Group")
+            layout.operator("node.group_edit").exit = False
+            layout.operator("node.group_ungroup")
 
         layout.separator()
         layout.menu("NODE_MT_context_menu_show_hide_menu")
@@ -462,8 +464,8 @@ class NODE_PT_geometry_node_tool_object_types(Panel):
             ("is_type_mesh", "Mesh", 'MESH_DATA'),
             ("is_type_curve", "Hair Curves", 'CURVES_DATA'),
         ]
-        if context.preferences.experimental.use_new_point_cloud_type:
-            types.append(("is_type_point_cloud", "Point Cloud", 'POINTCLOUD_DATA'))
+        if context.preferences.experimental.use_new_pointcloud_type:
+            types.append(("is_type_pointcloud", "Point Cloud", 'POINTCLOUD_DATA'))
 
         col = layout.column()
         col.active = group.is_tool
@@ -581,6 +583,7 @@ class NODE_MT_context_menu(Menu):
         snode = context.space_data
         is_nested = (len(snode.path) > 1)
         is_geometrynodes = snode.tree_type == 'GeometryNodeTree'
+        group = snode.edit_tree
 
         selected_nodes_len = len(context.selected_nodes)
         active_node = context.active_node
@@ -640,17 +643,18 @@ class NODE_MT_context_menu(Menu):
 
         layout.separator()
 
-        layout.operator("node.group_make", text="Make Group", icon='NODETREE')
-        layout.operator("node.group_insert", text="Insert Into Group")
+        if group and group.bl_use_group_interface:
+            layout.operator("node.group_make", text="Make Group", icon='NODETREE')
+            layout.operator("node.group_insert", text="Insert Into Group")
 
-        if active_node and active_node.type == 'GROUP':
-            layout.operator("node.group_edit").exit = False
-            layout.operator("node.group_ungroup", text="Ungroup")
+            if active_node and active_node.type == 'GROUP':
+                layout.operator("node.group_edit").exit = False
+                layout.operator("node.group_ungroup", text="Ungroup")
 
-        if is_nested:
-            layout.operator("node.tree_path_parent", text="Exit Group", icon='FILE_PARENT')
+            if is_nested:
+                layout.operator("node.tree_path_parent", text="Exit Group", icon='FILE_PARENT')
 
-        layout.separator()
+            layout.separator()
 
         layout.operator("node.join", text="Join in New Frame")
         layout.operator("node.detach", text="Remove from Frame")
@@ -693,7 +697,7 @@ class NODE_PT_active_node_generic(Panel):
         layout.prop(node, "name", icon='NODE')
         layout.prop(node, "label", icon='NODE')
 
-        if tree.type == "GEOMETRY":
+        if tree.type == 'GEOMETRY':
             layout.prop(node, "warning_propagation")
 
 
@@ -825,7 +829,7 @@ class NODE_PT_backdrop(Panel):
         col.operator("node.backimage_fit", text="Fit")
 
 
-class NODE_PT_quality(bpy.types.Panel):
+class NODE_PT_quality(Panel):
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
     bl_category = "Options"
@@ -849,32 +853,11 @@ class NODE_PT_quality(bpy.types.Panel):
 
         col = layout.column()
         col.prop(rd, "compositor_device", text="Device")
-        col.prop(rd, "compositor_precision", text="Precision")
+        if rd.compositor_device == 'GPU':
+            col.prop(rd, "compositor_precision", text="Precision")
 
         col = layout.column()
         col.prop(tree, "use_viewer_border")
-
-
-class NODE_PT_compositor_debug(Panel):
-    bl_space_type = 'NODE_EDITOR'
-    bl_region_type = 'UI'
-    bl_category = "Options"
-    bl_label = "Debug"
-    bl_parent_id = "NODE_PT_quality"
-    bl_options = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        render_data = context.scene.render
-        if render_data.compositor_device != "CPU":
-            return False
-
-        preferences = context.preferences
-        return preferences.view.show_developer_ui and preferences.experimental.enable_new_cpu_compositor
-
-    def draw(self, context):
-        render_data = context.scene.render
-        self.layout.prop(render_data, "use_new_cpu_compositor", text="Experimental CPU Implementation")
 
 
 class NODE_PT_overlay(Panel):
@@ -921,10 +904,19 @@ class NODE_PT_overlay(Panel):
 class NODE_MT_node_tree_interface_context_menu(Menu):
     bl_label = "Node Tree Interface Specials"
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
+        snode = context.space_data
+        tree = snode.edit_tree
+        active_item = tree.interface.active
 
         layout.operator("node.interface_item_duplicate", icon='DUPLICATE')
+        if tree.type in {'GEOMETRY', 'SHADER'}:
+            layout.separator()
+            if active_item.item_type == 'SOCKET':
+                layout.operator("node.interface_item_make_panel_toggle")
+            elif active_item.item_type == 'PANEL':
+                layout.operator("node.interface_item_unlink_panel_toggle")
 
 
 class NODE_PT_node_tree_interface(Panel):
@@ -942,6 +934,8 @@ class NODE_PT_node_tree_interface(Panel):
         if tree is None:
             return False
         if tree.is_embedded_data:
+            return False
+        if not tree.bl_use_group_interface:
             return False
         return True
 
@@ -993,6 +987,47 @@ class NODE_PT_node_tree_interface(Panel):
             layout.use_property_split = False
 
 
+class NODE_PT_node_tree_interface_panel_toggle(Panel):
+    bl_space_type = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = "Group"
+    bl_parent_id = "NODE_PT_node_tree_interface"
+    bl_label = "Panel Toggle"
+
+    @classmethod
+    def poll(cls, context):
+        snode = context.space_data
+        if snode is None:
+            return False
+        tree = snode.edit_tree
+        if tree is None:
+            return False
+        active_item = tree.interface.active
+        if not active_item or active_item.item_type != 'PANEL':
+            return False
+        if not active_item.interface_items:
+            return False
+        first_item = active_item.interface_items[0]
+        return first_item.is_panel_toggle
+
+    def draw(self, context):
+        layout = self.layout
+        snode = context.space_data
+        tree = snode.edit_tree
+
+        active_item = tree.interface.active
+        panel_toggle_item = active_item.interface_items[0]
+
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        layout.prop(panel_toggle_item, "default_value", text="Default")
+        layout.prop(panel_toggle_item, "hide_in_modifier")
+        layout.prop(panel_toggle_item, "force_non_field")
+
+        layout.use_property_split = False
+
+
 class NODE_PT_node_tree_properties(Panel):
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
@@ -1025,6 +1060,9 @@ class NODE_PT_node_tree_properties(Panel):
         else:
             layout.prop(group, "description", text="Description")
 
+        if not group.bl_use_group_interface:
+            return
+
         layout.prop(group, "color_tag")
         row = layout.row(align=True)
         row.prop(group, "default_group_node_width", text="Node Width")
@@ -1052,10 +1090,6 @@ class NODE_PT_annotation(AnnotationDataPanel, Panel):
     def poll(cls, context):
         snode = context.space_data
         return snode is not None and snode.node_tree is not None
-
-
-def node_draw_tree_view(_layout, _context):
-    pass
 
 
 # Adapt properties editor panel to display in node editor. We have to
@@ -1097,13 +1131,13 @@ classes = (
     NODE_PT_node_tree_properties,
     NODE_MT_node_tree_interface_context_menu,
     NODE_PT_node_tree_interface,
+    NODE_PT_node_tree_interface_panel_toggle,
     NODE_PT_active_node_generic,
     NODE_PT_active_node_color,
     NODE_PT_texture_mapping,
     NODE_PT_active_tool,
     NODE_PT_backdrop,
     NODE_PT_quality,
-    NODE_PT_compositor_debug,
     NODE_PT_annotation,
     NODE_PT_overlay,
     NODE_PT_active_node_properties,

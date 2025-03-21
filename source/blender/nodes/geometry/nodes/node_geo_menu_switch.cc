@@ -2,13 +2,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <algorithm>
-
 #include "node_geometry_util.hh"
 
 #include "DNA_node_types.h"
-
-#include "BLI_string.h"
 
 #include "FN_multi_function.hh"
 
@@ -100,7 +96,7 @@ static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeMenuSwitch *data = MEM_cnew<NodeMenuSwitch>(__func__);
+  NodeMenuSwitch *data = MEM_callocN<NodeMenuSwitch>(__func__);
   data->data_type = SOCK_GEOMETRY;
   data->enum_definition.next_identifier = 0;
   data->enum_definition.items_array = nullptr;
@@ -120,7 +116,7 @@ static void node_free_storage(bNode *node)
 static void node_copy_storage(bNodeTree * /*dst_tree*/, bNode *dst_node, const bNode *src_node)
 {
   const NodeMenuSwitch &src_storage = node_storage(*src_node);
-  NodeMenuSwitch *dst_storage = MEM_cnew<NodeMenuSwitch>(__func__, src_storage);
+  NodeMenuSwitch *dst_storage = MEM_dupallocN<NodeMenuSwitch>(__func__, src_storage);
   dst_node->storage = dst_storage;
 
   socket_items::copy_array<MenuSwitchItemsAccessor>(*src_node, *dst_node);
@@ -171,7 +167,7 @@ class MenuSwitchFn : public mf::MultiFunction {
     this->set_signature(&signature_);
   }
 
-  void call(const IndexMask &mask, mf::Params params, mf::Context /*context*/) const
+  void call(const IndexMask &mask, mf::Params params, mf::Context /*context*/) const override
   {
     const int value_inputs_start = 1;
     const int inputs_num = enum_def_.items_num;
@@ -236,8 +232,7 @@ class LazyFunctionForMenuSwitchNode : public LazyFunction {
     const NodeMenuSwitch &storage = node_storage(node);
     const eNodeSocketDatatype data_type = eNodeSocketDatatype(storage.data_type);
     can_be_field_ = socket_type_supports_fields(data_type);
-    const bke::bNodeSocketType *socket_type = bke::node_socket_type_find(
-        *bke::node_static_socket_type(data_type, PROP_NONE));
+    const bke::bNodeSocketType *socket_type = bke::node_socket_type_find_static(data_type);
     BLI_assert(socket_type != nullptr);
     cpp_type_ = socket_type->geometry_nodes_cpp_type;
     field_base_type_ = socket_type->base_cpp_type;
@@ -365,14 +360,15 @@ static void node_layout_ex(uiLayout *layout, bContext *C, PointerRNA *ptr)
 
   uiItemR(layout, ptr, "data_type", UI_ITEM_NONE, "", ICON_NONE);
 
-  if (uiLayout *panel = uiLayoutPanel(C, layout, "menu_switch_items", false, TIP_("Menu Items"))) {
+  if (uiLayout *panel = uiLayoutPanel(C, layout, "menu_switch_items", false, IFACE_("Menu Items")))
+  {
     socket_items::ui::draw_items_list_with_operators<MenuSwitchItemsAccessor>(
         C, panel, tree, node);
     socket_items::ui::draw_active_item_props<MenuSwitchItemsAccessor>(
         tree, node, [&](PointerRNA *item_ptr) {
           uiLayoutSetPropSep(panel, true);
           uiLayoutSetPropDecorate(panel, false);
-          uiItemR(panel, item_ptr, "description", UI_ITEM_NONE, nullptr, ICON_NONE);
+          uiItemR(panel, item_ptr, "description", UI_ITEM_NONE, std::nullopt, ICON_NONE);
         });
   }
 }
@@ -411,16 +407,20 @@ static void register_node()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_MENU_SWITCH, "Menu Switch", NODE_CLASS_CONVERTER);
+  geo_node_type_base(&ntype, "GeometryNodeMenuSwitch", GEO_NODE_MENU_SWITCH);
+  ntype.ui_name = "Menu Switch";
+  ntype.ui_description = "Select from multiple inputs by name";
+  ntype.enum_name_legacy = "MENU_SWITCH";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
-  blender::bke::node_type_storage(&ntype, "NodeMenuSwitch", node_free_storage, node_copy_storage);
+  blender::bke::node_type_storage(ntype, "NodeMenuSwitch", node_free_storage, node_copy_storage);
   ntype.gather_link_search_ops = node_gather_link_searches;
   ntype.draw_buttons = node_layout;
   ntype.draw_buttons_ex = node_layout_ex;
   ntype.register_operators = node_operators;
   ntype.insert_link = node_insert_link;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }
@@ -434,14 +434,14 @@ std::unique_ptr<LazyFunction> get_menu_switch_node_lazy_function(
     const bNode &node, GeometryNodesLazyFunctionGraphInfo &lf_graph_info)
 {
   using namespace node_geo_menu_switch_cc;
-  BLI_assert(node.type == GEO_NODE_MENU_SWITCH);
+  BLI_assert(node.type_legacy == GEO_NODE_MENU_SWITCH);
   return std::make_unique<LazyFunctionForMenuSwitchNode>(node, lf_graph_info);
 }
 
 std::unique_ptr<LazyFunction> get_menu_switch_node_socket_usage_lazy_function(const bNode &node)
 {
   using namespace node_geo_menu_switch_cc;
-  BLI_assert(node.type == GEO_NODE_MENU_SWITCH);
+  BLI_assert(node.type_legacy == GEO_NODE_MENU_SWITCH);
   return std::make_unique<LazyFunctionForMenuSwitchSocketUsage>(node);
 }
 

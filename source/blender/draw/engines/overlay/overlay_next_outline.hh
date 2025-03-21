@@ -13,6 +13,8 @@
 
 #include "draw_common.hh"
 
+#include "DNA_userdef_types.h"
+
 namespace blender::draw::overlay {
 
 /**
@@ -62,43 +64,44 @@ class Outline : Overlay {
       auto &pass = outline_prepass_ps_;
       pass.init();
       pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+      pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
       pass.framebuffer_set(&prepass_fb_);
       pass.clear_color_depth_stencil(float4(0.0f), 1.0f, 0x0);
       pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL,
                      state.clipping_plane_count);
       {
         auto &sub = pass.sub("Curves");
-        sub.shader_set(res.shaders.outline_prepass_curves.get());
+        sub.shader_set(res.shaders->outline_prepass_curves.get());
         sub.push_constant("isTransform", is_transform);
         prepass_curves_ps_ = &sub;
       }
       {
         auto &sub = pass.sub("PointCloud");
-        sub.shader_set(res.shaders.outline_prepass_pointcloud.get());
+        sub.shader_set(res.shaders->outline_prepass_pointcloud.get());
         sub.push_constant("isTransform", is_transform);
         prepass_pointcloud_ps_ = &sub;
       }
       {
         auto &sub = pass.sub("GreasePencil");
-        sub.shader_set(res.shaders.outline_prepass_gpencil.get());
+        sub.shader_set(res.shaders->outline_prepass_gpencil.get());
         sub.push_constant("isTransform", is_transform);
         prepass_gpencil_ps_ = &sub;
       }
       {
         auto &sub = pass.sub("Mesh");
-        sub.shader_set(res.shaders.outline_prepass_mesh.get());
+        sub.shader_set(res.shaders->outline_prepass_mesh.get());
         sub.push_constant("isTransform", is_transform);
         prepass_mesh_ps_ = &sub;
       }
       {
         auto &sub = pass.sub("Volume");
-        sub.shader_set(res.shaders.outline_prepass_mesh.get());
+        sub.shader_set(res.shaders->outline_prepass_mesh.get());
         sub.push_constant("isTransform", is_transform);
         prepass_volume_ps_ = &sub;
       }
       {
         auto &sub = pass.sub("Wire");
-        sub.shader_set(res.shaders.outline_prepass_wire.get());
+        sub.shader_set(res.shaders->outline_prepass_wire.get());
         sub.push_constant("isTransform", is_transform);
         prepass_wire_ps_ = &sub;
       }
@@ -107,7 +110,7 @@ class Outline : Overlay {
       auto &pass = outline_resolve_ps_;
       pass.init();
       pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA_PREMUL);
-      pass.shader_set(res.shaders.outline_detect.get());
+      pass.shader_set(res.shaders->outline_detect.get());
       /* Don't occlude the outline if in xray mode as it causes too much flickering. */
       pass.push_constant("alphaOcclu", state.xray_enabled ? 1.0f : 0.35f);
       pass.push_constant("doThickOutlines", do_expand);
@@ -117,6 +120,7 @@ class Outline : Overlay {
       pass.bind_texture("sceneDepth", &res.depth_tx);
       pass.bind_texture("outlineDepth", &tmp_depth_tx_);
       pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+      pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
       pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
     }
   }
@@ -167,7 +171,7 @@ class Outline : Overlay {
         /* Looks bad in wireframe mode. Could be relaxed if we draw a wireframe of some sort in
          * the future. */
         if (!state.is_wireframe_mode) {
-          geom = point_cloud_sub_pass_setup(*prepass_pointcloud_ps_, ob_ref.object);
+          geom = pointcloud_sub_pass_setup(*prepass_pointcloud_ps_, ob_ref.object);
           prepass_pointcloud_ps_->draw(geom, manager.unique_handle(ob_ref));
         }
         break;
@@ -197,10 +201,11 @@ class Outline : Overlay {
       /* Note: We need a dedicated pass since we have to populated it for each redraw. */
       auto &pass = outline_prepass_flat_ps_;
       pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+      pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
       pass.framebuffer_set(&prepass_fb_);
       pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL,
                      state.clipping_plane_count);
-      pass.shader_set(res.shaders.outline_prepass_wire.get());
+      pass.shader_set(res.shaders->outline_prepass_wire.get());
       pass.push_constant("isTransform", is_transform);
 
       for (FlatObjectRef flag_ob_ref : flat_objects_) {

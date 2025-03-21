@@ -9,27 +9,18 @@
 #include <climits>
 #include <cstdlib>
 
-#include "BLI_math_vector.h"
 #include "BLI_path_utils.hh"
-#include "BLI_sys_types.h"
-#include "BLI_utildefines.h"
 
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
 #include "rna_internal.hh"
 
-#include "BKE_fluid.h"
 #include "BKE_modifier.hh"
-#include "BKE_pointcache.h"
 
 #include "BLT_translation.hh"
 
 #include "DNA_fluid_types.h"
-#include "DNA_modifier_types.h"
-#include "DNA_object_force_types.h"
-#include "DNA_object_types.h"
-#include "DNA_particle_types.h"
 #include "DNA_scene_types.h"
 
 #include "WM_api.hh"
@@ -39,10 +30,13 @@
 
 #  include <fmt/format.h>
 
+#  include "BLI_math_vector.h"
+#  include "BLI_string.h"
 #  include "BLI_threads.h"
 
 #  include "BKE_colorband.hh"
 #  include "BKE_context.hh"
+#  include "BKE_fluid.h"
 #  include "BKE_particle.h"
 
 #  include "DEG_depsgraph.hh"
@@ -1315,7 +1309,9 @@ static void rna_def_fluid_domain_settings(BlenderRNA *brna)
 
   /*  Cache type - generated dynamically based on domain type */
   static const EnumPropertyItem cache_file_type_items[] = {
-      {0, "NONE", 0, "", ""},
+      {FLUID_DOMAIN_FILE_UNI, "UNI", 0, "Uni Cache", "Uni file format (.uni)"},
+      {FLUID_DOMAIN_FILE_OPENVDB, "OPENVDB", 0, "OpenVDB", "OpenVDB file format (.vdb)"},
+      {FLUID_DOMAIN_FILE_RAW, "RAW", 0, "Raw Cache", "Raw file format (.raw)"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -1762,6 +1758,7 @@ static void rna_def_fluid_domain_settings(BlenderRNA *brna)
   RNA_def_property_range(prop, 0.0, 10.0);
   RNA_def_property_ui_range(prop, 0.0, 10.0, 1, 2);
   RNA_def_property_ui_text(prop, "Strength", "Strength of noise");
+  RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_AMOUNT);
   RNA_def_property_update(prop, NC_OBJECT | ND_MODIFIER, "rna_Fluid_noisecache_reset");
 
   prop = RNA_def_property(srna, "noise_pos_scale", PROP_FLOAT, PROP_NONE);
@@ -1917,6 +1914,7 @@ static void rna_def_fluid_domain_settings(BlenderRNA *brna)
                            "Strength",
                            "Viscosity of liquid (higher values result in more viscous fluids, a "
                            "value of 0 will still apply some viscosity)");
+  RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_AMOUNT);
   RNA_def_property_update(prop, NC_OBJECT | ND_MODIFIER, "rna_Fluid_datacache_reset");
 
   /*  diffusion options */

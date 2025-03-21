@@ -1,4 +1,5 @@
 /* SPDX-FileCopyrightText: 2001-2002 NaN Holding BV. All rights reserved.
+ * SPDX-FileCopyrightText: 2025 Blender Authors
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
@@ -6,53 +7,18 @@
  * \ingroup imbuf
  */
 
-/**
- * \brief IMage Buffer module.
- *
- * This module offers import/export of several graphical file formats.
- * \ingroup imbuf
- *
- * \page IMB ImBuf module external interface
- * \section imb_about About the IMB module
- *
- * External interface of the IMage Buffer module. This module offers
- * import/export of several graphical file formats. It offers the
- * ImBuf type as a common structure to refer to different graphical
- * file formats, and to enable a uniform way of handling them.
- *
- * \section imb_issues Known issues with IMB
- *
- * - imbuf is written in C.
- * - Endianness issues are dealt with internally.
- * - File I/O must be done externally. The module uses FILE*'s to
- *   direct input/output.
- *
- * \section imb_dependencies Dependencies
- *
- * IMB needs:
- * - \ref DNA module
- *     The #ListBase types are used for handling the memory management.
- * - \ref blenlib module
- *     blenlib handles guarded memory management in blender-style.
- *     BLI_winstuff.h makes a few windows specific behaviors
- *     posix-compliant.
- */
-
 #pragma once
 
 #include "../gpu/GPU_texture.hh"
 
+#include "BLI_math_matrix_types.hh"
 #include "BLI_utildefines.h"
 
 #include "IMB_imbuf_types.hh"
 
-#define IM_MAX_SPACE 64
-
 struct ImBuf;
 struct rctf;
 struct rcti;
-
-struct ImBufAnim;
 
 struct ColorManagedDisplay;
 
@@ -172,16 +138,16 @@ ImBuf *IMB_dupImBuf(const ImBuf *ibuf1);
 /**
  * Approximate size of ImBuf in memory
  */
-size_t IMB_get_size_in_memory(ImBuf *ibuf);
+size_t IMB_get_size_in_memory(const ImBuf *ibuf);
 
 /**
- * \brief Get the length of the rect of the given image buffer in terms of pixels.
+ * \brief Get the length of the data of the given image buffer in pixels.
  *
  * This is the width * the height of the image buffer.
- * This function is preferred over `ibuf->x * ibuf->y` due to overflow issues when
- * working with large resolution images (30kx30k).
+ * This function is preferred over `ibuf->x * ibuf->y` due to 32 bit int overflow
+ * issues when working with very large resolution images.
  */
-size_t IMB_get_rect_len(const ImBuf *ibuf);
+size_t IMB_get_pixel_count(const ImBuf *ibuf);
 
 enum IMB_BlendMode {
   IMB_BLEND_MIX = 0,
@@ -293,94 +259,6 @@ enum eIMBInterpolationFilterMode {
   IMB_FILTER_BOX,
 };
 
-/**
- * Defaults to BL_proxy within the directory of the animation.
- */
-void IMB_anim_set_index_dir(ImBufAnim *anim, const char *dir);
-void IMB_anim_get_filename(ImBufAnim *anim, char *filename, int filename_maxncpy);
-
-int IMB_anim_index_get_frame_index(ImBufAnim *anim, IMB_Timecode_Type tc, int position);
-
-int IMB_anim_proxy_get_existing(ImBufAnim *anim);
-
-struct IndexBuildContext;
-
-/**
- * Prepare context for proxies/time-codes builder
- */
-IndexBuildContext *IMB_anim_index_rebuild_context(ImBufAnim *anim,
-                                                  IMB_Timecode_Type tcs_in_use,
-                                                  int proxy_sizes_in_use,
-                                                  int quality,
-                                                  const bool overwrite,
-                                                  GSet *file_list,
-                                                  bool build_only_on_bad_performance);
-
-/**
- * Will rebuild all used indices and proxies at once.
- */
-void IMB_anim_index_rebuild(IndexBuildContext *context,
-                            bool *stop,
-                            bool *do_update,
-                            float *progress);
-
-/**
- * Finish rebuilding proxies/time-codes and free temporary contexts used.
- */
-void IMB_anim_index_rebuild_finish(IndexBuildContext *context, bool stop);
-
-/**
- * Return the length (in frames) of the given \a anim.
- */
-int IMB_anim_get_duration(ImBufAnim *anim, IMB_Timecode_Type tc);
-
-/**
- * Return the encoded start offset (in seconds) of the given \a anim.
- */
-double IMD_anim_get_offset(ImBufAnim *anim);
-
-/**
- * Return the fps contained in movie files (function rval is false,
- * and frs_sec and frs_sec_base untouched if none available!)
- */
-bool IMB_anim_get_fps(const ImBufAnim *anim,
-                      bool no_av_base,
-                      short *r_frs_sec,
-                      float *r_frs_sec_base);
-
-ImBufAnim *IMB_open_anim(const char *filepath,
-                         int ib_flags,
-                         int streamindex,
-                         char colorspace[IM_MAX_SPACE]);
-void IMB_suffix_anim(ImBufAnim *anim, const char *suffix);
-void IMB_close_anim(ImBufAnim *anim);
-void IMB_close_anim_proxies(ImBufAnim *anim);
-bool IMB_anim_can_produce_frames(const ImBufAnim *anim);
-
-int IMB_anim_get_image_width(ImBufAnim *anim);
-int IMB_anim_get_image_height(ImBufAnim *anim);
-bool IMB_get_gop_decode_time(ImBufAnim *anim);
-
-/**
- * Fetches a frame from a movie at given frame position.
- *
- * Movies that are <= 8 bits/color channel are returned as byte images;
- * higher bit depth movies are returned as float images. Note that the
- * color space is returned as-is, i.e. a float image might not be in
- * linear space.
- */
-ImBuf *IMB_anim_absolute(ImBufAnim *anim,
-                         int position,
-                         IMB_Timecode_Type tc /* = 1 = IMB_TC_RECORD_RUN */,
-                         IMB_Proxy_Size preview_size /* = 0 = IMB_PROXY_NONE */);
-
-/**
- * fetches a define preview-frame, usually half way into the movie.
- */
-ImBuf *IMB_anim_previewframe(ImBufAnim *anim);
-
-void IMB_free_anim(ImBufAnim *anim);
-
 #define FILTER_MASK_NULL 0
 #define FILTER_MASK_MARGIN 1
 #define FILTER_MASK_USED 2
@@ -451,12 +329,6 @@ int IMB_ispic_type_from_memory(const unsigned char *buf, size_t buf_size);
 int IMB_ispic_type(const char *filepath);
 
 /**
- * Test if the file is a video file (known format, has a video stream and
- * supported video codec).
- */
-bool IMB_isanim(const char *filepath);
-
-/**
  * Test if color-space conversions of pixels in buffer need to take into account alpha.
  */
 bool IMB_alpha_affects_rgb(const ImBuf *ibuf);
@@ -464,9 +336,9 @@ bool IMB_alpha_affects_rgb(const ImBuf *ibuf);
 /**
  * Create char buffer, color corrected if necessary, for ImBufs that lack one.
  */
-void IMB_rect_from_float(ImBuf *ibuf);
-void IMB_float_from_rect_ex(ImBuf *dst, const ImBuf *src, const rcti *region_to_update);
-void IMB_float_from_rect(ImBuf *ibuf);
+void IMB_byte_from_float(ImBuf *ibuf);
+void IMB_float_from_byte_ex(ImBuf *dst, const ImBuf *src, const rcti *region_to_update);
+void IMB_float_from_byte(ImBuf *ibuf);
 /**
  * No profile conversion.
  */
@@ -488,7 +360,8 @@ void IMB_buffer_byte_from_float(unsigned char *rect_to,
                                 int width,
                                 int height,
                                 int stride_to,
-                                int stride_from);
+                                int stride_from,
+                                int start_y = 0);
 /**
  * Float to byte pixels, output 4-channel RGBA.
  */
@@ -649,42 +522,40 @@ void *imb_alloc_pixels(unsigned int x,
                        bool initialize_pixels,
                        const char *alloc_name);
 
-bool imb_addrectImBuf(ImBuf *ibuf, bool initialize_pixels = true);
 /**
- * Any free `ibuf->rect` frees mipmaps to be sure, creation is in render on first request.
+ * Allocate storage for byte type pixels.
+ * If the image already contains byte data storage, it is freed first.
  */
-void imb_freerectImBuf(ImBuf *ibuf);
+bool IMB_alloc_byte_pixels(ImBuf *ibuf, bool initialize_pixels = true);
 
-bool imb_addrectfloatImBuf(ImBuf *ibuf,
-                           const unsigned int channels,
-                           bool initialize_pixels = true);
 /**
- * Any free `ibuf->rect` frees mipmaps to be sure, creation is in render on first request.
+ * Deallocate image byte storage. Also deallocates any mipmaps.
  */
-void imb_freerectfloatImBuf(ImBuf *ibuf);
-void imb_freemipmapImBuf(ImBuf *ibuf);
+void IMB_free_byte_pixels(ImBuf *ibuf);
 
-/** Free all CPU pixel data (associated with image size). */
-void imb_freerectImbuf_all(ImBuf *ibuf);
+/**
+ * Allocate storage for float type pixels.
+ * If the image already contains float data storage, it is freed first.
+ */
+bool IMB_alloc_float_pixels(ImBuf *ibuf,
+                            const unsigned int channels,
+                            bool initialize_pixels = true);
+/**
+ * Deallocate image float storage. Also deallocates any mipmaps.
+ */
+void IMB_free_float_pixels(ImBuf *ibuf);
+
+/**
+ * Deallocate mipmaps.
+ */
+void IMB_free_mipmaps(ImBuf *ibuf);
+
+/** Deallocate all CPU side data storage (byte, float, encoded, mipmaps). */
+void IMB_free_all_data(ImBuf *ibuf);
 
 /* Free the GPU textures of the given image buffer, leaving the CPU buffers unchanged.
  * The ibuf can be nullptr, in which case the function does nothing. */
 void IMB_free_gpu_textures(ImBuf *ibuf);
-
-/**
- * Threaded processors.
- */
-void IMB_processor_apply_threaded(
-    int buffer_lines,
-    int handle_size,
-    void *init_customdata,
-    void(init_handle)(void *handle, int start_line, int tot_line, void *customdata),
-    void *(do_thread)(void *));
-
-using ScanlineThreadFunc = void (*)(void *custom_data, int scanline);
-void IMB_processor_apply_threaded_scanlines(int total_scanlines,
-                                            ScanlineThreadFunc do_thread,
-                                            void *custom_data);
 
 /**
  * \brief Transform modes to use for IMB_transform function.
@@ -723,13 +594,8 @@ void IMB_transform(const ImBuf *src,
                    ImBuf *dst,
                    eIMBTransformMode mode,
                    eIMBInterpolationFilterMode filter,
-                   const float transform_matrix[4][4],
+                   const blender::float3x3 &transform_matrix,
                    const rctf *src_crop);
-
-/* FFMPEG */
-
-void IMB_ffmpeg_init();
-const char *IMB_ffmpeg_last_error();
 
 GPUTexture *IMB_create_gpu_texture(const char *name,
                                    ImBuf *ibuf,
@@ -779,18 +645,6 @@ void IMB_stereo3d_write_dimensions(
     char mode, bool is_squeezed, size_t width, size_t height, size_t *r_width, size_t *r_height);
 void IMB_stereo3d_read_dimensions(
     char mode, bool is_squeezed, size_t width, size_t height, size_t *r_width, size_t *r_height);
-int *IMB_stereo3d_from_rect(const ImageFormatData *im_format,
-                            size_t x,
-                            size_t y,
-                            size_t channels,
-                            int *rect_left,
-                            int *rect_right);
-float *IMB_stereo3d_from_rectf(const ImageFormatData *im_format,
-                               size_t x,
-                               size_t y,
-                               size_t channels,
-                               float *rectf_left,
-                               float *rectf_right);
 /**
  * Left/right are always float.
  */

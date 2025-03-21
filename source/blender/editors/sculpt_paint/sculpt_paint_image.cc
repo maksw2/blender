@@ -8,10 +8,12 @@
 #include "DNA_brush_types.h"
 #include "DNA_image_types.h"
 #include "DNA_object_types.h"
+#include "DNA_userdef_types.h"
 
 #include "ED_paint.hh"
 
 #include "BLI_bit_vector.hh"
+#include "BLI_listbase.h"
 #include "BLI_math_color_blend.h"
 #include "BLI_math_geom.h"
 #ifdef DEBUG_PIXEL_NODES
@@ -25,8 +27,6 @@
 #include "BKE_image_wrappers.hh"
 #include "BKE_paint_bvh.hh"
 #include "BKE_paint_bvh_pixels.hh"
-
-#include "bmesh.hh"
 
 #include "mesh_brush_common.hh"
 #include "sculpt_automask.hh"
@@ -170,7 +170,7 @@ template<typename ImageBuffer> class PaintingKernel {
   const char *last_used_color_space_ = nullptr;
 
  public:
-  explicit PaintingKernel() {}
+  explicit PaintingKernel() = default;
 
   bool paint(const Brush &brush,
              const PackedPixelRow &pixel_row,
@@ -488,7 +488,7 @@ bool SCULPT_paint_image_canvas_get(PaintModeSettings &paint_mode_settings,
 
 bool SCULPT_use_image_paint_brush(PaintModeSettings &settings, Object &ob)
 {
-  if (!U.experimental.use_sculpt_texture_paint) {
+  if (!USER_EXPERIMENTAL_TEST(&U, use_sculpt_texture_paint)) {
     return false;
   }
   if (ob.type != OB_MESH) {

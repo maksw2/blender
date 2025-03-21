@@ -153,16 +153,29 @@ class Relations : Overlay {
             for (bConstraintTarget *target : ListBaseWrapper<bConstraintTarget>(targets)) {
               /* Calculate target's position. */
               float3 target_pos = float3(0.0f);
+              bool has_target = false;
               if (target->flag & CONSTRAINT_TAR_CUSTOM_SPACE) {
                 target_pos = cob->space_obj_world_matrix[3];
+                has_target = true;
               }
-              else if (cti->get_target_matrix) {
-                cti->get_target_matrix(
-                    state.depsgraph, constraint, cob, target, DEG_get_ctime(state.depsgraph));
+              else if (cti->get_target_matrix &&
+                       cti->get_target_matrix(state.depsgraph,
+                                              constraint,
+                                              cob,
+                                              target,
+                                              DEG_get_ctime(state.depsgraph)))
+              {
+                has_target = true;
                 target_pos = target->matrix[3];
               }
-              relations_buf_.append(
-                  target_pos, ob->object_to_world().location(), constraint_color);
+
+              if (has_target) {
+                /* Only draw this relationship line when there is actually a target. Otherwise it
+                 * would always draw to the world origin, which is visually rather noisy and not
+                 * that useful. */
+                relations_buf_.append(
+                    target_pos, ob->object_to_world().location(), constraint_color);
+              }
             }
 
             BKE_constraint_targets_flush(constraint, &targets, true);
@@ -183,13 +196,14 @@ class Relations : Overlay {
 
     ps_.init();
     ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+    ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
     res.select_bind(ps_);
     {
       PassSimple::Sub &sub_pass = ps_.sub("lines");
       sub_pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
                              DRW_STATE_DEPTH_LESS_EQUAL,
                          state.clipping_plane_count);
-      sub_pass.shader_set(res.shaders.extra_wire.get());
+      sub_pass.shader_set(res.shaders->extra_wire.get());
       relations_buf_.end_sync(sub_pass);
     }
     {
@@ -197,7 +211,7 @@ class Relations : Overlay {
       sub_pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
                              DRW_STATE_DEPTH_LESS_EQUAL,
                          state.clipping_plane_count);
-      sub_pass.shader_set(res.shaders.extra_loose_points.get());
+      sub_pass.shader_set(res.shaders->extra_loose_points.get());
       points_buf_.end_sync(sub_pass);
     }
   }

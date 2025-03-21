@@ -45,7 +45,7 @@ static void cmp_node_displace_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Color>("Image");
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class DisplaceOperation : public NodeOperation {
  public:
@@ -53,8 +53,10 @@ class DisplaceOperation : public NodeOperation {
 
   void execute() override
   {
-    if (is_identity()) {
-      get_input("Image").pass_through(get_result("Image"));
+    if (this->is_identity()) {
+      const Result &input = this->get_input("Image");
+      Result &output = this->get_result("Image");
+      output.share_data(input);
       return;
     }
 
@@ -133,10 +135,10 @@ class DisplaceOperation : public NodeOperation {
 
         /* Note that the input displacement is in pixel space, so divide by the input size to
          * transform it into the normalized sampler space. */
-        float2 scale = float2(x_scale.load_pixel_extended(texel).x,
-                              y_scale.load_pixel_extended(texel).x);
-        float2 displacement = input_displacement.load_pixel_extended(texel).xy() * scale /
-                              float2(size);
+        float2 scale = float2(x_scale.load_pixel_extended<float, true>(texel),
+                              y_scale.load_pixel_extended<float, true>(texel));
+        float2 displacement = input_displacement.load_pixel_extended<float3, true>(texel).xy() *
+                              scale / float2(size);
         return coordinates - displacement;
       };
 
@@ -189,15 +191,15 @@ class DisplaceOperation : public NodeOperation {
 
     const Result &input_displacement = get_input("Vector");
     if (input_displacement.is_single_value() &&
-        math::is_zero(input_displacement.get_vector_value()))
+        math::is_zero(input_displacement.get_single_value<float3>().xy()))
     {
       return true;
     }
 
     const Result &input_x_scale = get_input("X Scale");
     const Result &input_y_scale = get_input("Y Scale");
-    if (input_x_scale.is_single_value() && input_x_scale.get_float_value() == 0.0f &&
-        input_y_scale.is_single_value() && input_y_scale.get_float_value() == 0.0f)
+    if (input_x_scale.is_single_value() && input_x_scale.get_single_value<float>() == 0.0f &&
+        input_y_scale.is_single_value() && input_y_scale.get_single_value<float>() == 0.0f)
     {
       return true;
     }
@@ -219,9 +221,13 @@ void register_node_type_cmp_displace()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_DISPLACE, "Displace", NODE_CLASS_DISTORT);
+  cmp_node_type_base(&ntype, "CompositorNodeDisplace", CMP_NODE_DISPLACE);
+  ntype.ui_name = "Displace";
+  ntype.ui_description = "Displace pixel position using an offset vector";
+  ntype.enum_name_legacy = "DISPLACE";
+  ntype.nclass = NODE_CLASS_DISTORT;
   ntype.declare = file_ns::cmp_node_displace_declare;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

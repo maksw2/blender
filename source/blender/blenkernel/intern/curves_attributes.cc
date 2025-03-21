@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_listbase.h"
+
+#include "DNA_object_types.h"
+
 #include "BKE_curves.hh"
 #include "BKE_deform.hh"
 
@@ -42,6 +46,12 @@ static void tag_component_normals_changed(void *owner)
   curves.tag_normals_changed();
 }
 
+static void tag_component_material_index_changed(void *owner)
+{
+  CurvesGeometry &curves = *static_cast<CurvesGeometry *>(owner);
+  curves.tag_material_index_changed();
+}
+
 /**
  * This provider makes vertex groups available as float attributes.
  */
@@ -49,9 +59,6 @@ class CurvesVertexGroupsAttributeProvider final : public DynamicAttributesProvid
  public:
   GAttributeReader try_get_for_read(const void *owner, const StringRef attribute_id) const final
   {
-    if (bke::attribute_name_is_anonymous(attribute_id)) {
-      return {};
-    }
     const CurvesGeometry *curves = static_cast<const CurvesGeometry *>(owner);
     if (curves == nullptr) {
       return {};
@@ -78,9 +85,6 @@ class CurvesVertexGroupsAttributeProvider final : public DynamicAttributesProvid
 
   GAttributeWriter try_get_for_write(void *owner, const StringRef attribute_id) const final
   {
-    if (bke::attribute_name_is_anonymous(attribute_id)) {
-      return {};
-    }
     CurvesGeometry *curves = static_cast<CurvesGeometry *>(owner);
     if (curves == nullptr) {
       return {};
@@ -94,22 +98,16 @@ class CurvesVertexGroupsAttributeProvider final : public DynamicAttributesProvid
     return {varray_for_mutable_deform_verts(dverts, vertex_group_index), AttrDomain::Point};
   }
 
-  bool try_delete(void *owner, const StringRef attribute_id) const final
+  bool try_delete(void *owner, const StringRef name) const final
   {
-    if (bke::attribute_name_is_anonymous(attribute_id)) {
-      return false;
-    }
     CurvesGeometry *curves = static_cast<CurvesGeometry *>(owner);
     if (curves == nullptr) {
       return true;
     }
-    const std::string name = attribute_id;
 
     int index;
     bDeformGroup *group;
-    if (!BKE_defgroup_listbase_name_find(
-            &curves->vertex_group_names, name.c_str(), &index, &group))
-    {
+    if (!BKE_defgroup_listbase_name_find(&curves->vertex_group_names, name, &index, &group)) {
       return false;
     }
     BLI_remlink(&curves->vertex_group_names, group);
@@ -250,12 +248,15 @@ static GeometryAttributeProviders create_attribute_providers_for_curve()
                                                          tag_component_topology_changed,
                                                          AttributeValidator{&handle_type_clamp});
 
+  static float default_nurbs_weight = 1.0f;
   static BuiltinCustomDataLayerProvider nurbs_weight("nurbs_weight",
                                                      AttrDomain::Point,
                                                      CD_PROP_FLOAT,
                                                      BuiltinAttributeProvider::Deletable,
                                                      point_access,
-                                                     tag_component_positions_changed);
+                                                     tag_component_positions_changed,
+                                                     {},
+                                                     &default_nurbs_weight);
 
   static const auto nurbs_order_clamp = mf::build::SI1_SO<int8_t, int8_t>(
       "NURBS Order Validate",
@@ -341,6 +342,21 @@ static GeometryAttributeProviders create_attribute_providers_for_curve()
                                                curve_access,
                                                tag_component_topology_changed);
 
+  static const auto material_index_clamp = mf::build::SI1_SO<int, int>(
+      "Material Index Validate",
+      [](int value) {
+        /* Use #short for the maximum since many areas still use that type for indices. */
+        return std::clamp<int>(value, 0, std::numeric_limits<short>::max());
+      },
+      mf::build::exec_presets::AllSpanOrSingle());
+  static BuiltinCustomDataLayerProvider material_index("material_index",
+                                                       AttrDomain::Curve,
+                                                       CD_PROP_INT32,
+                                                       BuiltinAttributeProvider::Deletable,
+                                                       curve_access,
+                                                       tag_component_material_index_changed,
+                                                       AttributeValidator{&material_index_clamp});
+
   static CurvesVertexGroupsAttributeProvider vertex_groups;
   static CustomDataAttributeProvider curve_custom_data(AttrDomain::Curve, curve_access);
   static CustomDataAttributeProvider point_custom_data(AttrDomain::Point, point_access);
@@ -360,7 +376,8 @@ static GeometryAttributeProviders create_attribute_providers_for_curve()
                                      &nurbs_weight,
                                      &curve_type,
                                      &resolution,
-                                     &cyclic},
+                                     &cyclic,
+                                     &material_index},
                                     {&vertex_groups, &curve_custom_data, &point_custom_data});
 }
 

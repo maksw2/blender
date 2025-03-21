@@ -76,11 +76,12 @@ void VKDescriptorSetTracker::bind_image_resource(const VKStateManager &state_man
                                                  render_graph::VKResourceAccessInfo &access_info)
 {
   VKTexture &texture = *state_manager.images_.get(resource_binding.binding);
-  bind_image(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             VK_NULL_HANDLE,
-             texture.image_view_get(resource_binding.arrayed).vk_handle(),
-             VK_IMAGE_LAYOUT_GENERAL,
-             resource_binding.location);
+  bind_image(
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_NULL_HANDLE,
+      texture.image_view_get(resource_binding.arrayed, VKImageViewFlags::NO_SWIZZLING).vk_handle(),
+      VK_IMAGE_LAYOUT_GENERAL,
+      resource_binding.location);
   /* Update access info. */
   uint32_t layer_base = 0;
   uint32_t layer_count = VK_REMAINING_ARRAY_LAYERS;
@@ -127,7 +128,8 @@ void VKDescriptorSetTracker::bind_texture_resource(const VKDevice &device,
         const VKSampler &sampler = device.samplers().get(elem.sampler);
         bind_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                    sampler.vk_handle(),
-                   texture->image_view_get(resource_binding.arrayed).vk_handle(),
+                   texture->image_view_get(resource_binding.arrayed, VKImageViewFlags::DEFAULT)
+                       .vk_handle(),
                    VK_IMAGE_LAYOUT_GENERAL,
                    resource_binding.location);
         access_info.images.append({texture->vk_image_handle(),
@@ -150,16 +152,16 @@ void VKDescriptorSetTracker::bind_input_attachment_resource(
     const VKResourceBinding &resource_binding,
     render_graph::VKResourceAccessInfo &access_info)
 {
-  const BindSpaceTextures::Elem &elem = state_manager.textures_.get(resource_binding.binding);
-  VKTexture *texture = static_cast<VKTexture *>(elem.resource);
-  BLI_assert(elem.resource_type == BindSpaceTextures::Type::Texture);
-
-  if (!device.workarounds_get().dynamic_rendering) {
-    const VKSampler &sampler = device.samplers().get(elem.sampler);
-    bind_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-               sampler.vk_handle(),
-               texture->image_view_get(resource_binding.arrayed).vk_handle(),
-               VK_IMAGE_LAYOUT_GENERAL,
+  const bool supports_local_read = device.extensions_get().dynamic_rendering_local_read;
+  if (supports_local_read) {
+    VKTexture *texture = static_cast<VKTexture *>(
+        state_manager.images_.get(resource_binding.binding));
+    BLI_assert(texture);
+    bind_image(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+               VK_NULL_HANDLE,
+               texture->image_view_get(resource_binding.arrayed, VKImageViewFlags::NO_SWIZZLING)
+                   .vk_handle(),
+               VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR,
                resource_binding.location);
     access_info.images.append({texture->vk_image_handle(),
                                resource_binding.access_mask,
@@ -168,16 +170,39 @@ void VKDescriptorSetTracker::bind_input_attachment_resource(
                                VK_REMAINING_ARRAY_LAYERS});
   }
   else {
-    bind_image(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-               VK_NULL_HANDLE,
-               texture->image_view_get(resource_binding.arrayed).vk_handle(),
-               VK_IMAGE_LAYOUT_GENERAL,
-               resource_binding.location);
-    access_info.images.append({texture->vk_image_handle(),
-                               resource_binding.access_mask,
-                               to_vk_image_aspect_flag_bits(texture->device_format_get()),
-                               0,
-                               VK_REMAINING_ARRAY_LAYERS});
+    bool supports_dynamic_rendering = device.extensions_get().dynamic_rendering;
+    const BindSpaceTextures::Elem &elem = state_manager.textures_.get(resource_binding.binding);
+    VKTexture *texture = static_cast<VKTexture *>(elem.resource);
+    BLI_assert(texture);
+    BLI_assert(elem.resource_type == BindSpaceTextures::Type::Texture);
+    if (supports_dynamic_rendering) {
+      const VKSampler &sampler = device.samplers().get(elem.sampler);
+      bind_image(
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          sampler.vk_handle(),
+          texture->image_view_get(resource_binding.arrayed, VKImageViewFlags::DEFAULT).vk_handle(),
+          VK_IMAGE_LAYOUT_GENERAL,
+          resource_binding.location);
+      access_info.images.append({texture->vk_image_handle(),
+                                 resource_binding.access_mask,
+                                 to_vk_image_aspect_flag_bits(texture->device_format_get()),
+                                 0,
+                                 VK_REMAINING_ARRAY_LAYERS});
+    }
+    else {
+      /* Fallback to render-passes / sub-passes. */
+      bind_image(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+                 VK_NULL_HANDLE,
+                 texture->image_view_get(resource_binding.arrayed, VKImageViewFlags::NO_SWIZZLING)
+                     .vk_handle(),
+                 VK_IMAGE_LAYOUT_GENERAL,
+                 resource_binding.location);
+      access_info.images.append({texture->vk_image_handle(),
+                                 resource_binding.access_mask,
+                                 to_vk_image_aspect_flag_bits(texture->device_format_get()),
+                                 0,
+                                 VK_REMAINING_ARRAY_LAYERS});
+    }
   }
 }
 
@@ -344,8 +369,7 @@ void VKDescriptorSetTracker::upload_descriptor_sets()
   int buffer_index = 0;
   int buffer_view_index = 0;
   int image_index = 0;
-  for (int write_index : vk_write_descriptor_sets_.index_range()) {
-    VkWriteDescriptorSet &vk_write_descriptor_set = vk_write_descriptor_sets_[write_index++];
+  for (VkWriteDescriptorSet &vk_write_descriptor_set : vk_write_descriptor_sets_) {
     switch (vk_write_descriptor_set.descriptorType) {
       case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
       case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
@@ -367,6 +391,53 @@ void VKDescriptorSetTracker::upload_descriptor_sets()
         break;
     }
   }
+
+#if 0
+  /* Uncomment this for rebalancing VKDescriptorPools::POOL_SIZE_* */
+  {
+    int storage_buffer_count = 0;
+    int storage_image_count = 0;
+    int combined_image_sampler_count = 0;
+    int uniform_buffer_count = 0;
+    int uniform_texel_buffer_count = 0;
+    int input_attachment_count = 0;
+    Set<VkDescriptorSet> descriptor_set_count;
+
+    for (VkWriteDescriptorSet &vk_write_descriptor_set : vk_write_descriptor_sets_) {
+      descriptor_set_count.add(vk_write_descriptor_set.dstSet);
+      switch (vk_write_descriptor_set.descriptorType) {
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+          combined_image_sampler_count += 1;
+          break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+          storage_image_count += 1;
+          break;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+          uniform_texel_buffer_count += 1;
+          break;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+          uniform_buffer_count += 1;
+          break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+          storage_buffer_count += 1;
+          break;
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+          input_attachment_count += 1;
+          break;
+        default:
+          BLI_assert_unreachable();
+      }
+    }
+    std::cout << __func__ << ": "
+              << "descriptor_set=" << descriptor_set_count.size()
+              << ", combined_image_sampler=" << combined_image_sampler_count
+              << ", storage_image=" << storage_image_count
+              << ", uniform_texel_buffer=" << uniform_texel_buffer_count
+              << ", uniform_buffer=" << uniform_buffer_count
+              << ", storage_buffer=" << storage_buffer_count
+              << ", input_attachment=" << input_attachment_count << "\n";
+  }
+#endif
 
   /* Update the descriptor set on the device. */
   const VKDevice &device = VKBackend::get().device;

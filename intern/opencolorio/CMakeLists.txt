@@ -4,7 +4,6 @@
 
 set(INC
   .
-  ../../source/blender/gpu
   ../../source/blender/gpu/intern
 )
 
@@ -24,6 +23,7 @@ set(SRC
 set(LIB
   PRIVATE bf::blenlib
   PRIVATE bf::dna
+  PRIVATE bf::gpu
   PRIVATE bf::intern::guardedalloc
 )
 
@@ -47,15 +47,6 @@ if(WITH_OPENCOLORIO)
   list(APPEND LIB
     ${OPENCOLORIO_LIBRARIES}
   )
-
-  if(WIN32)
-    list(APPEND INC_SYS
-      ${BOOST_INCLUDE_DIR}
-    )
-    list(APPEND LIB
-      ${BOOST_LIBRARIES}
-    )
-  endif()
 
   set(GLSL_SRC
     gpu_shader_display_transform_vert.glsl

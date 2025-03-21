@@ -13,8 +13,10 @@
 #include "BLI_compiler_attrs.h"
 #include "BLI_map.hh"
 #include "BLI_math_vector_types.hh"
-#include "BLI_rect.h"
+#include "BLI_string_ref.hh"
 #include "BLI_vector.hh"
+
+#include "DNA_vec_types.h"
 
 #include "RNA_types.hh"
 
@@ -427,8 +429,8 @@ struct ARegionRuntime {
   /** Callbacks for this region type. */
   struct ARegionType *type;
 
-  /** Panel category to use between 'layout' and 'draw'. */
-  const char *category = nullptr;
+  /** Runtime for partial redraw, same or smaller than #ARegion::winrct. */
+  rcti drawrct = {};
 
   /**
    * The visible part of the region, use with region overlap not to draw
@@ -441,6 +443,9 @@ struct ARegionRuntime {
   /* The offset needed to not overlap with window scroll-bars. Only used by HUD regions for now. */
   int offset_x = 0;
   int offset_y = 0;
+
+  /** Panel category to use between 'layout' and 'draw'. */
+  const char *category = nullptr;
 
   /** Maps #uiBlock::name to uiBlock for faster lookups. */
   Map<std::string, uiBlock *> block_name_map;
@@ -469,6 +474,9 @@ struct ARegionRuntime {
 
   /** Private, cached notifier events. */
   short do_draw = 0;
+
+  /** Private, cached notifier events. */
+  short do_draw_paintcursor;
 
   /* Dummy panel used in popups so they can support layout panels. */
   Panel *popup_block_panel = nullptr;
@@ -701,7 +709,7 @@ void BKE_region_callback_refresh_tag_gizmomap_set(void (*callback)(wmGizmoMap *)
  * panel state with the given default value.
  */
 LayoutPanelState *BKE_panel_layout_panel_state_ensure(Panel *panel,
-                                                      const char *idname,
+                                                      blender::StringRef idname,
                                                       bool default_closed);
 
 /**

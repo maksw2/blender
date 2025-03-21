@@ -2,6 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_listbase.h"
 #include "BLI_string.h"
 
 #include "DNA_collection_types.h"
@@ -39,12 +40,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "transform_space", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "transform_space", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 }
 
 static void node_node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryCollectionInfo *data = MEM_cnew<NodeGeometryCollectionInfo>(__func__);
+  NodeGeometryCollectionInfo *data = MEM_callocN<NodeGeometryCollectionInfo>(__func__);
   data->transform_space = GEO_NODE_TRANSFORM_SPACE_ORIGINAL;
   node->storage = data;
 }
@@ -187,16 +188,18 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_COLLECTION_INFO, "Collection Info", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeCollectionInfo", GEO_NODE_COLLECTION_INFO);
+  ntype.ui_name = "Collection Info";
+  ntype.ui_description = "Retrieve geometry instances from a collection";
+  ntype.enum_name_legacy = "COLLECTION_INFO";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = node_declare;
   ntype.initfunc = node_node_init;
-  blender::bke::node_type_storage(&ntype,
-                                  "NodeGeometryCollectionInfo",
-                                  node_free_standard_storage,
-                                  node_copy_standard_storage);
+  blender::bke::node_type_storage(
+      ntype, "NodeGeometryCollectionInfo", node_free_standard_storage, node_copy_standard_storage);
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

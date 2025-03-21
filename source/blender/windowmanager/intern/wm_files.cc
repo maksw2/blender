@@ -33,12 +33,13 @@
 #include "MEM_CacheLimiterC-Api.h"
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
-#include "BLI_fileops_types.h"
+#include "BLI_fileops.h"
 #include "BLI_filereader.h"
 #include "BLI_linklist.h"
+#include "BLI_listbase.h"
 #include "BLI_math_time.h"
 #include "BLI_memory_cache.hh"
+#include "BLI_string.h"
 #include "BLI_system.h"
 #include "BLI_threads.h"
 #include "BLI_time.h"
@@ -51,10 +52,8 @@
 
 #include "BLF_api.hh"
 
-#include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
-#include "DNA_sequence_types.h"
 #include "DNA_space_types.h"
 #include "DNA_userdef_types.h"
 #include "DNA_windowmanager_types.h"
@@ -62,7 +61,9 @@
 
 #include "AS_asset_library.hh"
 
-#include "BKE_addon.h"
+#ifndef WITH_CYCLES
+#  include "BKE_addon.h"
+#endif
 #include "BKE_appdir.hh"
 #include "BKE_autoexec.hh"
 #include "BKE_blender.hh"
@@ -75,6 +76,7 @@
 #include "BKE_lib_id.hh"
 #include "BKE_lib_override.hh"
 #include "BKE_lib_remap.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_main_namemap.hh"
 #include "BKE_node.hh"
@@ -132,6 +134,7 @@
 #include "DEG_depsgraph.hh"
 
 #include "WM_api.hh"
+#include "WM_keymap.hh"
 #include "WM_message.hh"
 #include "WM_toolsystem.hh"
 #include "WM_types.hh"
@@ -209,7 +212,7 @@ static BlendFileReadWMSetupData *wm_file_read_setup_wm_init(bContext *C,
   using namespace blender;
   BLI_assert(BLI_listbase_count_at_most(&bmain->wm, 2) <= 1);
   wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
-  BlendFileReadWMSetupData *wm_setup_data = MEM_cnew<BlendFileReadWMSetupData>(__func__);
+  BlendFileReadWMSetupData *wm_setup_data = MEM_callocN<BlendFileReadWMSetupData>(__func__);
   wm_setup_data->is_read_homefile = is_read_homefile;
   /* This info is not always known yet when this function is called. */
   wm_setup_data->is_factory_startup = false;
@@ -816,7 +819,9 @@ static void wm_file_read_post(bContext *C,
 
     /* After load post, so for example the driver namespace can be filled
      * before evaluating the depsgraph. */
-    wm_event_do_depsgraph(C, true);
+    if (!G.background || (G.fileflags & G_BACKGROUND_NO_DEPSGRAPH) == 0) {
+      wm_event_do_depsgraph(C, true);
+    }
 
     ED_editors_init(C);
 
@@ -1031,7 +1036,7 @@ static void file_read_reports_finalize(BlendFileReadReport *bf_reports)
                 RPT_ERROR,
                 "%d sequence strips were not read because they were in a channel larger than %d",
                 bf_reports->count.sequence_strips_skipped,
-                SEQ_MAX_CHANNELS);
+                blender::seq::MAX_CHANNELS);
   }
 
   BLI_linklist_free(bf_reports->resynced_lib_overrides_libraries, nullptr);
@@ -1158,7 +1163,7 @@ bool WM_file_read(bContext *C, const char *filepath, ReportList *reports)
 
   wm_read_callback_post_wrapper(C, filepath, success);
 
-  BLI_assert(BKE_main_namemap_validate(CTX_data_main(C)));
+  BLI_assert(BKE_main_namemap_validate(*CTX_data_main(C)));
 
   return success;
 }
@@ -1555,8 +1560,7 @@ void wm_homefile_read_ex(bContext *C,
     }
     else {
       params_file_read_post.is_alloc = true;
-      *r_params_file_read_post = static_cast<wmFileReadPost_Params *>(
-          MEM_mallocN(sizeof(wmFileReadPost_Params), __func__));
+      *r_params_file_read_post = MEM_mallocN<wmFileReadPost_Params>(__func__);
       **r_params_file_read_post = params_file_read_post;
 
       /* Match #wm_file_read_post which leaves the window cleared too. */
@@ -1614,7 +1618,7 @@ void wm_history_file_read()
     const char *line = static_cast<const char *>(l->link);
     /* Don't check if files exist, causes slow startup for remote/external drives. */
     if (line[0]) {
-      RecentFile *recent = (RecentFile *)MEM_mallocN(sizeof(RecentFile), "RecentFile");
+      RecentFile *recent = MEM_mallocN<RecentFile>("RecentFile");
       BLI_addtail(&(G.recent_files), recent);
       recent->filepath = BLI_strdup(line);
       num++;
@@ -1626,7 +1630,7 @@ void wm_history_file_read()
 
 static RecentFile *wm_history_file_new(const char *filepath)
 {
-  RecentFile *recent = static_cast<RecentFile *>(MEM_mallocN(sizeof(RecentFile), "RecentFile"));
+  RecentFile *recent = MEM_mallocN<RecentFile>("RecentFile");
   recent->filepath = BLI_strdup(filepath);
   return recent;
 }
@@ -1766,13 +1770,11 @@ static uint8_t *blend_file_thumb_fast_downscale(const uint8_t *src_rect,
    * this isn't a concern. */
 
   BLI_assert(dst_size[0] <= src_size[0] && dst_size[1] <= src_size[1]);
-  uint8_t *dst_rect = static_cast<uint8_t *>(
-      MEM_mallocN(sizeof(uint8_t[4]) * dst_size[0] * dst_size[1], __func__));
+  uint8_t *dst_rect = MEM_malloc_arrayN<uint8_t>(size_t(4 * dst_size[0] * dst_size[1]), __func__);
 
   /* A row, the width of the destination to accumulate pixel values into
    * before writing into the image. */
-  uint32_t *accum_row = static_cast<uint32_t *>(
-      MEM_callocN(sizeof(uint32_t) * dst_size[0] * 4, __func__));
+  uint32_t *accum_row = MEM_calloc_arrayN<uint32_t>(size_t(dst_size[0] * 4), __func__);
 
 #  ifndef NDEBUG
   /* Assert that samples are calculated correctly. */
@@ -1978,7 +1980,7 @@ static ImBuf *blend_file_thumb_from_camera(const bContext *C,
                                                  scene->camera,
                                                  PREVIEW_RENDER_LARGE_HEIGHT * 2,
                                                  PREVIEW_RENDER_LARGE_HEIGHT * 2,
-                                                 IB_rect,
+                                                 IB_byte_data,
                                                  (v3d) ? V3D_OFSDRAW_OVERRIDE_SCENE_SETTINGS :
                                                          V3D_OFSDRAW_NONE,
                                                  R_ALPHAPREMUL,
@@ -1995,7 +1997,7 @@ static ImBuf *blend_file_thumb_from_camera(const bContext *C,
                                           region,
                                           PREVIEW_RENDER_LARGE_HEIGHT * 2,
                                           PREVIEW_RENDER_LARGE_HEIGHT * 2,
-                                          IB_rect,
+                                          IB_byte_data,
                                           R_ALPHAPREMUL,
                                           nullptr,
                                           true,
@@ -2093,7 +2095,7 @@ static bool wm_file_write_check_with_report_on_failure(Main *bmain,
   }
 
   LISTBASE_FOREACH (Library *, li, &bmain->libraries) {
-    if (BLI_path_cmp(li->runtime.filepath_abs, filepath) == 0) {
+    if (BLI_path_cmp(li->runtime->filepath_abs, filepath) == 0) {
       BKE_reportf(reports, RPT_ERROR, "Cannot overwrite used library '%.240s'", filepath);
       return false;
     }
@@ -2132,12 +2134,29 @@ static bool wm_file_write(bContext *C,
   BKE_callback_exec_string(bmain, BKE_CB_EVT_SAVE_PRE, filepath);
 
   /* Check if file write permission is OK. */
-  if (BLI_exists(filepath) && !BLI_file_is_writable(filepath)) {
-    BKE_reportf(
-        reports, RPT_ERROR, "Cannot save blend file, path \"%s\" is not writable", filepath);
+  if (const int st_mode = BLI_exists(filepath)) {
+    bool ok = true;
 
-    BKE_callback_exec_string(bmain, BKE_CB_EVT_SAVE_POST_FAIL, filepath);
-    return false;
+    if (!BLI_file_is_writable(filepath)) {
+      BKE_reportf(
+          reports, RPT_ERROR, "Cannot save blend file, path \"%s\" is not writable", filepath);
+      ok = false;
+    }
+    else if (S_ISDIR(st_mode)) {
+      /* While the UI mostly prevents this, it's possible to save to an existing
+       * directory from Python because the path is used unmodified.
+       * Besides it being unlikely the user wants to replace a directory,
+       * the file versioning logic (to create `*.blend1` files)
+       * would rename the directory with a `1` suffix, see #134101. */
+      BKE_reportf(
+          reports, RPT_ERROR, "Cannot save blend file, path \"%s\" is a directory", filepath);
+      ok = false;
+    }
+
+    if (!ok) {
+      BKE_callback_exec_string(bmain, BKE_CB_EVT_SAVE_POST_FAIL, filepath);
+      return false;
+    }
   }
 
   blender::ed::asset::pre_save_assets(bmain);
@@ -2233,9 +2252,6 @@ static bool wm_file_write(bContext *C,
       IMB_thumb_delete(filepath, THB_FAIL); /* Without this a failed thumb overrides. */
       ibuf_thumb = IMB_thumb_create(filepath, THB_LARGE, THB_SOURCE_BLEND, ibuf_thumb);
     }
-
-    /* Without this there is no feedback the file was saved. */
-    BKE_reportf(reports, RPT_INFO, "Saved \"%s\"", BLI_path_basename(filepath));
   }
 
   BKE_callback_exec_string(
@@ -2315,8 +2331,9 @@ void WM_autosave_write(wmWindowManager *wm, Main *bmain)
 
   char filepath[FILE_MAX];
   wm_autosave_location(filepath);
-  /* Save as regular blend file with recovery information. */
-  const int fileflags = (G.fileflags & ~G_FILE_COMPRESS) | G_FILE_RECOVER_WRITE;
+  /* Save as regular blend file with recovery information and always compress them, see: !132685.
+   */
+  const int fileflags = G.fileflags | G_FILE_RECOVER_WRITE | G_FILE_COMPRESS;
 
   /* Error reporting into console. */
   BlendFileWriteParams params{};
@@ -2466,7 +2483,7 @@ void wm_open_init_use_scripts(wmOperator *op, bool use_prefs)
  * \see #wm_file_write wraps #BLO_write_file in a similar way.
  * \return success.
  */
-static int wm_homefile_write_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_homefile_write_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   wmWindowManager *wm = CTX_wm_manager(C);
@@ -2532,7 +2549,9 @@ static int wm_homefile_write_exec(bContext *C, wmOperator *op)
   return OPERATOR_CANCELLED;
 }
 
-static int wm_homefile_write_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_homefile_write_invoke(bContext *C,
+                                                 wmOperator *op,
+                                                 const wmEvent * /*event*/)
 {
   if (!U.app_template[0]) {
     return WM_operator_confirm_ex(C,
@@ -2576,7 +2595,7 @@ void WM_OT_save_homefile(wmOperatorType *ot)
  * \{ */
 
 /* Only save the prefs block. operator entry. */
-static int wm_userpref_write_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_userpref_write_exec(bContext *C, wmOperator *op)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
 
@@ -2660,8 +2679,8 @@ static void wm_userpref_update_when_changed(bContext *C,
                                             UserDef *userdef_prev,
                                             UserDef *userdef_curr)
 {
-  PointerRNA ptr_a = RNA_pointer_create(nullptr, &RNA_Preferences, userdef_prev);
-  PointerRNA ptr_b = RNA_pointer_create(nullptr, &RNA_Preferences, userdef_curr);
+  PointerRNA ptr_a = RNA_pointer_create_discrete(nullptr, &RNA_Preferences, userdef_prev);
+  PointerRNA ptr_b = RNA_pointer_create_discrete(nullptr, &RNA_Preferences, userdef_curr);
   const bool is_dirty = userdef_curr->runtime.is_dirty;
 
   rna_struct_update_when_changed(C, bmain, &ptr_a, &ptr_b);
@@ -2672,7 +2691,7 @@ static void wm_userpref_update_when_changed(bContext *C,
   userdef_curr->runtime.is_dirty = is_dirty;
 }
 
-static int wm_userpref_read_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_userpref_read_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   const bool use_data = false;
@@ -2725,7 +2744,9 @@ void WM_OT_read_userpref(wmOperatorType *ot)
   ot->exec = wm_userpref_read_exec;
 }
 
-static int wm_userpref_read_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_userpref_read_invoke(bContext *C,
+                                                wmOperator *op,
+                                                const wmEvent * /*event*/)
 {
   std::string title;
 
@@ -2772,7 +2793,7 @@ void WM_OT_read_factory_userpref(wmOperatorType *ot)
 /** \name Read File History Operator
  * \{ */
 
-static int wm_history_file_read_exec(bContext * /*C*/, wmOperator * /*op*/)
+static wmOperatorStatus wm_history_file_read_exec(bContext * /*C*/, wmOperator * /*op*/)
 {
   ED_file_read_bookmarks();
   wm_history_file_read();
@@ -2800,7 +2821,7 @@ void WM_OT_read_history(wmOperatorType *ot)
  * Both #WM_OT_read_homefile & #WM_OT_read_factory_settings.
  * \{ */
 
-static int wm_homefile_read_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_homefile_read_exec(bContext *C, wmOperator *op)
 {
   const bool use_factory_startup_and_userdef = STREQ(op->type->idname,
                                                      "WM_OT_read_factory_settings");
@@ -2914,7 +2935,9 @@ static void wm_homefile_read_after_dialog_callback(bContext *C, void *user_data)
       C, "WM_OT_read_homefile", WM_OP_EXEC_DEFAULT, (IDProperty *)user_data, nullptr);
 }
 
-static int wm_homefile_read_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_homefile_read_invoke(bContext *C,
+                                                wmOperator *op,
+                                                const wmEvent * /*event*/)
 {
   if (wm_operator_close_file_dialog_if_needed(C, op, wm_homefile_read_after_dialog_callback)) {
     return OPERATOR_INTERFACE;
@@ -2984,7 +3007,9 @@ void WM_OT_read_homefile(wmOperatorType *ot)
   /* Omit poll to run in background mode. */
 }
 
-static int wm_read_factory_settings_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_read_factory_settings_invoke(bContext *C,
+                                                        wmOperator *op,
+                                                        const wmEvent * /*event*/)
 {
   const bool unsaved = wm_file_or_session_data_has_unsaved_changes(CTX_data_main(C),
                                                                    CTX_wm_manager(C));
@@ -3078,10 +3103,12 @@ static void set_next_operator_state(wmOperator *op, int state)
 
 struct OperatorDispatchTarget {
   int state;
-  int (*run)(bContext *C, wmOperator *op);
+  wmOperatorStatus (*run)(bContext *C, wmOperator *op);
 };
 
-static int operator_state_dispatch(bContext *C, wmOperator *op, OperatorDispatchTarget *targets)
+static wmOperatorStatus operator_state_dispatch(bContext *C,
+                                                wmOperator *op,
+                                                OperatorDispatchTarget *targets)
 {
   int state = get_operator_state(op);
   for (int i = 0; targets[i].run; i++) {
@@ -3106,7 +3133,7 @@ enum {
   OPEN_MAINFILE_STATE_OPEN,
 };
 
-static int wm_open_mainfile_dispatch(bContext *C, wmOperator *op);
+static wmOperatorStatus wm_open_mainfile_dispatch(bContext *C, wmOperator *op);
 
 static void wm_open_mainfile_after_dialog_callback(bContext *C, void *user_data)
 {
@@ -3114,7 +3141,7 @@ static void wm_open_mainfile_after_dialog_callback(bContext *C, void *user_data)
       C, "WM_OT_open_mainfile", WM_OP_INVOKE_DEFAULT, (IDProperty *)user_data, nullptr);
 }
 
-static int wm_open_mainfile__discard_changes(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_open_mainfile__discard_changes_exec(bContext *C, wmOperator *op)
 {
   if (RNA_boolean_get(op->ptr, "display_file_selector")) {
     set_next_operator_state(op, OPEN_MAINFILE_STATE_SELECT_FILE_PATH);
@@ -3129,7 +3156,7 @@ static int wm_open_mainfile__discard_changes(bContext *C, wmOperator *op)
   return wm_open_mainfile_dispatch(C, op);
 }
 
-static int wm_open_mainfile__select_file_path(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_open_mainfile__select_file_path_exec(bContext *C, wmOperator *op)
 {
   set_next_operator_state(op, OPEN_MAINFILE_STATE_OPEN);
 
@@ -3160,7 +3187,7 @@ static int wm_open_mainfile__select_file_path(bContext *C, wmOperator *op)
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int wm_open_mainfile__open(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_open_mainfile__open(bContext *C, wmOperator *op)
 {
   char filepath[FILE_MAX];
   bool success;
@@ -3190,23 +3217,25 @@ static int wm_open_mainfile__open(bContext *C, wmOperator *op)
 }
 
 static OperatorDispatchTarget wm_open_mainfile_dispatch_targets[] = {
-    {OPEN_MAINFILE_STATE_DISCARD_CHANGES, wm_open_mainfile__discard_changes},
-    {OPEN_MAINFILE_STATE_SELECT_FILE_PATH, wm_open_mainfile__select_file_path},
+    {OPEN_MAINFILE_STATE_DISCARD_CHANGES, wm_open_mainfile__discard_changes_exec},
+    {OPEN_MAINFILE_STATE_SELECT_FILE_PATH, wm_open_mainfile__select_file_path_exec},
     {OPEN_MAINFILE_STATE_OPEN, wm_open_mainfile__open},
     {0, nullptr},
 };
 
-static int wm_open_mainfile_dispatch(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_open_mainfile_dispatch(bContext *C, wmOperator *op)
 {
   return operator_state_dispatch(C, op, wm_open_mainfile_dispatch_targets);
 }
 
-static int wm_open_mainfile_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_open_mainfile_invoke(bContext *C,
+                                                wmOperator *op,
+                                                const wmEvent * /*event*/)
 {
   return wm_open_mainfile_dispatch(C, op);
 }
 
-static int wm_open_mainfile_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_open_mainfile_exec(bContext *C, wmOperator *op)
 {
   return wm_open_mainfile__open(C, op);
 }
@@ -3292,7 +3321,7 @@ static void wm_open_mainfile_ui(bContext * /*C*/, wmOperator *op)
   uiLayout *layout = op->layout;
   const char *autoexec_text;
 
-  uiItemR(layout, op->ptr, "load_ui", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, op->ptr, "load_ui", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   uiLayout *col = uiLayoutColumn(layout, false);
   if (file_info->is_untrusted) {
@@ -3356,7 +3385,9 @@ void WM_OT_open_mainfile(wmOperatorType *ot)
 /** \name Reload (revert) Main .blend File Operator
  * \{ */
 
-static int wm_revert_mainfile_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_revert_mainfile_invoke(bContext *C,
+                                                  wmOperator *op,
+                                                  const wmEvent * /*event*/)
 {
   std::string message = IFACE_("Any unsaved changes will be lost.");
   if (ED_image_should_save_modified(CTX_data_main(C))) {
@@ -3373,7 +3404,7 @@ static int wm_revert_mainfile_invoke(bContext *C, wmOperator *op, const wmEvent 
                                 false);
 }
 
-static int wm_revert_mainfile_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_revert_mainfile_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   bool success;
@@ -3427,7 +3458,7 @@ bool WM_file_recover_last_session(bContext *C, ReportList *reports)
   return success;
 }
 
-static int wm_recover_last_session_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_recover_last_session_exec(bContext *C, wmOperator *op)
 {
   wm_open_init_use_scripts(op, true);
   SET_FLAG_FROM_TEST(G.f, RNA_boolean_get(op->ptr, "use_scripts"), G_FLAG_SCRIPT_AUTOEXEC);
@@ -3450,7 +3481,9 @@ static void wm_recover_last_session_after_dialog_callback(bContext *C, void *use
       C, "WM_OT_recover_last_session", WM_OP_EXEC_DEFAULT, (IDProperty *)user_data, nullptr);
 }
 
-static int wm_recover_last_session_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_recover_last_session_invoke(bContext *C,
+                                                       wmOperator *op,
+                                                       const wmEvent * /*event*/)
 {
   /* Keep the current setting instead of using the preferences since a file selector
    * doesn't give us the option to change the setting. */
@@ -3482,7 +3515,7 @@ void WM_OT_recover_last_session(wmOperatorType *ot)
 /** \name Auto-Save Main .blend File Operator
  * \{ */
 
-static int wm_recover_auto_save_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_recover_auto_save_exec(bContext *C, wmOperator *op)
 {
   char filepath[FILE_MAX];
   bool success;
@@ -3512,7 +3545,9 @@ static int wm_recover_auto_save_exec(bContext *C, wmOperator *op)
   return OPERATOR_CANCELLED;
 }
 
-static int wm_recover_auto_save_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_recover_auto_save_invoke(bContext *C,
+                                                    wmOperator *op,
+                                                    const wmEvent * /*event*/)
 {
   char filepath[FILE_MAX];
 
@@ -3556,7 +3591,7 @@ static void wm_filepath_default(const Main *bmain, char *filepath)
 {
   if (bmain->filepath[0] == '\0') {
     char filename_untitled[FILE_MAXFILE];
-    SNPRINTF(filename_untitled, "%s.blend", DATA_("untitled"));
+    SNPRINTF(filename_untitled, "%s.blend", DATA_("Untitled"));
     BLI_path_filename_ensure(filepath, FILE_MAX, filename_untitled);
   }
 }
@@ -3611,7 +3646,9 @@ static void save_set_filepath(bContext *C, wmOperator *op)
   }
 }
 
-static int wm_save_as_mainfile_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_save_as_mainfile_invoke(bContext *C,
+                                                   wmOperator *op,
+                                                   const wmEvent * /*event*/)
 {
 
   save_set_compress(op);
@@ -3628,12 +3665,15 @@ static int wm_save_as_mainfile_invoke(bContext *C, wmOperator *op, const wmEvent
 }
 
 /* Function used for #WM_OT_save_mainfile too. */
-static int wm_save_as_mainfile_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus wm_save_as_mainfile_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   char filepath[FILE_MAX];
   const bool is_save_as = (op->type->invoke == wm_save_as_mainfile_invoke);
   const bool use_save_as_copy = is_save_as && RNA_boolean_get(op->ptr, "copy");
+
+  PropertyRNA *prop = RNA_struct_find_property(op->ptr, "incremental");
+  const bool is_incremental = prop ? RNA_property_boolean_get(op->ptr, prop) : false;
 
   /* We could expose all options to the users however in most cases remapping
    * existing relative paths is a good default.
@@ -3659,7 +3699,7 @@ static int wm_save_as_mainfile_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
-  if ((is_save_as == false) && RNA_boolean_get(op->ptr, "incremental")) {
+  if ((is_save_as == false) && is_incremental) {
     char head[FILE_MAXFILE], tail[FILE_MAXFILE];
     ushort digits;
     int num = BLI_path_sequence_decode(filepath, head, sizeof(head), tail, sizeof(tail), &digits);
@@ -3702,6 +3742,24 @@ static int wm_save_as_mainfile_exec(bContext *C, wmOperator *op)
 
   if (success == false) {
     return OPERATOR_CANCELLED;
+  }
+
+  const char *filename = BLI_path_basename(filepath);
+
+  if (is_incremental) {
+    BKE_reportf(op->reports, RPT_INFO, "Saved incremental as \"%s\"", filename);
+  }
+  else if (is_save_as) {
+    /* use_save_as_copy depends upon is_save_as. */
+    if (use_save_as_copy) {
+      BKE_reportf(op->reports, RPT_INFO, "Saved copy as \"%s\"", filename);
+    }
+    else {
+      BKE_reportf(op->reports, RPT_INFO, "Saved as \"%s\"", filename);
+    }
+  }
+  else {
+    BKE_reportf(op->reports, RPT_INFO, "Saved \"%s\"", filename);
   }
 
   if (!use_save_as_copy) {
@@ -3799,9 +3857,11 @@ void WM_OT_save_as_mainfile(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
-static int wm_save_mainfile_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus wm_save_mainfile_invoke(bContext *C,
+                                                wmOperator *op,
+                                                const wmEvent * /*event*/)
 {
-  int ret;
+  wmOperatorStatus ret;
 
   /* Cancel if no active window. */
   if (CTX_wm_window(C) == nullptr) {
@@ -3904,13 +3964,15 @@ static const EnumPropertyItem prop_clear_recent_types[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int wm_clear_recent_files_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus wm_clear_recent_files_invoke(bContext *C,
+                                                     wmOperator *op,
+                                                     const wmEvent *event)
 {
   return WM_operator_props_popup_confirm_ex(
       C, op, event, IFACE_("Clear Recent Files List"), IFACE_("Remove"));
 }
 
-static int wm_clear_recent_files_exec(bContext * /*C*/, wmOperator *op)
+static wmOperatorStatus wm_clear_recent_files_exec(bContext * /*C*/, wmOperator *op)
 {
   ClearRecentInclude include = static_cast<ClearRecentInclude>(RNA_enum_get(op->ptr, "remove"));
 
@@ -3920,7 +3982,7 @@ static int wm_clear_recent_files_exec(bContext * /*C*/, wmOperator *op)
   else if (include == CLEAR_RECENT_MISSING) {
     LISTBASE_FOREACH_MUTABLE (RecentFile *, recent, &G.recent_files) {
       if (!BLI_exists(recent->filepath)) {
-        BLI_freelinkN(&G.recent_files, recent);
+        wm_history_file_free(recent);
       }
     }
   }
@@ -3937,7 +3999,7 @@ static void wm_clear_recent_files_ui(bContext * /*C*/, wmOperator *op)
   uiLayoutSetPropDecorate(layout, false);
 
   uiItemS(layout);
-  uiItemR(layout, op->ptr, "remove", UI_ITEM_R_TOGGLE, nullptr, ICON_NONE);
+  uiItemR(layout, op->ptr, "remove", UI_ITEM_R_TOGGLE, std::nullopt, ICON_NONE);
   uiItemS(layout);
 }
 
@@ -4020,30 +4082,41 @@ static uiBlock *block_create_autorun_warning(bContext *C, ARegion *region, void 
   UI_block_theme_style_set(block, UI_BLOCK_THEME_STYLE_POPUP);
   UI_block_emboss_set(block, UI_EMBOSS);
 
-  uiLayout *layout = uiItemsAlertBox(block, 44, ALERT_ICON_ERROR);
+  const char *title = RPT_(
+      "For security reasons, automatic execution of Python scripts "
+      "in this file was disabled:");
+  const char *message = RPT_("This may lead to unexpected behavior");
+  const char *checkbox_text = RPT_("Permanently allow execution of scripts");
+
+  /* Measure strings to find the longest. */
+  const uiStyle *style = UI_style_get_dpi();
+  UI_fontstyle_set(&style->widget);
+  int text_width = int(BLF_width(style->widget.uifont_id, title, BLF_DRAW_STR_DUMMY_MAX));
+  text_width = std::max(text_width,
+                        int(BLF_width(style->widget.uifont_id, message, BLF_DRAW_STR_DUMMY_MAX)));
+  text_width = std::max(
+      text_width,
+      int(BLF_width(style->widget.uifont_id, checkbox_text, BLF_DRAW_STR_DUMMY_MAX) +
+          (UI_SCALE_FAC * 25.0f)));
+
+  const int dialog_width = std::max(int(400.0f * UI_SCALE_FAC),
+                                    text_width + int(style->columnspace * 2.5));
+  const short icon_size = 40 * UI_SCALE_FAC;
+  uiLayout *layout = uiItemsAlertBox(
+      block, style, dialog_width + icon_size, ALERT_ICON_ERROR, icon_size);
 
   /* Title and explanation text. */
   uiLayout *col = uiLayoutColumn(layout, true);
-  uiItemL_ex(col,
-             RPT_("For security reasons, automatic execution of Python scripts "
-                  "in this file was disabled:"),
-             ICON_NONE,
-             true,
-             false);
+  uiItemL_ex(col, title, ICON_NONE, true, false);
   uiItemL_ex(col, G.autoexec_fail, ICON_NONE, false, true);
-  uiItemL(col, RPT_("This may lead to unexpected behavior"), ICON_NONE);
+  uiItemL(col, message, ICON_NONE);
 
   uiItemS(layout);
 
-  PointerRNA pref_ptr = RNA_pointer_create(nullptr, &RNA_PreferencesFilePaths, &U);
-  uiItemR(layout,
-          &pref_ptr,
-          "use_scripts_auto_execute",
-          UI_ITEM_NONE,
-          RPT_("Permanently allow execution of scripts"),
-          ICON_NONE);
+  PointerRNA pref_ptr = RNA_pointer_create_discrete(nullptr, &RNA_PreferencesFilePaths, &U);
+  uiItemR(layout, &pref_ptr, "use_scripts_auto_execute", UI_ITEM_NONE, checkbox_text, ICON_NONE);
 
-  uiItemS_ex(layout, 3.0f);
+  uiItemS_ex(layout, 2.0f);
 
   /* Buttons. */
   uiBut *but;
@@ -4277,8 +4350,8 @@ static void save_file_overwrite_confirm(bContext *C, void *arg_block, void *arg_
 {
   wmWindow *win = CTX_wm_window(C);
 
-  /* Re-use operator properties as defined for the initial 'save' operator, which triggered this
-   * 'forward compat' popup. */
+  /* Re-use operator properties as defined for the initial "Save" operator,
+   * which triggered this "Forward Compatibility" popup. */
   wmGenericCallback *callback = WM_generic_callback_steal(
       static_cast<wmGenericCallback *>(arg_data));
 
@@ -4354,7 +4427,7 @@ static uiBlock *block_create_save_file_overwrite_dialog(bContext *C, ARegion *re
       block, UI_BLOCK_KEEP_OPEN | UI_BLOCK_LOOP | UI_BLOCK_NO_WIN_CLIP | UI_BLOCK_NUMSELECT);
   UI_block_theme_style_set(block, UI_BLOCK_THEME_STYLE_POPUP);
 
-  uiLayout *layout = uiItemsAlertBox(block, 34, ALERT_ICON_WARNING);
+  uiLayout *layout = uiItemsAlertBox(block, 44, ALERT_ICON_WARNING);
 
   /* Title. */
   if (bmain->has_forward_compatibility_issues) {
@@ -4389,7 +4462,7 @@ static uiBlock *block_create_save_file_overwrite_dialog(bContext *C, ARegion *re
     BLI_path_split_file_part(blendfile_path, filename, sizeof(filename));
   }
   else {
-    SNPRINTF(filename, "%s.blend", DATA_("untitled"));
+    SNPRINTF(filename, "%s.blend", DATA_("Untitled"));
     /* Since this dialog should only be shown when re-saving an existing file, current filepath
      * should never be empty. */
     BLI_assert_unreachable();
@@ -4431,7 +4504,7 @@ static uiBlock *block_create_save_file_overwrite_dialog(bContext *C, ARegion *re
 void wm_save_file_overwrite_dialog(bContext *C, wmOperator *op)
 {
   if (!UI_popup_block_name_exists(CTX_wm_screen(C), save_file_overwrite_dialog_name)) {
-    wmGenericCallback *callback = MEM_cnew<wmGenericCallback>(__func__);
+    wmGenericCallback *callback = MEM_callocN<wmGenericCallback>(__func__);
     callback->exec = nullptr;
     callback->user_data = IDP_CopyProperty(op->properties);
     callback->free_user_data = wm_free_operator_properties_callback;
@@ -4608,7 +4681,7 @@ static uiBlock *block_create__close_file_dialog(bContext *C, ARegion *region, vo
     BLI_path_split_file_part(blendfile_path, filename, sizeof(filename));
   }
   else {
-    SNPRINTF(filename, "%s.blend", DATA_("untitled"));
+    SNPRINTF(filename, "%s.blend", DATA_("Untitled"));
   }
   uiItemL(layout, filename, ICON_NONE);
 
@@ -4703,7 +4776,7 @@ static uiBlock *block_create__close_file_dialog(bContext *C, ARegion *region, vo
 
   BKE_reports_free(&reports);
 
-  uiItemS_ex(layout, has_extra_checkboxes ? 2.0f : 4.0f);
+  uiItemS_ex(layout, 2.0f);
 
   /* Buttons. */
 #ifdef _WIN32
@@ -4770,7 +4843,7 @@ bool wm_operator_close_file_dialog_if_needed(bContext *C,
   if (U.uiflag & USER_SAVE_PROMPT &&
       wm_file_or_session_data_has_unsaved_changes(CTX_data_main(C), CTX_wm_manager(C)))
   {
-    wmGenericCallback *callback = MEM_cnew<wmGenericCallback>(__func__);
+    wmGenericCallback *callback = MEM_callocN<wmGenericCallback>(__func__);
     callback->exec = post_action_fn;
     callback->user_data = IDP_CopyProperty(op->properties);
     callback->free_user_data = wm_free_operator_properties_callback;

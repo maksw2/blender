@@ -9,7 +9,10 @@ else:
     from . import properties
 
 import bpy
-from bpy.app.translations import pgettext_iface as iface_
+from bpy.app.translations import (
+    pgettext_iface as iface_,
+    contexts as i18n_contexts,
+)
 from bpy.types import (
     Menu,
     Panel,
@@ -93,7 +96,7 @@ class VIEW3D_PT_vr_session_view(Panel):
 
         col = layout.column(align=True)
         col.prop(session_settings, "clip_start", text="Clip Start")
-        col.prop(session_settings, "clip_end", text="End")
+        col.prop(session_settings, "clip_end", text="End", text_ctxt=i18n_contexts.id_camera)
 
 
 class VIEW3D_PT_vr_session_view_object_type_visibility(VIEW3D_PT_object_type_visibility):
@@ -241,8 +244,12 @@ class VIEW3D_PT_vr_info(bpy.types.Panel):
         return not bpy.app.build_options.xr_openxr
 
     def draw(self, context):
+        import platform
         layout = self.layout
-        layout.label(icon='ERROR', text="Built without VR/OpenXR features")
+        missing_support_string = "Built without VR/OpenXR features"
+        if platform.system() == "Darwin":
+            missing_support_string = "VR is not supported on macOS at the moment"
+        layout.label(icon='ERROR', text=missing_support_string)
 
 
 classes = (

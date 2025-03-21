@@ -22,8 +22,12 @@ class VKDevice;
  */
 class VKBuffer : public NonCopyable {
   size_t size_in_bytes_ = 0;
+  size_t alloc_size_in_bytes_ = 0;
   VkBuffer vk_buffer_ = VK_NULL_HANDLE;
   VmaAllocation allocation_ = VK_NULL_HANDLE;
+  VkMemoryPropertyFlags vk_memory_property_flags_;
+  TimelineValue async_timeline_ = 0;
+
   /* Pointer to the virtually mapped memory. */
   void *mapped_memory_ = nullptr;
 
@@ -33,12 +37,18 @@ class VKBuffer : public NonCopyable {
 
   /** Has this buffer been allocated? */
   bool is_allocated() const;
+
+  /**
+   * Allocate the buffer.
+   */
   bool create(size_t size,
-              GPUUsageType usage,
               VkBufferUsageFlags buffer_usage,
-              bool is_host_visible = true);
+              VkMemoryPropertyFlags required_flags,
+              VkMemoryPropertyFlags preferred_flags,
+              VmaAllocationCreateFlags vma_allocation_flags);
   void clear(VKContext &context, uint32_t clear_value);
   void update_immediately(const void *data) const;
+  void update_sub_immediately(size_t start_offset, size_t data_size, const void *data) const;
 
   /**
    * Update the buffer as part of the render graph evaluation. The ownership of data will be
@@ -46,7 +56,24 @@ class VKBuffer : public NonCopyable {
    */
   void update_render_graph(VKContext &context, void *data) const;
   void flush() const;
+
+  /**
+   * Read the buffer (synchronously).
+   */
   void read(VKContext &context, void *data) const;
+
+  /**
+   * Start a async read-back.
+   */
+  void async_flush_to_host(VKContext &context);
+
+  /**
+   * Wait until the async read back is finished and fill the given data with the content of the
+   * buffer.
+   *
+   * Will start a new async read-back when there is no read back in progress.
+   */
+  void read_async(VKContext &context, void *data);
 
   /**
    * Free the buffer.

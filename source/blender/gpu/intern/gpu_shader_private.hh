@@ -17,7 +17,6 @@
 
 #include "BLI_map.hh"
 
-#include <mutex>
 #include <string>
 
 namespace blender::gpu {
@@ -44,6 +43,8 @@ class Shader {
  public:
   /** Uniform & attribute locations for shader. */
   ShaderInterface *interface = nullptr;
+  /** Bit-set indicating the frame-buffer color attachments that this shader writes to. */
+  uint16_t fragment_output_bits = 0;
 
   /**
    * Specialization constants as a Struct-of-Arrays. Allow simpler comparison and reset.
@@ -97,11 +98,6 @@ class Shader {
    * See `GPU_shader_warm_cache(..)` in `GPU_shader.hh` for more information. */
   virtual void warm_cache(int limit) = 0;
 
-  virtual void transform_feedback_names_set(Span<const char *> name_list,
-                                            eGPUShaderTFBType geom_type) = 0;
-  virtual bool transform_feedback_enable(VertBuf *) = 0;
-  virtual void transform_feedback_disable() = 0;
-
   virtual void bind() = 0;
   virtual void unbind() = 0;
 
@@ -122,21 +118,17 @@ class Shader {
   /* DEPRECATED: Kept only because of BGL API. */
   virtual int program_handle_get() const = 0;
 
-  /* Only used by SSBO Vertex fetch. */
-  virtual bool get_uses_ssbo_vertex_fetch() const = 0;
-  virtual int get_ssbo_vertex_fetch_output_num_verts() const = 0;
-
-  inline StringRefNull name_get() const
+  StringRefNull name_get() const
   {
     return name;
   }
 
-  inline void parent_set(Shader *parent)
+  void parent_set(Shader *parent)
   {
     parent_shader_ = parent;
   }
 
-  inline Shader *parent_get() const
+  Shader *parent_get() const
   {
     return parent_shader_;
   }
@@ -199,8 +191,7 @@ class ShaderCompiler {
   };
 };
 
-/* Generic (fully synchronous) implementation for backends that don't implement their own
- * ShaderCompiler. Used by Vulkan and Metal. */
+/* Generic (fully synchronous) implementation used as fallback. */
 class ShaderCompilerGeneric : public ShaderCompiler {
  private:
   struct Batch {
@@ -210,6 +201,7 @@ class ShaderCompilerGeneric : public ShaderCompiler {
   };
   BatchHandle next_batch_handle = 1;
   Map<BatchHandle, Batch> batches;
+  std::mutex mutex_;
 
  public:
   ~ShaderCompilerGeneric() override;

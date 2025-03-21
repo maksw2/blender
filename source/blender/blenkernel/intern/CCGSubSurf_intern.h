@@ -8,9 +8,7 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "CCGSubSurf.h"
 
 /**
  * Definitions which defines internal behavior of CCGSubSurf.
@@ -30,26 +28,24 @@ extern "C" {
  * Common type definitions.
  */
 
-typedef unsigned char byte;
-
 /**
  * Hash implementation.
  */
 
-typedef struct _EHEntry {
-  struct _EHEntry *next;
+struct EHEntry {
+  struct EHEntry *next;
   void *key;
-} EHEntry;
+};
 
-typedef struct _EHash {
+struct EHash {
   EHEntry **buckets;
   int numEntries, curSize, curSizeIdx;
 
   CCGAllocatorIFC allocatorIFC;
   CCGAllocatorHDL allocator;
-} EHash;
+};
 
-typedef void (*EHEntryFreeFP)(EHEntry *, void *);
+using EHEntryFreeFP = void (*)(EHEntry *, void *);
 
 #define EHASH_alloc(eh, nb) (EHEntry **)((eh)->allocatorIFC.alloc((eh)->allocator, nb))
 #define EHASH_free(eh, ptr) ((eh)->allocatorIFC.free((eh)->allocator, ptr))
@@ -107,8 +103,8 @@ struct CCGVert {
 
   CCGEdge **edges;
   CCGFace **faces;
-  // byte *levelData;
-  // byte *user_data;
+  // uint8_t *levelData;
+  // uint8_t *user_data;
 };
 
 struct CCGEdge {
@@ -121,8 +117,8 @@ struct CCGEdge {
   CCGVert *v0, *v1;
   CCGFace **faces;
 
-  // byte *levelData;
-  // byte *user_data;
+  // uint8_t *levelData;
+  // uint8_t *user_data;
 };
 
 struct CCGFace {
@@ -134,18 +130,18 @@ struct CCGFace {
 
   // CCGVert **verts;
   // CCGEdge **edges;
-  // byte *centerData;
-  // byte **gridData;
-  // byte *user_data;
+  // uint8_t *centerData;
+  // uint8_t **gridData;
+  // uint8_t *user_data;
 };
 
-typedef enum {
+enum SyncState {
   eSyncState_None = 0,
   eSyncState_Vert,
   eSyncState_Edge,
   eSyncState_Face,
   eSyncState_Partial,
-} SyncState;
+};
 
 struct CCGSubSurf {
   EHash *vMap; /* map of CCGVertHDL -> Vert */
@@ -260,9 +256,3 @@ void ccgSubSurf__sync_legacy(CCGSubSurf *ss);
 #ifdef DUMP_RESULT_GRIDS
 void ccgSubSurf__dumpCoords(CCGSubSurf *ss);
 #endif
-
-#ifdef __cplusplus
-}
-#endif
-
-#include "CCGSubSurf_inline.h"

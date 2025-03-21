@@ -16,7 +16,6 @@
 #include "DNA_space_types.h"
 
 #include "BLI_listbase.h"
-#include "BLI_string.h"
 
 #include "BLT_translation.hh"
 
@@ -24,8 +23,9 @@
 #include "BKE_context.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_object.hh"
 #include "BKE_report.hh"
 
@@ -405,7 +405,7 @@ static void parent_drop_set_parents(bContext *C,
   }
 }
 
-static int parent_drop_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus parent_drop_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   TreeElement *te = outliner_drop_find(C, event);
   TreeStoreElem *tselem = te ? TREESTORE(te) : nullptr;
@@ -503,7 +503,7 @@ static bool parent_clear_poll(bContext *C, wmDrag *drag, const wmEvent *event)
   }
 }
 
-static int parent_clear_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus parent_clear_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
 {
   Main *bmain = CTX_data_main(C);
 
@@ -559,7 +559,7 @@ static bool scene_drop_poll(bContext *C, wmDrag *drag, const wmEvent *event)
   return (ob && (outliner_ID_drop_find(C, event, ID_SCE) != nullptr));
 }
 
-static int scene_drop_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus scene_drop_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = (Scene *)outliner_ID_drop_find(C, event, ID_SCE);
@@ -592,6 +592,7 @@ static int scene_drop_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *ev
     }
   }
 
+  ED_region_tag_redraw(CTX_wm_region(C));
   DEG_relations_tag_update(bmain);
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SELECT);
@@ -631,7 +632,9 @@ static bool material_drop_poll(bContext *C, wmDrag *drag, const wmEvent *event)
   return (!ELEM(nullptr, ob, ma) && ID_IS_EDITABLE(&ob->id) && !ID_IS_OVERRIDE_LIBRARY(&ob->id));
 }
 
-static int material_drop_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus material_drop_invoke(bContext *C,
+                                             wmOperator * /*op*/,
+                                             const wmEvent *event)
 {
   Main *bmain = CTX_data_main(C);
   Object *ob = (Object *)outliner_ID_drop_find(C, event, ID_OB);
@@ -642,7 +645,7 @@ static int material_drop_invoke(bContext *C, wmOperator * /*op*/, const wmEvent 
   }
 
   /* only drop grease pencil material on grease pencil objects */
-  if ((ma->gp_style != nullptr) && (ob->type != OB_GPENCIL_LEGACY)) {
+  if ((ma->gp_style != nullptr) && (ob->type != OB_GREASE_PENCIL)) {
     return OPERATOR_CANCELLED;
   }
 
@@ -710,7 +713,7 @@ static void datastack_drop_data_init(wmDrag *drag,
                                      TreeStoreElem *tselem,
                                      void *directdata)
 {
-  StackDropData *drop_data = MEM_cnew<StackDropData>("datastack drop data");
+  StackDropData *drop_data = MEM_callocN<StackDropData>("datastack drop data");
 
   drop_data->ob_parent = ob;
   drop_data->pchan_parent = pchan;
@@ -837,7 +840,7 @@ static bool datastack_drop_are_types_valid(StackDropData *drop_data)
   switch (drop_data->drag_tselem->type) {
     case TSE_MODIFIER_BASE:
     case TSE_MODIFIER:
-      return (ob_parent->type == OB_GPENCIL_LEGACY) == (ob_dst->type == OB_GPENCIL_LEGACY);
+      return (ob_parent->type == OB_GREASE_PENCIL) == (ob_dst->type == OB_GREASE_PENCIL);
       break;
     case TSE_CONSTRAINT_BASE:
     case TSE_CONSTRAINT:
@@ -845,7 +848,7 @@ static bool datastack_drop_are_types_valid(StackDropData *drop_data)
       break;
     case TSE_GPENCIL_EFFECT_BASE:
     case TSE_GPENCIL_EFFECT:
-      return ob_parent->type == OB_GPENCIL_LEGACY && ob_dst->type == OB_GPENCIL_LEGACY;
+      return ob_parent->type == OB_GREASE_PENCIL && ob_dst->type == OB_GREASE_PENCIL;
       break;
   }
 
@@ -952,7 +955,7 @@ static void datastack_drop_link(bContext *C, StackDropData *drop_data)
       break;
     }
     case TSE_GPENCIL_EFFECT_BASE:
-      if (ob_dst->type != OB_GPENCIL_LEGACY) {
+      if (ob_dst->type != OB_GREASE_PENCIL) {
         return;
       }
 
@@ -992,7 +995,7 @@ static void datastack_drop_copy(bContext *C, StackDropData *drop_data)
       }
       break;
     case TSE_GPENCIL_EFFECT: {
-      if (ob_dst->type != OB_GPENCIL_LEGACY) {
+      if (ob_dst->type != OB_GREASE_PENCIL) {
         return;
       }
 
@@ -1046,7 +1049,7 @@ static void datastack_drop_reorder(bContext *C, ReportList *reports, StackDropDa
   }
 }
 
-static int datastack_drop_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus datastack_drop_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   if (event->custom != EVT_DATA_DRAGDROP) {
     return OPERATOR_CANCELLED;
@@ -1280,7 +1283,9 @@ static std::string collection_drop_tooltip(bContext *C,
   return {};
 }
 
-static int collection_drop_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus collection_drop_invoke(bContext *C,
+                                               wmOperator * /*op*/,
+                                               const wmEvent *event)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
@@ -1395,7 +1400,9 @@ static TreeElement *outliner_item_drag_element_find(SpaceOutliner *space_outline
   return outliner_find_item_at_y(space_outliner, &space_outliner->tree, my);
 }
 
-static int outliner_item_drag_drop_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus outliner_item_drag_drop_invoke(bContext *C,
+                                                       wmOperator * /*op*/,
+                                                       const wmEvent *event)
 {
   ARegion *region = CTX_wm_region(C);
   SpaceOutliner *space_outliner = CTX_wm_space_outliner(C);

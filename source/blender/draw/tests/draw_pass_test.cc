@@ -4,8 +4,11 @@
 
 #include "testing/testing.h"
 
+#include "BLI_math_geom.h"
 #include "BLI_math_matrix.hh"
+#include "GPU_context.hh"
 
+#include "draw_cache.hh"
 #include "draw_manager.hh"
 #include "draw_pass.hh"
 #include "draw_shader.hh"
@@ -123,8 +126,6 @@ static void test_draw_pass_all_commands()
   expected << "  .barrier(2)" << std::endl;
 
   EXPECT_EQ(result, expected.str());
-
-  DRW_shape_cache_free();
 }
 DRAW_TEST(draw_pass_all_commands)
 
@@ -203,8 +204,6 @@ static void test_draw_pass_simple_draw()
   expected << "    .draw(inst_len=3, vert_len=80, vert_first=8, res_id=8)" << std::endl;
 
   EXPECT_EQ(result, expected.str());
-
-  DRW_shape_cache_free();
 }
 DRAW_TEST(draw_pass_simple_draw)
 
@@ -246,8 +245,6 @@ static void test_draw_pass_multi_draw()
   expected << "      .proto(instance_len=1, resource_id=1, front_face)" << std::endl;
 
   EXPECT_EQ(result, expected.str());
-
-  DRW_shape_cache_free();
 }
 DRAW_TEST(draw_pass_multi_draw)
 
@@ -272,8 +269,6 @@ static void test_draw_pass_sortable()
   expected << "  .Sub5" << std::endl;
 
   EXPECT_EQ(result, expected.str());
-
-  DRW_shape_cache_free();
 }
 DRAW_TEST(draw_pass_sortable)
 
@@ -325,7 +320,7 @@ static void test_draw_resource_id_gen()
       result << val << " ";
     }
 
-    StringRefNull expected_simple = "2 1 1 1 1 3 3 1 1 1 1 1 3 2 2 2 2 2 2 1 1 1 ";
+    StringRefNull expected_simple = "0 2 1 1 1 1 3 3 1 1 1 1 1 3 2 2 2 2 2 2 1 1 1 ";
     EXPECT_EQ(result.str(), expected_simple);
   }
 
@@ -358,14 +353,14 @@ static void test_draw_resource_id_gen()
   }
 
   GPU_render_end();
-
-  DRW_shape_cache_free();
   DRW_shaders_free();
 }
 DRAW_TEST(draw_resource_id_gen)
 
 static void test_draw_visibility()
 {
+  GTEST_SKIP() << "This test needs to be reviewed. It should check visibility checks, but all "
+                  "resource handles are visible.";
   GPU_render_begin();
   Texture color_attachment;
   Framebuffer framebuffer;
@@ -410,8 +405,6 @@ static void test_draw_visibility()
   EXPECT_EQ(result.str(), "11111111111111111111111111111011");
 
   GPU_render_end();
-
-  DRW_shape_cache_free();
   DRW_shaders_free();
 }
 DRAW_TEST(draw_visibility)

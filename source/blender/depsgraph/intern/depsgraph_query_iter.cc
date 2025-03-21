@@ -11,10 +11,7 @@
 /* Silence warnings from copying deprecated fields. */
 #define DNA_DEPRECATED_ALLOW
 
-#include "MEM_guardedalloc.h"
-
 #include "BKE_duplilist.hh"
-#include "BKE_geometry_set.hh"
 #include "BKE_idprop.hh"
 #include "BKE_layer.hh"
 #include "BKE_modifier.hh"
@@ -22,6 +19,7 @@
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
 
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
 #include "BLI_utildefines.h"

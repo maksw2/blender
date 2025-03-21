@@ -45,7 +45,7 @@ class Fade : Overlay {
     ps_.init();
     ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_BLEND_ALPHA,
                   state.clipping_plane_count);
-    ps_.shader_set(res.shaders.uniform_color.get());
+    ps_.shader_set(res.shaders->uniform_color.get());
     {
       PassMain::Sub &sub = ps_.sub("edit_mesh.fade");
       float4 color = res.background_color_get(state);
@@ -144,6 +144,20 @@ class Fade : Overlay {
   }
 
  private:
+  /**
+   * Determines the effective mode of a given object based on whether the currently active mode is
+   * one that supports multi-object editing.
+   */
+  static int effective_mode(const Object *ob, const Object *active_object)
+  {
+    /* Any modes that support multi-object editing should be included here. */
+    if (ELEM(active_object->mode, OB_MODE_EDIT)) {
+      return active_object->mode & ob->mode;
+    }
+
+    return active_object == ob ? ob->mode : OB_MODE_OBJECT;
+  }
+
   static bool overlay_should_fade_object(const Object *ob, const Object *active_object)
   {
     if (!active_object || !ob) {
@@ -154,7 +168,7 @@ class Fade : Overlay {
       return false;
     }
 
-    if ((active_object->mode & ob->mode) != 0) {
+    if (active_object->mode == effective_mode(ob, active_object)) {
       return false;
     }
 

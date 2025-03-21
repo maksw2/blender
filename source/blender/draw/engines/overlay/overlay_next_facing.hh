@@ -10,6 +10,8 @@
 
 #include "BKE_paint.hh"
 
+#include "draw_sculpt.hh"
+
 #include "overlay_next_base.hh"
 
 namespace blender::draw::overlay {
@@ -49,8 +51,9 @@ class Facing : Overlay {
     ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | depth_compare_state |
                       backface_cull_state,
                   state.clipping_plane_count);
-    ps_.shader_set(res.shaders.facing.get());
+    ps_.shader_set(res.shaders->facing.get());
     ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+    ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
   }
 
   void object_sync(Manager &manager,

@@ -5,11 +5,12 @@
  * SPDX-License-Identifier: GPL-2.0-or-later AND BSD-3-Clause */
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 
+#include "BLI_math_base.h"
 #include "BLI_math_base.hh"
-#include "BLI_math_base_safe.h"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_numbers.hh"
 #include "BLI_math_vector.hh"
@@ -583,8 +584,18 @@ float perlin(float4 position)
 
 /* fBM = Fractal Brownian Motion */
 template<typename T>
-float perlin_fbm(
-    T p, const float detail, const float roughness, const float lacunarity, const bool normalize)
+#if defined(_MSC_VER) && _MSC_VER >= 1930
+/* The MSVC 2022 optimizer generates bad code for perlin_fractal_distorted when perlin_fbm gets
+ * inlined leading to incorrect results and failing tests that rely on perlin noise. For now just
+ * disable inlining for this function until we can get the compiler fixed. */
+BLI_NOINLINE
+#endif
+    float
+    perlin_fbm(T p,
+               const float detail,
+               const float roughness,
+               const float lacunarity,
+               const bool normalize)
 {
   float fscale = 1.0f;
   float amp = 1.0f;
@@ -610,6 +621,12 @@ float perlin_fbm(
 
 /* Explicit instantiation for Wave Texture. */
 template float perlin_fbm<float3>(float3 p,
+                                  const float detail,
+                                  const float roughness,
+                                  const float lacunarity,
+                                  const bool normalize);
+
+template float perlin_fbm<float2>(float2 p,
                                   const float detail,
                                   const float roughness,
                                   const float lacunarity,
@@ -674,9 +691,7 @@ float perlin_hybrid_multi_fractal(T p,
   float weight = 1.0f;
 
   for (int i = 0; (weight > 0.001f) && (i <= int(detail)); i++) {
-    if (weight > 1.0f) {
-      weight = 1.0f;
-    }
+    weight = std::min(weight, 1.0f);
 
     float signal = (perlin_signed(p) + offset) * pwr;
     pwr *= roughness;
@@ -687,9 +702,7 @@ float perlin_hybrid_multi_fractal(T p,
 
   const float rmd = detail - floorf(detail);
   if ((rmd != 0.0f) && (weight > 0.001f)) {
-    if (weight > 1.0f) {
-      weight = 1.0f;
-    }
+    weight = std::min(weight, 1.0f);
     float signal = (perlin_signed(p) + offset) * pwr;
     value += rmd * weight * signal;
   }
@@ -1081,7 +1094,7 @@ float voronoi_distance(const float3 a, const float3 b, const VoronoiParams &para
     case NOISE_SHD_VORONOI_MANHATTAN:
       return std::abs(a.x - b.x) + std::abs(a.y - b.y) + std::abs(a.z - b.z);
     case NOISE_SHD_VORONOI_CHEBYCHEV:
-      return std::max(std::abs(a.x - b.x), std::max(std::abs(a.y - b.y), std::abs(a.z - b.z)));
+      return std::max({std::abs(a.x - b.x), std::abs(a.y - b.y), std::abs(a.z - b.z)});
     case NOISE_SHD_VORONOI_MINKOWSKI:
       return std::pow(std::pow(std::abs(a.x - b.x), params.exponent) +
                           std::pow(std::abs(a.y - b.y), params.exponent) +
@@ -1103,8 +1116,7 @@ float voronoi_distance(const float4 a, const float4 b, const VoronoiParams &para
       return std::abs(a.x - b.x) + std::abs(a.y - b.y) + std::abs(a.z - b.z) + std::abs(a.w - b.w);
     case NOISE_SHD_VORONOI_CHEBYCHEV:
       return std::max(
-          std::abs(a.x - b.x),
-          std::max(std::abs(a.y - b.y), std::max(std::abs(a.z - b.z), std::abs(a.w - b.w))));
+          {std::abs(a.x - b.x), std::abs(a.y - b.y), std::abs(a.z - b.z), std::abs(a.w - b.w)});
     case NOISE_SHD_VORONOI_MINKOWSKI:
       return std::pow(std::pow(std::abs(a.x - b.x), params.exponent) +
                           std::pow(std::abs(a.y - b.y), params.exponent) +
@@ -2126,20 +2138,27 @@ static float2 compute_2d_gabor_kernel(const float2 position,
   return windowed_gaussian_envelope * phasor;
 }
 
-/* Computes the approximate standard deviation of the zero mean normal distribution representing
+/**
+ * Computes the approximate standard deviation of the zero mean normal distribution representing
  * the amplitude distribution of the noise based on Equation (9) in the original Gabor noise paper.
  * For simplicity, the Hann window is ignored and the orientation is fixed since the variance is
  * orientation invariant. We start integrating the squared Gabor kernel with respect to x:
  *
- *   \int_{-\infty}^{-\infty} (e^{- \pi (x^2 + y^2)} cos(2 \pi f_0 x))^2 dx
+ * \code{.tex}
+ * \int_{-\infty}^{-\infty} (e^{- \pi (x^2 + y^2)} cos(2 \pi f_0 x))^2 dx
+ * \endcode
  *
  * Which gives:
  *
- *  \frac{(e^{2 \pi f_0^2}-1) e^{-2 \pi y^2 - 2 pi f_0^2}}{2^\frac{3}{2}}
+ * \code{.tex}
+ * \frac{(e^{2 \pi f_0^2}-1) e^{-2 \pi y^2 - 2 pi f_0^2}}{2^\frac{3}{2}}
+ * \endcode
  *
  * Then we similarly integrate with respect to y to get:
  *
- *  \frac{1 - e^{-2 \pi f_0^2}}{4}
+ * \code{.tex}
+ * \frac{1 - e^{-2 \pi f_0^2}}{4}
+ * \endcode
  *
  * Secondly, we note that the second moment of the weights distribution is 0.5 since it is a
  * fair Bernoulli distribution. So the final standard deviation expression is square root the
@@ -2149,7 +2168,9 @@ static float2 compute_2d_gabor_kernel(const float2 position,
  * converges to an upper limit as the frequency approaches infinity, so we replace the expression
  * with the following limit:
  *
- *  \lim_{x \to \infty} \frac{1 - e^{-2 \pi f_0^2}}{4}
+ * \code{.tex}
+ * \lim_{x \to \infty} \frac{1 - e^{-2 \pi f_0^2}}{4}
+ * \endcode
  *
  * To get an approximation of 0.25. */
 static float compute_2d_gabor_standard_deviation()

@@ -6,7 +6,6 @@
  * \ingroup bli
  */
 
-#include "BLI_array.hh"
 #include "BLI_math_color.h"
 #include "BLI_math_color.hh"
 #include "BLI_math_matrix.hh"
@@ -14,9 +13,10 @@
 #include "BLI_simd.hh"
 #include "BLI_utildefines.h"
 
-#include <string.h>
+#include <algorithm>
+#include <cstring>
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 void hsv_to_rgb(float h, float s, float v, float *r_r, float *r_g, float *r_b)
 {
@@ -379,15 +379,9 @@ uint rgb_to_cpack(float r, float g, float b)
   ig = uint(floorf(255.0f * max_ff(g, 0.0f)));
   ib = uint(floorf(255.0f * max_ff(b, 0.0f)));
 
-  if (ir > 255) {
-    ir = 255;
-  }
-  if (ig > 255) {
-    ig = 255;
-  }
-  if (ib > 255) {
-    ib = 255;
-  }
+  ir = std::min<uint>(ir, 255);
+  ig = std::min<uint>(ig, 255);
+  ib = std::min<uint>(ib, 255);
 
   return (ir + (ig * 256) + (ib * 256 * 256));
 }
@@ -681,69 +675,6 @@ void linearrgb_to_srgb_v3_v3(float srgb[3], const float linear[3])
 }
 
 #endif /* BLI_HAVE_SSE2 */
-
-void minmax_rgb(short c[3])
-{
-  if (c[0] > 255) {
-    c[0] = 255;
-  }
-  else if (c[0] < 0) {
-    c[0] = 0;
-  }
-
-  if (c[1] > 255) {
-    c[1] = 255;
-  }
-  else if (c[1] < 0) {
-    c[1] = 0;
-  }
-
-  if (c[2] > 255) {
-    c[2] = 255;
-  }
-  else if (c[2] < 0) {
-    c[2] = 0;
-  }
-}
-
-int constrain_rgb(float *r, float *g, float *b)
-{
-  /* Amount of white needed */
-  const float w = -min_ffff(0.0f, *r, *g, *b);
-
-  /* Add just enough white to make r, g, b all positive. */
-  if (w > 0.0f) {
-    *r += w;
-    *g += w;
-    *b += w;
-
-    return 1; /* Color modified to fit RGB gamut */
-  }
-
-  return 0; /* Color within RGB gamut */
-}
-
-/* ********************** lift/gamma/gain / ASC-CDL conversion ********************************* */
-
-void lift_gamma_gain_to_asc_cdl(const float *lift,
-                                const float *gamma,
-                                const float *gain,
-                                float *offset,
-                                float *slope,
-                                float *power)
-{
-  int c;
-  for (c = 0; c < 3; c++) {
-    offset[c] = lift[c] * gain[c];
-    slope[c] = gain[c] * (1.0f - lift[c]);
-    if (gamma[c] == 0) {
-      power[c] = FLT_MAX;
-    }
-    else {
-      power[c] = 1.0f / gamma[c];
-    }
-  }
-}
 
 /* ************************************* other ************************************************* */
 

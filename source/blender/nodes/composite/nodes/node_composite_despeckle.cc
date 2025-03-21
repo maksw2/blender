@@ -50,11 +50,11 @@ static void node_composit_buts_despeckle(uiLayout *layout, bContext * /*C*/, Poi
   uiLayout *col;
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "threshold", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "threshold_neighbor", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "threshold", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "threshold_neighbor", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class DespeckleOperation : public NodeOperation {
  public:
@@ -62,9 +62,10 @@ class DespeckleOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &input_image = get_input("Image");
-    if (input_image.is_single_value()) {
-      input_image.pass_through(get_result("Image"));
+    const Result &input = this->get_input("Image");
+    if (input.is_single_value()) {
+      Result &output = this->get_result("Image");
+      output.share_data(input);
       return;
     }
 
@@ -125,7 +126,7 @@ class DespeckleOperation : public NodeOperation {
                                 float3(corner_weight, 1.0f, corner_weight));
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float4 center_color = input.load_pixel(texel);
+      float4 center_color = input.load_pixel<float4>(texel);
 
       /* Go over the pixels in the 3x3 window around the center pixel and compute the total sum of
        * their colors multiplied by their weights. Additionally, for pixels whose colors are not
@@ -137,7 +138,7 @@ class DespeckleOperation : public NodeOperation {
       for (int j = 0; j < 3; j++) {
         for (int i = 0; i < 3; i++) {
           float weight = weights[j][i];
-          float4 color = input.load_pixel_extended(texel + int2(i - 1, j - 1)) * weight;
+          float4 color = input.load_pixel_extended<float4>(texel + int2(i - 1, j - 1)) * weight;
           sum_of_colors += color;
           if (!math::is_equal(center_color.xyz(), color.xyz(), color_threshold)) {
             accumulated_color += color;
@@ -172,7 +173,7 @@ class DespeckleOperation : public NodeOperation {
       }
 
       /* We need to despeckle, so write the mean accumulated color. */
-      float factor = factor_image.load_pixel(texel).x;
+      float factor = factor_image.load_pixel<float, true>(texel);
       float4 mean_color = accumulated_color / accumulated_weight;
       output.store_pixel(texel, math::interpolate(center_color, mean_color, factor));
     });
@@ -202,12 +203,18 @@ void register_node_type_cmp_despeckle()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_DESPECKLE, "Despeckle", NODE_CLASS_OP_FILTER);
+  cmp_node_type_base(&ntype, "CompositorNodeDespeckle", CMP_NODE_DESPECKLE);
+  ntype.ui_name = "Despeckle";
+  ntype.ui_description =
+      "Smooth areas of an image in which noise is noticeable, while leaving complex areas "
+      "untouched";
+  ntype.enum_name_legacy = "DESPECKLE";
+  ntype.nclass = NODE_CLASS_OP_FILTER;
   ntype.declare = file_ns::cmp_node_despeckle_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_despeckle;
   ntype.flag |= NODE_PREVIEW;
   ntype.initfunc = file_ns::node_composit_init_despeckle;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

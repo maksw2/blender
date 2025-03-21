@@ -16,6 +16,7 @@
 #include "BKE_attribute_math.hh"
 #include "BKE_curves.hh"
 #include "BKE_curves_utils.hh"
+#include "BKE_deform.hh"
 #include "BKE_geometry_fields.hh"
 
 #include "GEO_resample_curves.hh"
@@ -31,24 +32,32 @@ static fn::Field<int> get_count_input_max_one(const fn::Field<int> &count_field)
   return fn::Field<int>(fn::FieldOperation::Create(max_one_fn, {count_field}));
 }
 
-static fn::Field<int> get_count_input_from_length(const fn::Field<float> &length_field)
+static int get_count_from_length(const float curve_length,
+                                 const float sample_length,
+                                 const bool keep_last_segment)
 {
-  static auto get_count_fn = mf::build::SI2_SO<float, float, int>(
+  /* Find the number of sampled segments by dividing the total length by
+   * the sample length. Then there is one more sampled point than segment. */
+  if (UNLIKELY(sample_length == 0.0f)) {
+    return 1;
+  }
+  const int count = int(curve_length / sample_length) + 1;
+  return std::max(keep_last_segment ? 2 : 1, count);
+}
+
+static fn::Field<int> get_count_input_from_length(const fn::Field<float> &length_field,
+                                                  const bool keep_last_segment)
+{
+  static auto get_count_fn = mf::build::SI3_SO<float, float, bool, int>(
       "Length Input to Count",
-      [](const float curve_length, const float sample_length) {
-        /* Find the number of sampled segments by dividing the total length by
-         * the sample length. Then there is one more sampled point than segment. */
-        if (UNLIKELY(sample_length == 0.0f)) {
-          return 1;
-        }
-        const int count = int(curve_length / sample_length) + 1;
-        return std::max(1, count);
-      },
-      mf::build::exec_presets::AllSpanOrSingle());
+      get_count_from_length,
+      mf::build::exec_presets::SomeSpanOrSingle<0, 1>());
 
   auto get_count_op = fn::FieldOperation::Create(
       get_count_fn,
-      {fn::Field<float>(std::make_shared<bke::CurveLengthFieldInput>()), length_field});
+      {fn::Field<float>(std::make_shared<bke::CurveLengthFieldInput>()),
+       length_field,
+       fn::make_constant_field(keep_last_segment)});
 
   return fn::Field<int>(std::move(get_count_op));
 }
@@ -411,6 +420,8 @@ static CurvesGeometry resample_to_uniform(const CurvesGeometry &src_curves,
   const OffsetIndices src_points_by_curve = src_curves.points_by_curve();
 
   CurvesGeometry dst_curves = bke::curves::copy_only_curve_domain(src_curves);
+  /* Copy vertex groups from source curves to allow copying vertex group attributes. */
+  BKE_defgroup_copy_list(&dst_curves.vertex_group_names, &src_curves.vertex_group_names);
   MutableSpan<int> dst_offsets = dst_curves.offsets_for_write();
 
   fn::FieldEvaluator evaluator{field_context, src_curves.curves_num()};
@@ -444,6 +455,8 @@ CurvesGeometry resample_to_count(const CurvesGeometry &src_curves,
   const OffsetIndices src_points_by_curve = src_curves.points_by_curve();
 
   CurvesGeometry dst_curves = bke::curves::copy_only_curve_domain(src_curves);
+  /* Copy vertex groups from source curves to allow copying vertex group attributes. */
+  BKE_defgroup_copy_list(&dst_curves.vertex_group_names, &src_curves.vertex_group_names);
   MutableSpan<int> dst_offsets = dst_curves.offsets_for_write();
 
   array_utils::copy(counts, selection, dst_offsets);
@@ -481,7 +494,8 @@ CurvesGeometry resample_to_count(const CurvesGeometry &src_curves,
 CurvesGeometry resample_to_length(const CurvesGeometry &src_curves,
                                   const IndexMask &selection,
                                   const VArray<float> &sample_lengths,
-                                  const ResampleCurvesOutputAttributeIDs &output_ids)
+                                  const ResampleCurvesOutputAttributeIDs &output_ids,
+                                  const bool keep_last_segment)
 {
   if (src_curves.curves_range().is_empty()) {
     return {};
@@ -490,13 +504,16 @@ CurvesGeometry resample_to_length(const CurvesGeometry &src_curves,
   const VArray<bool> curves_cyclic = src_curves.cyclic();
 
   CurvesGeometry dst_curves = bke::curves::copy_only_curve_domain(src_curves);
+  /* Copy vertex groups from source curves to allow copying vertex group attributes. */
+  BKE_defgroup_copy_list(&dst_curves.vertex_group_names, &src_curves.vertex_group_names);
   MutableSpan<int> dst_offsets = dst_curves.offsets_for_write();
 
   src_curves.ensure_evaluated_lengths();
   selection.foreach_index(GrainSize(1024), [&](const int curve_i) {
     const float curve_length = src_curves.evaluated_length_total_for_curve(curve_i,
                                                                            curves_cyclic[curve_i]);
-    dst_offsets[curve_i] = int(curve_length / sample_lengths[curve_i]) + 1;
+    dst_offsets[curve_i] = get_count_from_length(
+        curve_length, sample_lengths[curve_i], keep_last_segment);
   });
 
   IndexMaskMemory memory;
@@ -516,12 +533,13 @@ CurvesGeometry resample_to_length(const CurvesGeometry &src_curves,
                                   const fn::FieldContext &field_context,
                                   const fn::Field<bool> &selection_field,
                                   const fn::Field<float> &segment_length_field,
-                                  const ResampleCurvesOutputAttributeIDs &output_ids)
+                                  const ResampleCurvesOutputAttributeIDs &output_ids,
+                                  const bool keep_last_segment)
 {
   return resample_to_uniform(src_curves,
                              field_context,
                              selection_field,
-                             get_count_input_from_length(segment_length_field),
+                             get_count_input_from_length(segment_length_field, keep_last_segment),
                              output_ids);
 }
 
@@ -540,6 +558,8 @@ CurvesGeometry resample_to_evaluated(const CurvesGeometry &src_curves,
   const IndexMask unselected = selection.complement(src_curves.curves_range(), memory);
 
   CurvesGeometry dst_curves = bke::curves::copy_only_curve_domain(src_curves);
+  /* Copy vertex groups from source curves to allow copying vertex group attributes. */
+  BKE_defgroup_copy_list(&dst_curves.vertex_group_names, &src_curves.vertex_group_names);
   dst_curves.fill_curve_types(selection, CURVE_TYPE_POLY);
   MutableSpan<int> dst_offsets = dst_curves.offsets_for_write();
   offset_indices::copy_group_sizes(src_evaluated_points_by_curve, selection, dst_offsets);

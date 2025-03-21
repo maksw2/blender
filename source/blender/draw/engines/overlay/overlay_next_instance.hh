@@ -18,6 +18,7 @@
 #include "overlay_next_background.hh"
 #include "overlay_next_bounds.hh"
 #include "overlay_next_camera.hh"
+#include "overlay_next_cursor.hh"
 #include "overlay_next_curve.hh"
 #include "overlay_next_edit_text.hh"
 #include "overlay_next_empty.hh"
@@ -39,6 +40,7 @@
 #include "overlay_next_outline.hh"
 #include "overlay_next_paint.hh"
 #include "overlay_next_particle.hh"
+#include "overlay_next_pointcloud.hh"
 #include "overlay_next_prepass.hh"
 #include "overlay_next_relation.hh"
 #include "overlay_next_sculpt.hh"
@@ -52,22 +54,15 @@ namespace blender::draw::overlay {
  * Selection engine reuse most of the Overlay engine by creating selection IDs for each
  * selectable component and using a special shaders for drawing.
  */
-class Instance {
+class Instance : public DrawEngine {
   const SelectionType selection_type_;
-  const bool clipping_enabled_;
+  bool clipping_enabled_;
 
  public:
-  /* WORKAROUND: Legacy. Move to grid pass. */
-  GPUUniformBuf *grid_ubo = nullptr;
-
   ShapeCache shapes;
 
-  View view = {"OverlayView"};
-
   /** Global types. */
-  Resources resources = {selection_type_,
-                         overlay::ShaderModule::module_get(selection_type_, clipping_enabled_),
-                         shapes};
+  Resources resources = {selection_type_, shapes};
   State state;
 
   /** Overlay types. */
@@ -76,6 +71,7 @@ class Instance {
   Origins origins = {selection_type_};
   Outline outline;
   MotionPath motion_paths;
+  Cursor cursor;
 
   struct OverlayLayer {
     const SelectionType selection_type_;
@@ -103,6 +99,7 @@ class Instance {
     Names names;
     Paints paints;
     Particles particles;
+    PointClouds pointclouds;
     Prepass prepass;
     Relations relations = {selection_type_};
     Sculpts sculpts;
@@ -115,24 +112,19 @@ class Instance {
   AntiAliasing anti_aliasing;
   XrayFade xray_fade;
 
-  Instance(const SelectionType selection_type, const bool clipping_enabled)
-      : selection_type_(selection_type), clipping_enabled_(clipping_enabled){};
+  Instance() : selection_type_(select::SelectionType::DISABLED){};
+  Instance(const SelectionType selection_type) : selection_type_(selection_type){};
 
-  ~Instance()
+  blender::StringRefNull name_get() final
   {
-    DRW_UBO_FREE_SAFE(grid_ubo);
+    return "Overlay";
   }
 
-  void init();
-  void begin_sync();
-  void object_sync(ObjectRef &ob_ref, Manager &manager);
-  void end_sync();
-  void draw(Manager &manager);
-
-  bool clipping_enabled() const
-  {
-    return clipping_enabled_;
-  }
+  void init() final;
+  void begin_sync() final;
+  void object_sync(ObjectRef &ob_ref, Manager &manager) final;
+  void end_sync() final;
+  void draw(Manager &manager) final;
 
  private:
   bool object_is_selected(const ObjectRef &ob_ref);
@@ -158,6 +150,8 @@ class Instance {
   void draw_node(Manager &manager, View &view);
   void draw_v2d(Manager &manager, View &view);
   void draw_v3d(Manager &manager, View &view);
+
+  void ensure_weight_ramp_texture();
 };
 
 }  // namespace blender::draw::overlay

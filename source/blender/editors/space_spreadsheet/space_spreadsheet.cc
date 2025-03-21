@@ -8,6 +8,7 @@
 #include "BLI_string.h"
 
 #include "BKE_screen.hh"
+#include "BKE_viewer_path.hh"
 
 #include "ED_screen.hh"
 #include "ED_space_api.hh"
@@ -35,6 +36,7 @@
 
 #include "BLF_api.hh"
 
+#include "spreadsheet_column.hh"
 #include "spreadsheet_data_source_geometry.hh"
 #include "spreadsheet_intern.hh"
 #include "spreadsheet_layout.hh"
@@ -47,7 +49,7 @@ namespace blender::ed::spreadsheet {
 
 static SpaceLink *spreadsheet_create(const ScrArea * /*area*/, const Scene * /*scene*/)
 {
-  SpaceSpreadsheet *spreadsheet_space = MEM_cnew<SpaceSpreadsheet>("spreadsheet space");
+  SpaceSpreadsheet *spreadsheet_space = MEM_callocN<SpaceSpreadsheet>("spreadsheet space");
   spreadsheet_space->spacetype = SPACE_SPREADSHEET;
 
   spreadsheet_space->filter_flag = SPREADSHEET_FILTER_ENABLE;
@@ -619,7 +621,7 @@ static void spreadsheet_footer_region_draw(const bContext *C, ARegion *region)
                                      style);
   uiItemSpacer(layout);
   uiLayoutSetAlignment(layout, UI_LAYOUT_ALIGN_RIGHT);
-  uiItemL(layout, stats_str.c_str(), ICON_NONE);
+  uiItemL(layout, stats_str, ICON_NONE);
   UI_block_layout_resolve(block, nullptr, nullptr);
   UI_block_align_end(block);
   UI_block_end(C, block);
@@ -743,7 +745,7 @@ void register_spacetype()
   st->blend_write = spreadsheet_blend_write;
 
   /* regions: main window */
-  art = MEM_cnew<ARegionType>("spacetype spreadsheet region");
+  art = MEM_callocN<ARegionType>("spacetype spreadsheet region");
   art->regionid = RGN_TYPE_WINDOW;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_VIEW2D | ED_KEYMAP_FRAMES;
   art->lock = 1;
@@ -754,7 +756,7 @@ void register_spacetype()
   BLI_addhead(&st->regiontypes, art);
 
   /* regions: header */
-  art = MEM_cnew<ARegionType>("spacetype spreadsheet header region");
+  art = MEM_callocN<ARegionType>("spacetype spreadsheet header region");
   art->regionid = RGN_TYPE_HEADER;
   art->prefsizey = HEADERY;
   art->keymapflag = 0;
@@ -768,7 +770,7 @@ void register_spacetype()
   BLI_addhead(&st->regiontypes, art);
 
   /* regions: footer */
-  art = MEM_cnew<ARegionType>("spacetype spreadsheet footer region");
+  art = MEM_callocN<ARegionType>("spacetype spreadsheet footer region");
   art->regionid = RGN_TYPE_FOOTER;
   art->prefsizey = HEADERY;
   art->keymapflag = 0;
@@ -782,7 +784,7 @@ void register_spacetype()
   BLI_addhead(&st->regiontypes, art);
 
   /* regions: right panel buttons */
-  art = MEM_cnew<ARegionType>("spacetype spreadsheet right region");
+  art = MEM_callocN<ARegionType>("spacetype spreadsheet right region");
   art->regionid = RGN_TYPE_UI;
   art->prefsizex = UI_SIDEBAR_PANEL_WIDTH;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_FRAMES;
@@ -798,7 +800,7 @@ void register_spacetype()
   register_row_filter_panels(*art);
 
   /* regions: channels */
-  art = MEM_cnew<ARegionType>("spreadsheet dataset region");
+  art = MEM_callocN<ARegionType>("spreadsheet dataset region");
   art->regionid = RGN_TYPE_TOOLS;
   art->prefsizex = 150 + V2D_SCROLL_WIDTH;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_FRAMES;

@@ -12,14 +12,18 @@
 
 struct ARegion;
 struct AZone;
+struct ReportList;
 struct bContext;
 struct bContextDataResult;
 struct bScreen;
 struct Main;
 struct rcti;
+struct ScrArea;
 struct ScrAreaMap;
 struct ScrEdge;
 struct ScrVert;
+struct WorkSpaceLayout;
+struct wmOperatorType;
 struct wmWindow;
 
 /* internal exports only */
@@ -56,8 +60,6 @@ enum class AreaDockTarget {
   Center, /* Middle portion of area. */
 };
 
-#define AZONESPOTW UI_HEADER_OFFSET         /* width of corner #AZone - max */
-#define AZONESPOTH (0.6f * U.widget_unit)   /* height of corner #AZone */
 #define AZONEFADEIN (5.0f * U.widget_unit)  /* when #AZone is totally visible */
 #define AZONEFADEOUT (6.5f * U.widget_unit) /* when we start seeing the #AZone */
 
@@ -68,7 +70,7 @@ enum class AreaDockTarget {
 /**
  * Expanded interaction influence of area borders.
  */
-#define BORDERPADDING ((3.0f * UI_SCALE_FAC) + U.pixelsize)
+#define BORDERPADDING ((4.0f * UI_SCALE_FAC) + U.pixelsize)
 
 /* `area.cc` */
 
@@ -89,8 +91,13 @@ void region_toggle_hidden(bContext *C, ARegion *region, bool do_fade);
  * \param sa2: Target area that will be replaced.
  */
 void screen_draw_join_highlight(const wmWindow *win, ScrArea *sa1, ScrArea *sa2, eScreenDir dir);
-void screen_draw_dock_preview(
-    ScrArea *source, ScrArea *target, AreaDockTarget dock_target, float factor, int x, int y);
+void screen_draw_dock_preview(const wmWindow *win,
+                              ScrArea *source,
+                              ScrArea *target,
+                              AreaDockTarget dock_target,
+                              float factor,
+                              int x,
+                              int y);
 void screen_draw_split_preview(ScrArea *area, eScreenAxis dir_axis, float factor);
 
 void screen_draw_move_highlight(bScreen *screen, eScreenAxis dir_axis);
@@ -122,7 +129,8 @@ ScrArea *area_split(const wmWindow *win,
 /**
  * Join any two neighboring areas. Might involve complex changes.
  */
-int screen_area_join(bContext *C, bScreen *screen, ScrArea *sa1, ScrArea *sa2);
+int screen_area_join(
+    bContext *C, ReportList *reports, bScreen *screen, ScrArea *sa1, ScrArea *sa2);
 /**
  * with `sa_a` as center, `sa_b` is located at: 0=W, 1=N, 2=E, 3=S
  * -1 = not valid check.
@@ -136,9 +144,11 @@ void area_getoffsets(ScrArea *sa_a, ScrArea *sa_b, eScreenDir dir, int *r_offset
 /**
  * Close a screen area, allowing most-aligned neighbor to take its place.
  */
-bool screen_area_close(bContext *C, bScreen *screen, ScrArea *area);
+bool screen_area_close(bContext *C, ReportList *reports, bScreen *screen, ScrArea *area);
 void screen_area_spacelink_add(const Scene *scene, ScrArea *area, eSpace_Type space_type);
 AZone *ED_area_actionzone_find_xy(ScrArea *area, const int xy[2]);
+
+bool area_regions_poll(bContext *C, const bScreen *screen, ScrArea *area);
 
 /* `screen_geometry.cc` */
 

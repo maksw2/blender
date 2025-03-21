@@ -2,7 +2,12 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_lib.glsl"
+#include "infos/overlay_outline_info.hh"
+
+FRAGMENT_SHADER_CREATE_INFO(overlay_outline_detect)
+
+#include "draw_view_lib.glsl"
+#include "overlay_common_lib.glsl"
 
 #define XPOS (1 << 0)
 #define XNEG (1 << 1)
@@ -165,7 +170,7 @@ void main()
   uint ref_col = ref;
 
   vec2 uvs = gl_FragCoord.xy * sizeViewportInv;
-  vec3 ofs = vec3(sizeViewportInv.xy, 0.0);
+  vec3 ofs = vec3(sizeViewportInv, 0.0);
 
   vec2 depth_uv = uvs;
 
@@ -270,7 +275,6 @@ void main()
   }
 
   vec2 line_start, line_end;
-  vec2 line_ofs;
   bvec4 extra_edges, extra_edges2;
   /* TODO: simplify this branching hell. */
   switch (edge_case) {

@@ -188,8 +188,8 @@ static float viewzoom_scale_value(const rcti *winrct,
         BLI_rcti_cent_x(winrct),
         BLI_rcti_cent_y(winrct),
     };
-    float len_new = (5 * UI_SCALE_FAC) + (float(len_v2v2_int(ctr, xy_curr)) / UI_SCALE_FAC);
-    float len_old = (5 * UI_SCALE_FAC) + (float(len_v2v2_int(ctr, xy_init)) / UI_SCALE_FAC);
+    float len_new = (5 * UI_SCALE_FAC) + (len_v2v2_int(ctr, xy_curr) / UI_SCALE_FAC);
+    float len_old = (5 * UI_SCALE_FAC) + (len_v2v2_int(ctr, xy_init) / UI_SCALE_FAC);
 
     /* intentionally ignore 'zoom_invert' for scale */
     if (zoom_invert_force) {
@@ -345,13 +345,13 @@ static void viewzoom_apply(ViewOpsData *vod,
   }
 }
 
-static int viewzoom_modal_impl(bContext *C,
-                               ViewOpsData *vod,
-                               const eV3D_OpEvent event_code,
-                               const int xy[2])
+static wmOperatorStatus viewzoom_modal_impl(bContext *C,
+                                            ViewOpsData *vod,
+                                            const eV3D_OpEvent event_code,
+                                            const int xy[2])
 {
   bool use_autokey = false;
-  int ret = OPERATOR_RUNNING_MODAL;
+  wmOperatorStatus ret = OPERATOR_RUNNING_MODAL;
 
   switch (event_code) {
     case VIEW_APPLY: {
@@ -433,7 +433,7 @@ static void view_zoom_apply_step(bContext *C,
   ED_region_tag_redraw(region);
 }
 
-static int viewzoom_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus viewzoom_exec(bContext *C, wmOperator *op)
 {
   BLI_assert(op->customdata == nullptr);
 
@@ -464,10 +464,10 @@ static int viewzoom_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int viewzoom_invoke_impl(bContext *C,
-                                ViewOpsData *vod,
-                                const wmEvent *event,
-                                PointerRNA *ptr)
+static wmOperatorStatus viewzoom_invoke_impl(bContext *C,
+                                             ViewOpsData *vod,
+                                             const wmEvent *event,
+                                             PointerRNA *ptr)
 {
   int xy[2];
 
@@ -493,22 +493,21 @@ static int viewzoom_invoke_impl(bContext *C,
 
     return OPERATOR_FINISHED;
   }
-  else {
-    eV3D_OpEvent event_code = ELEM(event->type, MOUSEZOOM, MOUSEPAN) ? VIEW_CONFIRM : VIEW_PASS;
-    if (event_code == VIEW_CONFIRM) {
-      if (U.uiflag & USER_ZOOM_HORIZ) {
-        vod->init.event_xy[0] = vod->prev.event_xy[0] = xy[0];
-      }
-      else {
-        /* Set y move = x move as MOUSEZOOM uses only x axis to pass magnification value */
-        vod->init.event_xy[1] = vod->prev.event_xy[1] = vod->init.event_xy[1] + xy[0] -
-                                                        event->prev_xy[0];
-      }
-      viewzoom_apply(vod, event->prev_xy, USER_ZOOM_DOLLY, (U.uiflag & USER_ZOOM_INVERT) != 0);
-      ED_view3d_camera_lock_autokey(vod->v3d, vod->rv3d, C, false, true);
 
-      return OPERATOR_FINISHED;
+  eV3D_OpEvent event_code = ELEM(event->type, MOUSEZOOM, MOUSEPAN) ? VIEW_CONFIRM : VIEW_PASS;
+  if (event_code == VIEW_CONFIRM) {
+    if (U.uiflag & USER_ZOOM_HORIZ) {
+      vod->init.event_xy[0] = vod->prev.event_xy[0] = xy[0];
     }
+    else {
+      /* Set y move = x move as MOUSEZOOM uses only x axis to pass magnification value */
+      vod->init.event_xy[1] = vod->prev.event_xy[1] = vod->init.event_xy[1] + xy[0] -
+                                                      event->prev_xy[0];
+    }
+    viewzoom_apply(vod, event->prev_xy, USER_ZOOM_DOLLY, (U.uiflag & USER_ZOOM_INVERT) != 0);
+    ED_view3d_camera_lock_autokey(vod->v3d, vod->rv3d, C, false, true);
+
+    return OPERATOR_FINISHED;
   }
 
   if (U.viewzoom == USER_ZOOM_CONTINUE) {
@@ -520,9 +519,9 @@ static int viewzoom_invoke_impl(bContext *C,
   return OPERATOR_RUNNING_MODAL;
 }
 
-/* viewdolly_invoke() copied this function, changes here may apply there */
-static int viewzoom_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus viewzoom_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
+  /* Near duplicate logic in #viewdolly_invoke(), changes here may apply there too. */
   return view3d_navigate_invoke_impl(C, op, event, &ViewOpsType_zoom);
 }
 

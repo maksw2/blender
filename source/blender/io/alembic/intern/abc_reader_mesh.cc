@@ -29,9 +29,10 @@
 #include "BKE_geometry_set.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mesh.hh"
 #include "BKE_object.hh"
+#include "BKE_subdiv.hh"
 
 using Alembic::Abc::FloatArraySamplePtr;
 using Alembic::Abc::Int32ArraySamplePtr;
@@ -269,8 +270,7 @@ static void process_loop_normals(CDStreamConfig &config, const N3fArraySamplePtr
     return;
   }
 
-  float(*lnors)[3] = static_cast<float(*)[3]>(
-      MEM_malloc_arrayN(loop_count, sizeof(float[3]), "ABC::FaceNormals"));
+  Array<float3> corner_normals(loop_count);
 
   const OffsetIndices faces = mesh->faces();
   const N3fArraySample &loop_normals = *loop_normals_ptr;
@@ -280,13 +280,11 @@ static void process_loop_normals(CDStreamConfig &config, const N3fArraySamplePtr
     /* As usual, ABC orders the loops in reverse. */
     for (int j = face.size() - 1; j >= 0; j--, abc_index++) {
       int blender_index = face[j];
-      copy_zup_from_yup(lnors[blender_index], loop_normals[abc_index].getValue());
+      copy_zup_from_yup(corner_normals[blender_index], loop_normals[abc_index].getValue());
     }
   }
 
-  BKE_mesh_set_custom_normals(mesh, lnors);
-
-  MEM_freeN(lnors);
+  bke::mesh_set_custom_normals(*mesh, corner_normals);
 }
 
 static void process_vertex_normals(CDStreamConfig &config,
@@ -298,16 +296,14 @@ static void process_vertex_normals(CDStreamConfig &config,
     return;
   }
 
-  float(*vert_normals)[3] = static_cast<float(*)[3]>(
-      MEM_malloc_arrayN(normals_count, sizeof(float[3]), "ABC::VertexNormals"));
+  Array<float3> vert_normals(normals_count);
 
   const N3fArraySample &vertex_normals = *vertex_normals_ptr;
   for (int index = 0; index < normals_count; index++) {
     copy_zup_from_yup(vert_normals[index], vertex_normals[index].getValue());
   }
 
-  BKE_mesh_set_custom_normals_from_verts(config.mesh, vert_normals);
-  MEM_freeN(vert_normals);
+  bke::mesh_set_custom_normals_from_verts(*config.mesh, vert_normals);
 }
 
 static void process_normals(CDStreamConfig &config,
@@ -918,7 +914,8 @@ static void read_subd_sample(const std::string &iobject_full_name,
 
 static void read_vertex_creases(Mesh *mesh,
                                 const Int32ArraySamplePtr &indices,
-                                const FloatArraySamplePtr &sharpnesses)
+                                const FloatArraySamplePtr &sharpnesses,
+                                const ImportSettings *settings)
 {
   if (!(indices && sharpnesses && indices->size() == sharpnesses->size() && indices->size() != 0))
   {
@@ -936,28 +933,32 @@ static void read_vertex_creases(Mesh *mesh,
       continue;
     }
 
-    vertex_crease_data[idx] = (*sharpnesses)[i];
+    const float crease = settings->blender_archive_version_prior_44 ?
+                             (*sharpnesses)[i] :
+                             bke::subdiv::sharpness_to_crease((*sharpnesses)[i]);
+    vertex_crease_data[idx] = std::clamp(crease, 0.0f, 1.0f);
   }
 }
 
 static void read_edge_creases(Mesh *mesh,
                               const Int32ArraySamplePtr &indices,
-                              const FloatArraySamplePtr &sharpnesses)
+                              const FloatArraySamplePtr &sharpnesses,
+                              const ImportSettings *settings)
 {
   if (!(indices && sharpnesses)) {
     return;
   }
 
-  MutableSpan<int2> edges = mesh->edges_for_write();
+  const Span<int2> edges = mesh->edges_for_write();
   Map<OrderedEdge, int> edge_hash;
   edge_hash.reserve(edges.size());
-
-  float *creases = static_cast<float *>(CustomData_add_layer_named(
-      &mesh->edge_data, CD_PROP_FLOAT, CD_SET_DEFAULT, edges.size(), "crease_edge"));
-
   for (const int i : edges.index_range()) {
     edge_hash.add(edges[i], i);
   }
+
+  bke::MutableAttributeAccessor attributes = mesh->attributes_for_write();
+  bke::SpanAttributeWriter<float> creases = attributes.lookup_or_add_for_write_span<float>(
+      "crease_edge", bke::AttrDomain::Edge);
 
   for (int i = 0, s = 0, e = indices->size(); i < e; i += 2, s++) {
     int v1 = (*indices)[i];
@@ -967,8 +968,13 @@ static void read_edge_creases(Mesh *mesh,
       continue;
     }
 
-    creases[*index] = unit_float_to_uchar_clamp((*sharpnesses)[s]);
+    const float crease = settings->blender_archive_version_prior_44 ?
+                             (*sharpnesses)[s] :
+                             bke::subdiv::sharpness_to_crease((*sharpnesses)[s]);
+    creases.span[*index] = std::clamp(crease, 0.0f, 1.0f);
   }
+
+  creases.finish();
 }
 
 /* ************************************************************************** */
@@ -1034,9 +1040,9 @@ void AbcSubDReader::readObjectData(Main *bmain, const Alembic::Abc::ISampleSelec
     return;
   }
 
-  read_edge_creases(mesh, sample.getCreaseIndices(), sample.getCreaseSharpnesses());
+  read_edge_creases(mesh, sample.getCreaseIndices(), sample.getCreaseSharpnesses(), m_settings);
 
-  read_vertex_creases(mesh, sample.getCornerIndices(), sample.getCornerSharpnesses());
+  read_vertex_creases(mesh, sample.getCornerIndices(), sample.getCornerSharpnesses(), m_settings);
 
   if (m_settings->validate_meshes) {
     BKE_mesh_validate(mesh, false, false);

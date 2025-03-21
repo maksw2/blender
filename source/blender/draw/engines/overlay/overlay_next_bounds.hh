@@ -119,10 +119,10 @@ class Bounds : Overlay {
           call_buffers_.capsule_cap.append(data, select_id);
           mat.z_axis() *= -1;
           mat.location().z = center.z - std::max(0.0f, size.z - size.x);
-          data.object_to_world_ = object_mat * mat;
+          data.object_to_world = object_mat * mat;
           call_buffers_.capsule_cap.append(data, select_id);
           mat.z_axis().z = std::max(0.0f, size.z * 2.0f - size.x * 2.0f);
-          data.object_to_world_ = object_mat * mat;
+          data.object_to_world = object_mat * mat;
           call_buffers_.capsule_body.append(data, select_id);
           break;
         }
@@ -130,7 +130,10 @@ class Bounds : Overlay {
     };
 
     auto add_bounds = [&](const bool around_origin, const char bound_type) {
-      const blender::Bounds<float3> bounds = BKE_object_boundbox_get(ob).value_or(
+      const std::optional<blender::Bounds<float3>> bounds_opt =
+          ELEM(ob->type, OB_LATTICE, OB_ARMATURE) ? BKE_object_boundbox_get(ob) :
+                                                    BKE_object_evaluated_geometry_bounds(ob);
+      const blender::Bounds<float3> bounds = bounds_opt.value_or(
           blender::Bounds(float3(-1.0f), float3(1.0f)));
       const float3 size = (bounds.max - bounds.min) * 0.5f;
       const float3 center = around_origin ? float3(0) : math::midpoint(bounds.min, bounds.max);
@@ -167,20 +170,20 @@ class Bounds : Overlay {
     if (!from_dupli && ob->data && (ob->dtx & OB_TEXSPACE)) {
       switch (GS(static_cast<ID *>(ob->data)->name)) {
         case ID_ME: {
-          Mesh *me = static_cast<Mesh *>(ob->data);
-          BKE_mesh_texspace_ensure(me);
-          add_bounds_ex(me->texspace_location, me->texspace_size, OB_BOUND_BOX);
+          Mesh &me = DRW_object_get_data_for_drawing<Mesh>(*ob);
+          BKE_mesh_texspace_ensure(&me);
+          add_bounds_ex(me.texspace_location, me.texspace_size, OB_BOUND_BOX);
           break;
         }
         case ID_CU_LEGACY: {
-          Curve *cu = static_cast<Curve *>(ob->data);
-          BKE_curve_texspace_ensure(cu);
-          add_bounds_ex(cu->texspace_location, cu->texspace_size, OB_BOUND_BOX);
+          Curve &cu = DRW_object_get_data_for_drawing<Curve>(*ob);
+          BKE_curve_texspace_ensure(&cu);
+          add_bounds_ex(cu.texspace_location, cu.texspace_size, OB_BOUND_BOX);
           break;
         }
         case ID_MB: {
-          MetaBall *mb = static_cast<MetaBall *>(ob->data);
-          add_bounds_ex(mb->texspace_location, mb->texspace_size, OB_BOUND_BOX);
+          MetaBall &mb = DRW_object_get_data_for_drawing<MetaBall>(*ob);
+          add_bounds_ex(mb.texspace_location, mb.texspace_size, OB_BOUND_BOX);
           break;
         }
         case ID_CV:
@@ -201,8 +204,9 @@ class Bounds : Overlay {
     ps_.init();
     ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL,
                   state.clipping_plane_count);
-    ps_.shader_set(res.shaders.extra_shape.get());
+    ps_.shader_set(res.shaders->extra_shape.get());
     ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+    ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
     res.select_bind(ps_);
 
     call_buffers_.box.end_sync(ps_, res.shapes.cube.get());

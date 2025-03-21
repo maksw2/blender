@@ -14,6 +14,7 @@
 
 #include "IO_wavefront_obj.hh"
 #include "obj_export_io.hh"
+#include "obj_export_mesh.hh"
 #include "obj_export_mtl.hh"
 
 namespace blender::io::obj {
@@ -57,7 +58,7 @@ class OBJWriter : NonMovable, NonCopyable {
   /**
    * Write file name of Material Library in `.OBJ` file.
    */
-  void write_mtllib_name(const StringRefNull mtl_filepath) const;
+  void write_mtllib_name(StringRefNull mtl_filepath) const;
   /**
    * Write vertex coordinates for all vertices as "v x y z" or "v x y z r g b".
    */

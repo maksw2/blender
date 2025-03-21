@@ -6,10 +6,7 @@
  * \ingroup edlattice
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_math_vector.h"
-#include "BLI_utildefines.h"
 
 #include "DNA_curve_types.h"
 #include "DNA_lattice_types.h"
@@ -51,7 +48,7 @@ static bool make_regular_poll(bContext *C)
   return (ob && ob->type == OB_LATTICE);
 }
 
-static int make_regular_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus make_regular_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -199,7 +196,7 @@ static void lattice_swap_point_pairs(
   lattice_flip_point_value(lt, u1, v1, w1, mid, axis);
 }
 
-static int lattice_flip_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus lattice_flip_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);

@@ -6,7 +6,6 @@
  * \ingroup bke
  */
 
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -46,8 +45,6 @@
 static void world_free_data(ID *id)
 {
   World *wrld = (World *)id;
-
-  DRW_drawdata_free(id);
 
   /* is no lib link block, but world extension */
   if (wrld->nodetree) {
@@ -112,7 +109,6 @@ static void world_copy_data(Main *bmain,
   }
 
   BLI_listbase_clear(&wrld_dst->gpumaterial);
-  BLI_listbase_clear((ListBase *)&wrld_dst->drawdata);
 
   if ((flag & LIB_ID_COPY_NO_PREVIEW) == 0) {
     BKE_previewimg_id_copy(&wrld_dst->id, &wrld_src->id);

@@ -4,9 +4,7 @@
 
 #include <numeric>
 
-#include "BLI_listbase.h"
 #include "BLI_string.h"
-#include "BLI_string_utf8.h"
 
 #include "RNA_enum_types.hh"
 
@@ -46,8 +44,8 @@ static void node_update(bNodeTree *ntree, bNode *node)
   bNodeSocket *sockB = sockA->next;
   bNodeSocket *sockC = sockB->next;
 
-  bke::node_set_socket_availability(ntree, sockB, !one_input_ops);
-  bke::node_set_socket_availability(ntree, sockC, three_input_ops);
+  bke::node_set_socket_availability(*ntree, *sockB, !one_input_ops);
+  bke::node_set_socket_availability(*ntree, *sockC, three_input_ops);
 
   node_sock_label_clear(sockA);
   node_sock_label_clear(sockB);
@@ -302,7 +300,10 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, FN_NODE_INTEGER_MATH, "Integer Math", NODE_CLASS_CONVERTER);
+  fn_node_type_base(&ntype, "FunctionNodeIntegerMath", FN_NODE_INTEGER_MATH);
+  ntype.ui_name = "Integer Math";
+  ntype.enum_name_legacy = "INTEGER_MATH";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
   ntype.labelfunc = node_label;
   ntype.updatefunc = node_update;
@@ -313,7 +314,7 @@ static void node_register()
   ntype.eval_inverse_elem = node_eval_inverse_elem;
   ntype.eval_inverse = node_eval_inverse;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

@@ -7,10 +7,7 @@
  */
 
 #include <iostream>
-#include <map>
-#include <set>
 
-#include "../application/AppCanvas.h"
 #include "../application/AppConfig.h"
 #include "../application/AppView.h"
 #include "../application/Controller.h"
@@ -22,7 +19,6 @@ using namespace Freestyle;
 
 #include "MEM_guardedalloc.h"
 
-#include "DNA_camera_types.h"
 #include "DNA_collection_types.h"
 #include "DNA_freestyle_types.h"
 #include "DNA_material_types.h"
@@ -39,7 +35,7 @@ using namespace Freestyle;
 
 #include "BLT_translation.hh"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_math_color_blend.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
@@ -53,8 +49,6 @@ using namespace Freestyle;
 #include "pipeline.hh"
 
 #include "FRS_freestyle.h"
-
-extern "C" {
 
 FreestyleGlobals g_freestyle;
 
@@ -167,7 +161,7 @@ static void init_view(Render *re)
 
 static char *escape_quotes(char *name)
 {
-  char *s = (char *)MEM_mallocN(strlen(name) * 2 + 1, "escape_quotes");
+  char *s = MEM_malloc_arrayN<char>(strlen(name) * 2 + 1, "escape_quotes");
   char *p = s;
   while (*name) {
     if (*name == '\'') {
@@ -764,5 +758,3 @@ Material *FRS_create_stroke_material(Main *bmain, FreestyleLineStyle *linestyle)
   ma->id.us = 0;
   return ma;
 }
-
-}  // extern "C"

@@ -2,14 +2,18 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_armature_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_armature_envelope_outline)
+
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
 #include "select_lib.glsl"
 
 /* project to screen space */
 vec2 proj(vec4 pos)
 {
-  return (0.5 * (pos.xy / pos.w) + 0.5) * sizeViewport.xy;
+  return (0.5 * (pos.xy / pos.w) + 0.5) * sizeViewport;
 }
 
 vec2 compute_dir(vec2 v0, vec2 v1, vec2 v2)
@@ -21,8 +25,8 @@ vec2 compute_dir(vec2 v0, vec2 v1, vec2 v2)
 
 mat3 compute_mat(vec4 sphere, vec3 bone_vec, out float z_ofs)
 {
-  bool is_persp = (drw_view.winmat[3][3] == 0.0);
-  vec3 cam_ray = (is_persp) ? sphere.xyz - drw_view.viewinv[3].xyz : -drw_view.viewinv[2].xyz;
+  bool is_persp = (drw_view().winmat[3][3] == 0.0);
+  vec3 cam_ray = (is_persp) ? sphere.xyz - drw_view().viewinv[3].xyz : -drw_view().viewinv[2].xyz;
 
   /* Sphere center distance from the camera (persp) in world space. */
   float cam_dist = length(cam_ray);
@@ -94,19 +98,19 @@ void main()
 {
   select_id_set(in_select_buf[gl_InstanceID]);
 
-  float dst_head = distance(headSphere.xyz, drw_view.viewinv[3].xyz);
-  float dst_tail = distance(tailSphere.xyz, drw_view.viewinv[3].xyz);
-  // float dst_head = -dot(headSphere.xyz, drw_view.viewmat[2].xyz);
-  // float dst_tail = -dot(tailSphere.xyz, drw_view.viewmat[2].xyz);
+  float dst_head = distance(data_buf[gl_InstanceID].head_sphere.xyz, drw_view().viewinv[3].xyz);
+  float dst_tail = distance(data_buf[gl_InstanceID].tail_sphere.xyz, drw_view().viewinv[3].xyz);
+  // float dst_head = -dot(data_buf[gl_InstanceID].head_sphere.xyz, drw_view().viewmat[2].xyz);
+  // float dst_tail = -dot(data_buf[gl_InstanceID].tail_sphere.xyz, drw_view().viewmat[2].xyz);
 
   vec4 sph_near, sph_far;
-  if ((dst_head > dst_tail) && (drw_view.winmat[3][3] == 0.0)) {
-    sph_near = tailSphere;
-    sph_far = headSphere;
+  if ((dst_head > dst_tail) && (drw_view().winmat[3][3] == 0.0)) {
+    sph_near = data_buf[gl_InstanceID].tail_sphere;
+    sph_far = data_buf[gl_InstanceID].head_sphere;
   }
   else {
-    sph_near = headSphere;
-    sph_far = tailSphere;
+    sph_near = data_buf[gl_InstanceID].head_sphere;
+    sph_far = data_buf[gl_InstanceID].tail_sphere;
   }
 
   vec3 bone_vec = (sph_far.xyz - sph_near.xyz) + 1e-8;
@@ -129,9 +133,9 @@ void main()
 
   view_clipping_distances(wpos1);
 
-  vec4 p0 = point_world_to_ndc(wpos0);
-  vec4 p1 = point_world_to_ndc(wpos1);
-  vec4 p2 = point_world_to_ndc(wpos2);
+  vec4 p0 = drw_point_world_to_homogenous(wpos0);
+  vec4 p1 = drw_point_world_to_homogenous(wpos1);
+  vec4 p2 = drw_point_world_to_homogenous(wpos2);
 
   gl_Position = p1;
 
@@ -147,5 +151,5 @@ void main()
 
   edgeStart = edgePos = proj(gl_Position);
 
-  finalColor = vec4(outlineColorSize.rgb, 1.0);
+  finalColor = vec4(data_buf[gl_InstanceID].bone_color_and_wire_width.rgb, 1.0);
 }

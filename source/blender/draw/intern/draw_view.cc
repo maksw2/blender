@@ -7,13 +7,20 @@
  */
 
 #include "BLI_math_geom.h"
+#include "BLI_math_matrix.h"
 #include "BLI_math_matrix.hh"
+
+#include "DRW_render.hh"
 #include "GPU_compute.hh"
 #include "GPU_debug.hh"
 
-#include "draw_debug.hh"
+#include "draw_context_private.hh"
 #include "draw_shader.hh"
 #include "draw_view.hh"
+
+#ifdef _DEBUG
+#  include "draw_debug.hh"
+#endif
 
 namespace blender::draw {
 
@@ -36,14 +43,6 @@ void View::sync(const float4x4 &view_mat, const float4x4 &win_mat, int view_id)
   manager_fingerprint_ = 0;
   /* Add 2 to always have a non-null number even in case of overflow. */
   sync_counter_ = (global_sync_counter_ += 2);
-}
-
-void View::sync(const DRWView *view)
-{
-  float4x4 view_mat, win_mat;
-  DRW_view_viewmat_get(view, view_mat.ptr(), false);
-  DRW_view_winmat_get(view, win_mat.ptr(), false);
-  this->sync(view_mat, win_mat);
 }
 
 void View::frustum_boundbox_calc(int view_id)
@@ -104,7 +103,10 @@ void View::frustum_culling_planes_calc(int view_id)
                       culling_[view_id].frustum_planes.planes[2]);
   /* Normalize. */
   for (float4 &plane : culling_[view_id].frustum_planes.planes) {
-    plane /= math::length(plane.xyz());
+    float len = math::length(plane.xyz());
+    if (len != 0.0f) {
+      plane /= len;
+    }
   }
 }
 
@@ -265,7 +267,7 @@ void View::compute_visibility(ObjectBoundsBuf &bounds,
     culling_freeze_[0] = static_cast<ViewCullingData>(culling_[0]);
     culling_freeze_.push_update();
   }
-#ifdef _DEBUG
+#ifdef WITH_DRAW_DEBUG
   if (debug_freeze) {
     float4x4 persmat = data_freeze_[0].winmat * data_freeze_[0].viewmat;
     drw_debug_matrix_as_bbox(math::invert(persmat), float4(0, 1, 0, 1));
@@ -314,6 +316,38 @@ void View::compute_visibility(ObjectBoundsBuf &bounds,
 VisibilityBuf &View::get_visibility_buffer()
 {
   return visibility_buf_;
+}
+
+blender::draw::View &View::default_get()
+{
+  return *drw_get().data->default_view;
+}
+
+void View::default_set(const float4x4 &view_mat, const float4x4 &win_mat)
+{
+  drw_get().data->default_view->sync(view_mat, win_mat);
+}
+
+std::array<float4, 6> View::frustum_planes_get(int view_id)
+{
+  return {culling_[view_id].frustum_planes.planes[0],
+          culling_[view_id].frustum_planes.planes[1],
+          culling_[view_id].frustum_planes.planes[2],
+          culling_[view_id].frustum_planes.planes[3],
+          culling_[view_id].frustum_planes.planes[4],
+          culling_[view_id].frustum_planes.planes[5]};
+}
+
+std::array<float3, 8> View::frustum_corners_get(int view_id)
+{
+  return {culling_[view_id].frustum_corners.corners[0].xyz(),
+          culling_[view_id].frustum_corners.corners[1].xyz(),
+          culling_[view_id].frustum_corners.corners[2].xyz(),
+          culling_[view_id].frustum_corners.corners[3].xyz(),
+          culling_[view_id].frustum_corners.corners[4].xyz(),
+          culling_[view_id].frustum_corners.corners[5].xyz(),
+          culling_[view_id].frustum_corners.corners[6].xyz(),
+          culling_[view_id].frustum_corners.corners[7].xyz()};
 }
 
 }  // namespace blender::draw

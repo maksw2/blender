@@ -9,12 +9,11 @@
 
 #include "BKE_node.hh"
 
-#include <queue>
 #include <type_traits>
 
 #include "BLI_cache_mutex.hh"
 #include "BLI_parameter_pack_utils.hh"
-#include "BLI_vector.hh"
+#include "BLI_vector_set.hh"
 
 namespace blender::bke {
 
@@ -39,10 +38,10 @@ class bNodeTreeInterfaceRuntime {
   CacheMutex items_cache_mutex_;
 
   /* Runtime topology cache for linear access to items. */
-  Vector<bNodeTreeInterfaceItem *> items_;
+  VectorSet<bNodeTreeInterfaceItem *> items_;
   /* Socket-only lists for input/output access by index. */
-  Vector<bNodeTreeInterfaceSocket *> inputs_;
-  Vector<bNodeTreeInterfaceSocket *> outputs_;
+  VectorSet<bNodeTreeInterfaceSocket *> inputs_;
+  VectorSet<bNodeTreeInterfaceSocket *> outputs_;
 };
 
 namespace node_interface {
@@ -54,11 +53,11 @@ template<typename T> static bool item_is_type(const bNodeTreeInterfaceItem &item
   bool match = false;
   switch (item.item_type) {
     case NODE_INTERFACE_SOCKET: {
-      match |= std::is_same<T, bNodeTreeInterfaceSocket>::value;
+      match |= std::is_same_v<T, bNodeTreeInterfaceSocket>;
       break;
     }
     case NODE_INTERFACE_PANEL: {
-      match |= std::is_same<T, bNodeTreeInterfacePanel>::value;
+      match |= std::is_same_v<T, bNodeTreeInterfacePanel>;
       break;
     }
   }
@@ -289,8 +288,8 @@ template<typename T> const T &get_socket_data_as(const bNodeTreeInterfaceSocket 
 bNodeTreeInterfaceSocket *add_interface_socket_from_node(bNodeTree &ntree,
                                                          const bNode &from_node,
                                                          const bNodeSocket &from_sock,
-                                                         const StringRef socket_type,
-                                                         const StringRef name);
+                                                         StringRef socket_type,
+                                                         StringRef name);
 
 inline bNodeTreeInterfaceSocket *add_interface_socket_from_node(bNodeTree &ntree,
                                                                 const bNode &from_node,

@@ -6,6 +6,7 @@
  * \ingroup bke
  */
 
+#include <algorithm>
 #include <cstring>
 
 #include "MEM_guardedalloc.h"
@@ -49,8 +50,7 @@ static void alloc_child_particles(ParticleSystem *psys, int tot)
   if (psys->part->childtype) {
     psys->totchild = tot;
     if (psys->totchild) {
-      psys->child = static_cast<ChildParticle *>(
-          MEM_callocN(psys->totchild * sizeof(ChildParticle), "child_particles"));
+      psys->child = MEM_calloc_arrayN<ChildParticle>(size_t(psys->totchild), "child_particles");
     }
   }
 }
@@ -347,9 +347,9 @@ static void init_mv_jit(float *jit, int num, int seed2, float amount)
     return;
   }
 
-  rad1 = float(1.0f / sqrtf(float(num)));
-  rad2 = float(1.0f / float(num));
-  rad3 = float(sqrtf(float(num)) / float(num));
+  rad1 = (1.0f / sqrtf(float(num)));
+  rad2 = (1.0f / float(num));
+  rad3 = (sqrtf(float(num)) / float(num));
 
   rng = BLI_rng_new(31415926 + num + seed2);
   x = 0;
@@ -359,14 +359,15 @@ static void init_mv_jit(float *jit, int num, int seed2, float amount)
     jit[i] = x + amount * rad1 * (0.5f - BLI_rng_get_float(rng));
     jit[i + 1] = i / (2.0f * num) + amount * rad1 * (0.5f - BLI_rng_get_float(rng));
 
-    jit[i] -= float(floor(jit[i]));
-    jit[i + 1] -= float(floor(jit[i + 1]));
+    jit[i] -= floor(jit[i]);
+    jit[i + 1] -= floor(jit[i + 1]);
 
     x += rad3;
-    x -= float(floor(x));
+    x -= floor(x);
   }
 
-  jit2 = static_cast<float *>(MEM_mallocN(12 + sizeof(float[2]) * num, "initjit"));
+  /* FIXME: The `+ 3` number of items does not seem to be required? */
+  jit2 = MEM_malloc_arrayN<float>(3 + 2 * size_t(num), "initjit");
 
   for (i = 0; i < 4; i++) {
     BLI_jitterate1((float(*)[2])jit, (float(*)[2])jit2, num, rad1);
@@ -1060,12 +1061,9 @@ static int psys_thread_context_init_distribute(ParticleThreadContext *ctx,
     return 0;
   }
 
-  element_weight = static_cast<float *>(
-      MEM_callocN(sizeof(float) * totelem, "particle_distribution_weights"));
-  particle_element = static_cast<int *>(
-      MEM_callocN(sizeof(int) * totpart, "particle_distribution_indexes"));
-  jitter_offset = static_cast<float *>(
-      MEM_callocN(sizeof(float) * totelem, "particle_distribution_jitoff"));
+  element_weight = MEM_calloc_arrayN<float>(size_t(totelem), "particle_distribution_weights");
+  particle_element = MEM_calloc_arrayN<int>(size_t(totpart), "particle_distribution_indexes");
+  jitter_offset = MEM_calloc_arrayN<float>(size_t(totelem), "particle_distribution_jitoff");
 
   /* Calculate weights from face areas */
   if ((part->flag & PART_EDISTR || children) && from != PART_FROM_VERT) {
@@ -1104,9 +1102,7 @@ static int psys_thread_context_init_distribute(ParticleThreadContext *ctx,
 
       cur = mf->v4 ? area_quad_v3(co1, co2, co3, co4) : area_tri_v3(co1, co2, co3);
 
-      if (cur > maxweight) {
-        maxweight = cur;
-      }
+      maxweight = std::max(cur, maxweight);
 
       element_weight[i] = cur;
       totarea += cur;
@@ -1187,9 +1183,8 @@ static int psys_thread_context_init_distribute(ParticleThreadContext *ctx,
    * This simplifies greatly the filtering of zero-weighted items - and can be much more efficient
    * especially in random case (reducing a lot the size of binary-searched array)...
    */
-  float *element_sum = static_cast<float *>(
-      MEM_mallocN(sizeof(*element_sum) * totmapped, __func__));
-  int *element_map = static_cast<int *>(MEM_mallocN(sizeof(*element_map) * totmapped, __func__));
+  float *element_sum = MEM_malloc_arrayN<float>(size_t(totmapped), __func__);
+  int *element_map = MEM_malloc_arrayN<int>(size_t(totmapped), __func__);
   int i_mapped = 0;
 
   for (i = 0; i < totelem && element_weight[i] == 0.0f; i++) {
@@ -1287,12 +1282,10 @@ static int psys_thread_context_init_distribute(ParticleThreadContext *ctx,
       if (part->flag & PART_EDISTR) {
         jitlevel *= 2; /* looks better in general, not very scientific */
       }
-      if (jitlevel < 3) {
-        jitlevel = 3;
-      }
+      jitlevel = std::max(jitlevel, 3);
     }
 
-    jit = static_cast<float *>(MEM_callocN((2 + jitlevel * 2) * sizeof(float), "jit"));
+    jit = MEM_calloc_arrayN<float>(2 + size_t(jitlevel * 2), "jit");
 
     /* for small amounts of particles we use regular jitter since it looks
      * a bit better, for larger amounts we switch to hammersley sequence

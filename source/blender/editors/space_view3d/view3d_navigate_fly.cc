@@ -24,6 +24,7 @@
 
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
+#include "BLI_math_vector.h"
 #include "BLI_rect.h"
 #include "BLI_time.h" /* Smooth-view. */
 
@@ -31,6 +32,8 @@
 #include "BKE_lib_id.hh"
 #include "BKE_report.hh"
 #include "BKE_screen.hh"
+
+#include "BLT_translation.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -46,7 +49,9 @@
 #include "view3d_intern.hh" /* own include */
 #include "view3d_navigate.hh"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include <fmt/format.h>
+
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 /* -------------------------------------------------------------------- */
 /** \name Modal Key-map
@@ -413,7 +418,7 @@ static bool initFlyInfo(bContext *C, FlyInfo *fly, wmOperator *op, const wmEvent
   return true;
 }
 
-static int flyEnd(bContext *C, FlyInfo *fly)
+static wmOperatorStatus flyEnd(bContext *C, FlyInfo *fly)
 {
   wmWindow *win;
   RegionView3D *rv3d;
@@ -440,6 +445,8 @@ static int flyEnd(bContext *C, FlyInfo *fly)
 
   win = CTX_wm_window(C);
   rv3d = fly->rv3d;
+
+  ED_workspace_status_text(C, nullptr);
 
   WM_event_timer_remove(CTX_wm_manager(C), win, fly->timer);
 
@@ -1058,7 +1065,41 @@ static void flyApply_ndof(bContext *C, FlyInfo *fly, bool is_confirm)
 /** \name Fly Operator
  * \{ */
 
-static int fly_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static void fly_draw_status(bContext *C, wmOperator *op)
+{
+  FlyInfo *fly = static_cast<FlyInfo *>(op->customdata);
+
+  WorkspaceStatus status(C);
+
+  status.opmodal(IFACE_("Confirm"), op->type, FLY_MODAL_CONFIRM);
+  status.opmodal(IFACE_("Cancel"), op->type, FLY_MODAL_CANCEL);
+
+  status.opmodal("", op->type, FLY_MODAL_DIR_FORWARD);
+  status.opmodal("", op->type, FLY_MODAL_DIR_LEFT);
+  status.opmodal("", op->type, FLY_MODAL_DIR_BACKWARD);
+  status.opmodal("", op->type, FLY_MODAL_DIR_RIGHT);
+  status.item(IFACE_("Move"), ICON_NONE);
+
+  status.opmodal("", op->type, FLY_MODAL_DIR_UP);
+  status.opmodal("", op->type, FLY_MODAL_DIR_DOWN);
+  status.item(IFACE_("Up/Down"), ICON_NONE);
+
+  status.opmodal(IFACE_("Pan"), op->type, FLY_MODAL_PAN_ENABLE);
+  status.opmodal(IFACE_("Speed"), op->type, FLY_MODAL_SPEED);
+
+  status.opmodal("", op->type, FLY_MODAL_AXIS_LOCK_X, fly->xlock != FLY_AXISLOCK_STATE_OFF);
+  status.opmodal("", op->type, FLY_MODAL_AXIS_LOCK_Z, fly->zlock != FLY_AXISLOCK_STATE_OFF);
+  status.item(IFACE_("Axis Lock"), ICON_NONE);
+
+  status.opmodal(IFACE_("Precision"), op->type, FLY_MODAL_PRECISION_ENABLE, fly->use_precision);
+  status.opmodal(IFACE_("Free Look"), op->type, FLY_MODAL_FREELOOK_ENABLE, fly->use_freelook);
+
+  status.opmodal("", op->type, FLY_MODAL_ACCELERATE);
+  status.opmodal("", op->type, FLY_MODAL_DECELERATE);
+  status.item(fmt::format("{} ({:.2f})", IFACE_("Acceleration"), fly->speed), ICON_NONE);
+}
+
+static wmOperatorStatus fly_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   RegionView3D *rv3d = CTX_wm_region_view3d(C);
 
@@ -1066,7 +1107,7 @@ static int fly_invoke(bContext *C, wmOperator *op, const wmEvent *event)
     return OPERATOR_CANCELLED;
   }
 
-  FlyInfo *fly = MEM_cnew<FlyInfo>("FlyOperation");
+  FlyInfo *fly = MEM_callocN<FlyInfo>("FlyOperation");
 
   op->customdata = fly;
 
@@ -1076,6 +1117,8 @@ static int fly_invoke(bContext *C, wmOperator *op, const wmEvent *event)
   }
 
   flyEvent(fly, event);
+
+  fly_draw_status(C, op);
 
   WM_event_add_modal_handler(C, op);
 
@@ -1091,9 +1134,9 @@ static void fly_cancel(bContext *C, wmOperator *op)
   op->customdata = nullptr;
 }
 
-static int fly_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus fly_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
-  int exit_code;
+  wmOperatorStatus exit_code;
   bool do_draw = false;
   FlyInfo *fly = static_cast<FlyInfo *>(op->customdata);
   View3D *v3d = fly->v3d;
@@ -1103,6 +1146,8 @@ static int fly_modal(bContext *C, wmOperator *op, const wmEvent *event)
   fly->redraw = false;
 
   flyEvent(fly, event);
+
+  fly_draw_status(C, op);
 
 #ifdef WITH_INPUT_NDOF
   if (fly->ndof) { /* 3D mouse overrules [2D mouse + timer]. */

@@ -11,12 +11,16 @@
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
+#include "BLI_listbase.h"
+
 #include "SEQ_select.hh"
 #include "SEQ_sequencer.hh"
 
-Sequence *SEQ_select_active_get(const Scene *scene)
+namespace blender::seq {
+
+Strip *select_active_get(const Scene *scene)
 {
-  const Editing *ed = SEQ_editing_get(scene);
+  const Editing *ed = editing_get(scene);
 
   if (ed == nullptr) {
     return nullptr;
@@ -25,22 +29,22 @@ Sequence *SEQ_select_active_get(const Scene *scene)
   return ed->act_seq;
 }
 
-void SEQ_select_active_set(Scene *scene, Sequence *seq)
+void select_active_set(Scene *scene, Strip *strip)
 {
-  Editing *ed = SEQ_editing_get(scene);
+  Editing *ed = editing_get(scene);
 
   if (ed == nullptr) {
     return;
   }
 
-  ed->act_seq = seq;
+  ed->act_seq = strip;
 }
 
-bool SEQ_select_active_get_pair(Scene *scene, Sequence **r_seq_act, Sequence **r_seq_other)
+bool select_active_get_pair(Scene *scene, Strip **r_seq_act, Strip **r_seq_other)
 {
-  Editing *ed = SEQ_editing_get(scene);
+  Editing *ed = editing_get(scene);
 
-  *r_seq_act = SEQ_select_active_get(scene);
+  *r_seq_act = select_active_get(scene);
 
   if (*r_seq_act == nullptr) {
     return false;
@@ -48,15 +52,17 @@ bool SEQ_select_active_get_pair(Scene *scene, Sequence **r_seq_act, Sequence **r
 
   *r_seq_other = nullptr;
 
-  LISTBASE_FOREACH (Sequence *, seq, ed->seqbasep) {
-    if (seq->flag & SELECT && (seq != (*r_seq_act))) {
+  LISTBASE_FOREACH (Strip *, strip, ed->seqbasep) {
+    if (strip->flag & SELECT && (strip != (*r_seq_act))) {
       if (*r_seq_other) {
         return false;
       }
 
-      *r_seq_other = seq;
+      *r_seq_other = strip;
     }
   }
 
   return (*r_seq_other != nullptr);
 }
+
+}  // namespace blender::seq

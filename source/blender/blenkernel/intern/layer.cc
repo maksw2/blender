@@ -28,10 +28,12 @@
 #include "BKE_idprop.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
+#include "BKE_node_runtime.hh"
 #include "BKE_object.hh"
-#include "BKE_object_types.hh"
 
 #include "DNA_ID.h"
 #include "DNA_collection_types.h"
@@ -42,7 +44,6 @@
 #include "DNA_space_types.h"
 #include "DNA_view3d_types.h"
 #include "DNA_windowmanager_types.h"
-#include "DNA_workspace_types.h"
 #include "DNA_world_types.h"
 
 #include "DEG_depsgraph.hh"
@@ -75,7 +76,7 @@ static void object_bases_iterator_next(BLI_Iterator *iter, const int flag);
 
 static LayerCollection *layer_collection_add(ListBase *lb_parent, Collection *collection)
 {
-  LayerCollection *lc = MEM_cnew<LayerCollection>("Collection Base");
+  LayerCollection *lc = MEM_callocN<LayerCollection>("Collection Base");
   lc->collection = collection;
   lc->local_collections_bits = ~(0);
   BLI_addtail(lb_parent, lc);
@@ -98,7 +99,7 @@ static void layer_collection_free(ViewLayer *view_layer, LayerCollection *lc)
 
 static Base *object_base_new(Object *ob)
 {
-  Base *base = MEM_cnew<Base>("Object Base");
+  Base *base = MEM_callocN<Base>("Object Base");
   base->object = ob;
   base->local_view_bits = ~(0);
   if (ob->base_flag & BASE_SELECTED) {
@@ -162,7 +163,7 @@ static ViewLayer *view_layer_add(const char *name)
     name = DATA_("ViewLayer");
   }
 
-  ViewLayer *view_layer = MEM_cnew<ViewLayer>("View Layer");
+  ViewLayer *view_layer = MEM_callocN<ViewLayer>("View Layer");
   view_layer->flag = VIEW_LAYER_RENDER | VIEW_LAYER_FREESTYLE;
 
   STRNCPY_UTF8(view_layer->name, name);
@@ -209,7 +210,7 @@ ViewLayer *BKE_view_layer_add(Scene *scene,
     }
     case VIEWLAYER_ADD_COPY: {
       /* Allocate and copy view layer data */
-      view_layer_new = MEM_cnew<ViewLayer>("View Layer");
+      view_layer_new = MEM_callocN<ViewLayer>("View Layer");
       *view_layer_new = *view_layer_source;
       BKE_view_layer_copy_data(scene, scene, view_layer_new, view_layer_source, 0);
       BLI_addtail(&scene->view_layers, view_layer_new);
@@ -252,21 +253,17 @@ void BKE_view_layer_free_ex(ViewLayer *view_layer, const bool do_id_user)
 {
   BKE_view_layer_free_object_content(view_layer);
 
-  LISTBASE_FOREACH (ViewLayerEngineData *, sled, &view_layer->drawdata) {
-    if (sled->storage) {
-      if (sled->free) {
-        sled->free(sled->storage);
-      }
-      MEM_freeN(sled->storage);
-    }
-  }
-  BLI_freelistN(&view_layer->drawdata);
   BLI_freelistN(&view_layer->aovs);
   view_layer->active_aov = nullptr;
   BLI_freelistN(&view_layer->lightgroups);
   view_layer->active_lightgroup = nullptr;
 
-  MEM_SAFE_FREE(view_layer->stats);
+  /* Cannot use MEM_SAFE_FREE, as #SceneStats type is only forward-declared in `DNA_layer_types.h`
+   */
+  if (view_layer->stats) {
+    MEM_freeN(static_cast<void *>(view_layer->stats));
+    view_layer->stats = nullptr;
+  }
 
   BKE_freestyle_config_free(&view_layer->freestyle_config, do_id_user);
 
@@ -514,7 +511,6 @@ void BKE_view_layer_copy_data(Scene *scene_dst,
   view_layer_dst->stats = nullptr;
 
   /* Clear temporary data. */
-  BLI_listbase_clear(&view_layer_dst->drawdata);
   view_layer_dst->object_bases_array = nullptr;
   view_layer_dst->object_bases_hash = nullptr;
 
@@ -571,8 +567,8 @@ void BKE_view_layer_rename(Main *bmain, Scene *scene, ViewLayer *view_layer, con
   if (scene->nodetree) {
     int index = BLI_findindex(&scene->view_layers, view_layer);
 
-    LISTBASE_FOREACH (bNode *, node, &scene->nodetree->nodes) {
-      if (node->type == CMP_NODE_R_LAYERS && node->id == nullptr) {
+    for (bNode *node : scene->nodetree->all_nodes()) {
+      if (node->type_legacy == CMP_NODE_R_LAYERS && node->id == nullptr) {
         if (node->custom1 == index) {
           STRNCPY(node->name, view_layer->name);
         }
@@ -2062,7 +2058,7 @@ static void object_bases_iterator_begin(BLI_Iterator *iter, void *data_in_v, con
     return;
   }
 
-  LayerObjectBaseIteratorData *data = MEM_cnew<LayerObjectBaseIteratorData>(__func__);
+  LayerObjectBaseIteratorData *data = MEM_callocN<LayerObjectBaseIteratorData>(__func__);
   iter->data = data;
 
   data->v3d = v3d;
@@ -2360,8 +2356,8 @@ static void layer_eval_view_layer(Depsgraph *depsgraph, Scene *scene, ViewLayer 
   BKE_view_layer_synced_ensure(scene, view_layer);
   const int num_object_bases = BLI_listbase_count(BKE_view_layer_object_bases_get(view_layer));
   MEM_SAFE_FREE(view_layer->object_bases_array);
-  view_layer->object_bases_array = static_cast<Base **>(
-      MEM_malloc_arrayN(num_object_bases, sizeof(Base *), "view_layer->object_bases_array"));
+  view_layer->object_bases_array = MEM_malloc_arrayN<Base *>(size_t(num_object_bases),
+                                                             "view_layer->object_bases_array");
   int base_index = 0;
   LISTBASE_FOREACH (Base *, base, BKE_view_layer_object_bases_get(view_layer)) {
     view_layer->object_bases_array[base_index++] = base;
@@ -2470,7 +2466,6 @@ void BKE_view_layer_blend_read_data(BlendDataReader *reader, ViewLayer *view_lay
   BLO_read_struct_list(reader, ViewLayerLightgroup, &view_layer->lightgroups);
   BLO_read_struct(reader, ViewLayerLightgroup, &view_layer->active_lightgroup);
 
-  BLI_listbase_clear(&view_layer->drawdata);
   view_layer->object_bases_array = nullptr;
   view_layer->object_bases_hash = nullptr;
 }
@@ -2524,7 +2519,7 @@ static void viewlayer_aov_active_set(ViewLayer *view_layer, ViewLayerAOV *aov)
 ViewLayerAOV *BKE_view_layer_add_aov(ViewLayer *view_layer)
 {
   ViewLayerAOV *aov;
-  aov = MEM_cnew<ViewLayerAOV>(__func__);
+  aov = MEM_callocN<ViewLayerAOV>(__func__);
   aov->type = AOV_TYPE_COLOR;
   STRNCPY_UTF8(aov->name, DATA_("AOV"));
   BLI_addtail(&view_layer->aovs, aov);
@@ -2649,7 +2644,7 @@ static void viewlayer_lightgroup_active_set(ViewLayer *view_layer, ViewLayerLigh
 ViewLayerLightgroup *BKE_view_layer_add_lightgroup(ViewLayer *view_layer, const char *name)
 {
   ViewLayerLightgroup *lightgroup;
-  lightgroup = MEM_cnew<ViewLayerLightgroup>(__func__);
+  lightgroup = MEM_callocN<ViewLayerLightgroup>(__func__);
   STRNCPY_UTF8(lightgroup->name, (name && name[0]) ? name : DATA_("Lightgroup"));
   BLI_addtail(&view_layer->lightgroups, lightgroup);
   viewlayer_lightgroup_active_set(view_layer, lightgroup);
@@ -2742,7 +2737,7 @@ void BKE_lightgroup_membership_set(LightgroupMembership **lgm, const char *name)
 {
   if (name[0] != '\0') {
     if (*lgm == nullptr) {
-      *lgm = MEM_cnew<LightgroupMembership>(__func__);
+      *lgm = MEM_callocN<LightgroupMembership>(__func__);
     }
     BLI_strncpy((*lgm)->name, name, sizeof((*lgm)->name));
   }

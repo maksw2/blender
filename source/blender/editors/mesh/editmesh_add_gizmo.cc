@@ -121,8 +121,8 @@ struct GizmoPlacementGroup {
 static void gizmo_placement_exec(GizmoPlacementGroup *ggd)
 {
   wmOperator *op = ggd->data.op;
-  if (op == WM_operator_last_redo((bContext *)ggd->data.context)) {
-    ED_undo_operator_repeat((bContext *)ggd->data.context, op);
+  if (op == WM_operator_last_redo(ggd->data.context)) {
+    ED_undo_operator_repeat(ggd->data.context, op);
   }
 }
 
@@ -275,7 +275,7 @@ static void gizmo_mesh_placement_draw_prepare(const bContext * /*C*/, wmGizmoGro
 {
   GizmoPlacementGroup *ggd = static_cast<GizmoPlacementGroup *>(gzgroup->customdata);
   if (ggd->data.op->next) {
-    ggd->data.op = WM_operator_last_redo((bContext *)ggd->data.context);
+    ggd->data.op = WM_operator_last_redo(ggd->data.context);
   }
   gizmo_mesh_placement_update_from_op(ggd);
 }
@@ -305,7 +305,7 @@ static void MESH_GGT_add_bounds(wmGizmoGroupType *gzgt)
  * and share the same BMesh creation code.
  * \{ */
 
-static int add_primitive_cube_gizmo_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus add_primitive_cube_gizmo_exec(bContext *C, wmOperator *op)
 {
   Object *obedit = CTX_data_edit_object(C);
   BMEditMesh *em = BKE_editmesh_from_object(obedit);
@@ -353,11 +353,13 @@ static int add_primitive_cube_gizmo_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int add_primitive_cube_gizmo_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus add_primitive_cube_gizmo_invoke(bContext *C,
+                                                        wmOperator *op,
+                                                        const wmEvent * /*event*/)
 {
   View3D *v3d = CTX_wm_view3d(C);
 
-  int ret = add_primitive_cube_gizmo_exec(C, op);
+  wmOperatorStatus ret = add_primitive_cube_gizmo_exec(C, op);
   if (ret & OPERATOR_FINISHED) {
     /* Setup gizmos */
     if (v3d && ((v3d->gizmo_flag & V3D_GIZMO_HIDE) == 0)) {

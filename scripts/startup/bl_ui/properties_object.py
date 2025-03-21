@@ -200,7 +200,7 @@ class OBJECT_PT_display(ObjectButtonsPanel, Panel):
         is_wire = (obj_type in {'CAMERA', 'EMPTY'})
         is_empty_image = (obj_type == 'EMPTY' and obj.empty_display_type == 'IMAGE')
         is_dupli = (obj.instance_type != 'NONE')
-        is_gpencil = (obj_type == 'GPENCIL')
+        is_gpencil = (obj_type == 'GREASEPENCIL')
 
         col = layout.column(heading="Show")
         col.prop(obj, "show_name", text="Name")
@@ -416,7 +416,7 @@ class OBJECT_PT_visibility(ObjectButtonsPanel, Panel):
                 col.prop(ob, "hide_probe_sphere", text="Sphere", toggle=False, invert_checkbox=True)
                 col.prop(ob, "hide_probe_plane", text="Plane", toggle=False, invert_checkbox=True)
 
-        if ob.type in {'GPENCIL', 'GREASEPENCIL'}:
+        if ob.type == 'GREASEPENCIL':
             col = layout.column(heading="Grease Pencil")
             col.prop(ob, "use_grease_pencil_lights", toggle=False)
 
@@ -437,7 +437,8 @@ def has_geometry_visibility(ob):
             'VOLUME',
             'POINTCLOUD',
             'CURVES',
-        }) or (ob.instance_type == 'COLLECTION' and ob.instance_collection))
+        }) or (ob.instance_type == 'COLLECTION' and ob.instance_collection)
+    )
 
 
 class OBJECT_PT_shading(ObjectButtonsPanel, Panel):
@@ -487,7 +488,8 @@ class OBJECT_PT_light_linking(ObjectButtonsPanel, Panel):
         col.template_ID(
             light_linking,
             "receiver_collection",
-            new="object.light_linking_receiver_collection_new")
+            new="object.light_linking_receiver_collection_new",
+        )
 
         if not light_linking.receiver_collection:
             return
@@ -532,7 +534,8 @@ class OBJECT_PT_shadow_linking(ObjectButtonsPanel, Panel):
         col.template_ID(
             light_linking,
             "blocker_collection",
-            new="object.light_linking_blocker_collection_new")
+            new="object.light_linking_blocker_collection_new",
+        )
 
         if not light_linking.blocker_collection:
             return

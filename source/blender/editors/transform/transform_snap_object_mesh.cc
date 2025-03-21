@@ -23,7 +23,7 @@
 #  endif
 #endif
 
-using namespace blender;
+namespace blender::ed::transform {
 
 /* -------------------------------------------------------------------- */
 /** \name Snap Object Data
@@ -31,7 +31,7 @@ using namespace blender;
 
 static void snap_object_data_mesh_get(const Mesh *mesh_eval,
                                       bool skip_hidden,
-                                      BVHTreeFromMesh *r_treedata)
+                                      bke::BVHTreeFromMesh *r_treedata)
 {
   /* The BVHTree from corner_tris is always required. */
   if (skip_hidden) {
@@ -57,15 +57,15 @@ static void mesh_corner_tris_raycast_backface_culling_cb(void *userdata,
                                                          const BVHTreeRay *ray,
                                                          BVHTreeRayHit *hit)
 {
-  const BVHTreeFromMesh *data = (BVHTreeFromMesh *)userdata;
-  const blender::Span<blender::float3> positions = data->vert_positions;
+  const bke::BVHTreeFromMesh *data = (bke::BVHTreeFromMesh *)userdata;
+  const Span<float3> positions = data->vert_positions;
   const int3 &tri = data->corner_tris[index];
   const float *vtri_co[3] = {
       positions[data->corner_verts[tri[0]]],
       positions[data->corner_verts[tri[1]]],
       positions[data->corner_verts[tri[2]]],
   };
-  float dist = bvhtree_ray_tri_intersection(ray, hit->dist, UNPACK3(vtri_co));
+  float dist = bke::bvhtree_ray_tri_intersection(ray, hit->dist, UNPACK3(vtri_co));
 
   if (dist >= 0 && dist < hit->dist) {
     float no[3];
@@ -130,10 +130,10 @@ static bool raycastMesh(SnapObjectContext *sctx,
     len_diff = 0.0f;
   }
 
-  BVHTreeFromMesh treedata;
+  bke::BVHTreeFromMesh treedata;
   snap_object_data_mesh_get(mesh_eval, use_hide, &treedata);
 
-  const blender::Span<int> tri_faces = mesh_eval->corner_tri_faces();
+  const Span<int> tri_faces = mesh_eval->corner_tri_faces();
 
   if (treedata.tree == nullptr) {
     return retval;
@@ -197,7 +197,7 @@ static bool nearest_world_mesh(SnapObjectContext *sctx,
                                const float4x4 &obmat,
                                bool use_hide)
 {
-  BVHTreeFromMesh treedata;
+  bke::BVHTreeFromMesh treedata;
   snap_object_data_mesh_get(mesh_eval, use_hide, &treedata);
   if (treedata.tree == nullptr) {
     return false;
@@ -247,7 +247,7 @@ class SnapData_Mesh : public SnapData {
 
   void get_edge_verts_index(const int index, int r_v_index[2]) override
   {
-    const blender::int2 &edge = this->edges[index];
+    const int2 &edge = this->edges[index];
     r_v_index[0] = edge[0];
     r_v_index[1] = edge[1];
   }
@@ -374,7 +374,7 @@ eSnapMode snap_polygon_mesh(SnapObjectContext *sctx,
   nearest.index = -1;
   nearest.dist_sq = sctx->ret.dist_px_sq;
 
-  const blender::IndexRange face = mesh_eval->faces()[face_index];
+  const IndexRange face = mesh_eval->faces()[face_index];
 
   if (snap_to_flag &
       (SCE_SNAP_TO_EDGE | SCE_SNAP_TO_EDGE_MIDPOINT | SCE_SNAP_TO_EDGE_PERPENDICULAR))
@@ -474,7 +474,7 @@ static eSnapMode snapMesh(SnapObjectContext *sctx,
     return SCE_SNAP_TO_NONE;
   }
 
-  BVHTreeFromMesh treedata, treedata_dummy;
+  bke::BVHTreeFromMesh treedata;
   snap_object_data_mesh_get(mesh_eval, skip_hidden, &treedata);
 
   const BVHTree *bvhtree[2] = {nullptr};
@@ -627,3 +627,5 @@ eSnapMode snap_object_mesh(SnapObjectContext *sctx,
 
   return SCE_SNAP_TO_NONE;
 }
+
+}  // namespace blender::ed::transform

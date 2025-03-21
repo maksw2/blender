@@ -8,6 +8,8 @@
 
 #include "BKE_editmesh.hh"
 
+#include "BLI_math_geom.h"
+
 #include "GPU_index_buffer.hh"
 
 #include "extract_mesh.hh"
@@ -75,8 +77,8 @@ static void extract_tris_bmesh(const MeshRenderData &mr,
       if (BM_elem_flag_test(&face, BM_ELEM_HIDDEN)) {
         continue;
       }
-      const int loop_index = BM_elem_index_get(BM_FACE_FIRST_LOOP(&face));
-      const IndexRange bm_tris(poly_to_tri_count(face_index, loop_index),
+      const int corner_index = BM_elem_index_get(BM_FACE_FIRST_LOOP(&face));
+      const IndexRange bm_tris(poly_to_tri_count(face_index, corner_index),
                                bke::mesh::face_triangles_num(face.len));
       const IndexRange ibo_tris(face_tri_offsets[face_index], bm_tris.size());
       for (const int i : bm_tris.index_range()) {

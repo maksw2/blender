@@ -2,7 +2,19 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "gpu_shader_create_info.hh"
+#ifdef GPU_SHADER
+#  pragma once
+#  include "gpu_glsl_cpp_stubs.hh"
+
+#  include "draw_common_shader_shared.hh"
+#  include "draw_object_infos_info.hh"
+#  include "draw_view_info.hh"
+
+#  define HAIR_SHADER
+#  define DRW_HAIR_INFO
+#endif
+
+#include "overlay_common_info.hh"
 
 GPU_SHADER_INTERFACE_INFO(overlay_sculpt_curves_selection_iface)
 SMOOTH(FLOAT, mask_weight)
@@ -17,15 +29,13 @@ VERTEX_OUT(overlay_sculpt_curves_selection_iface)
 VERTEX_SOURCE("overlay_sculpt_curves_selection_vert.glsl")
 FRAGMENT_SOURCE("overlay_sculpt_curves_selection_frag.glsl")
 FRAGMENT_OUT(0, VEC4, out_color)
-ADDITIONAL_INFO(draw_hair)
+ADDITIONAL_INFO(draw_view)
+ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_globals)
+ADDITIONAL_INFO(draw_hair)
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(overlay_sculpt_curves_selection_clipped)
-DO_STATIC_COMPILATION()
-ADDITIONAL_INFO(overlay_sculpt_curves_selection)
-ADDITIONAL_INFO(drw_clipped)
-GPU_SHADER_CREATE_END()
+OVERLAY_INFO_CLIP_VARIATION(overlay_sculpt_curves_selection)
 
 GPU_SHADER_INTERFACE_INFO(overlay_sculpt_curves_cage_iface)
 NO_PERSPECTIVE(VEC2, edgePos)
@@ -43,13 +53,9 @@ FRAGMENT_OUT(1, VEC4, lineOutput)
 PUSH_CONSTANT(FLOAT, opacity)
 VERTEX_SOURCE("overlay_sculpt_curves_cage_vert.glsl")
 FRAGMENT_SOURCE("overlay_extra_frag.glsl")
-ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_view)
+ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_globals)
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(overlay_sculpt_curves_cage_clipped)
-DO_STATIC_COMPILATION()
-ADDITIONAL_INFO(overlay_sculpt_curves_cage)
-ADDITIONAL_INFO(drw_clipped)
-GPU_SHADER_CREATE_END()
+OVERLAY_INFO_CLIP_VARIATION(overlay_sculpt_curves_cage)

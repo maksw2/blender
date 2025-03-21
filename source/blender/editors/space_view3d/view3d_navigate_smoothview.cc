@@ -525,7 +525,9 @@ static void view3d_smoothview_apply_from_timer(bContext *C, View3D *v3d, ARegion
   ED_region_tag_redraw(region);
 }
 
-static int view3d_smoothview_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus view3d_smoothview_invoke(bContext *C,
+                                                 wmOperator * /*op*/,
+                                                 const wmEvent *event)
 {
   View3D *v3d = CTX_wm_view3d(C);
   ARegion *region = CTX_wm_region(C);
@@ -585,7 +587,7 @@ void ED_view3d_smooth_view_force_finish_no_camera_lock(const Depsgraph *depsgrap
 
   /* NOTE(@ideasman42): Ideally we would *always* apply the camera lock.
    * Failing to do so results in incorrect behavior when a user performs
-   * a camera-locked view-port manipulation & immediately enters enters local-view
+   * a camera-locked view-port manipulation & immediately enters local-view
    * before the operation is completed.
    * In this case the camera isn't key-framed when it should be.
    *

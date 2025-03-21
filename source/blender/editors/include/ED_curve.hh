@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "BLI_span.hh"
+
+#include "DNA_windowmanager_enums.h"
+
 struct BPoint;
 struct Base;
 struct BezTriple;
@@ -68,7 +72,7 @@ bool ED_curve_nurb_deselect_all(const Nurb *nu);
  * This is used externally, by #OBJECT_OT_join.
  * TODO: shape keys - as with meshes.
  */
-int ED_curve_join_objects_exec(bContext *C, wmOperator *op);
+wmOperatorStatus ED_curve_join_objects_exec(bContext *C, wmOperator *op);
 
 /* `editcurve_select.cc` */
 

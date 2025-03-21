@@ -21,8 +21,6 @@
 
 #include "GPU_material.hh"
 
-#include "COM_shader_node.hh"
-
 #include "node_composite_util.hh"
 
 /* ******************* Luma Matte Node ********************************* */
@@ -42,7 +40,7 @@ static void cmp_node_luma_matte_declare(NodeDeclarationBuilder &b)
 
 static void node_composit_init_luma_matte(bNodeTree * /*ntree*/, bNode *node)
 {
-  NodeChroma *c = MEM_cnew<NodeChroma>(__func__);
+  NodeChroma *c = MEM_callocN<NodeChroma>(__func__);
   node->storage = c;
   c->t1 = 1.0f;
   c->t2 = 0.0f;
@@ -53,13 +51,21 @@ static void node_composit_buts_luma_matte(uiLayout *layout, bContext * /*C*/, Po
   uiLayout *col;
 
   col = uiLayoutColumn(layout, true);
-  uiItemR(
-      col, ptr, "limit_max", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
-  uiItemR(
-      col, ptr, "limit_min", UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(col,
+          ptr,
+          "limit_max",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
+  uiItemR(col,
+          ptr,
+          "limit_min",
+          UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_SLIDER,
+          std::nullopt,
+          ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 static float get_high(const bNode &node)
 {
@@ -71,34 +77,25 @@ static float get_low(const bNode &node)
   return node_storage(node).t2;
 }
 
-class LuminanceMatteShaderNode : public ShaderNode {
- public:
-  using ShaderNode::ShaderNode;
-
-  void compile(GPUMaterial *material) override
-  {
-    GPUNodeStack *inputs = get_inputs_array();
-    GPUNodeStack *outputs = get_outputs_array();
-
-    const float high = get_high(bnode());
-    const float low = get_low(bnode());
-    float luminance_coefficients[3];
-    IMB_colormanagement_get_luminance_coefficients(luminance_coefficients);
-
-    GPU_stack_link(material,
-                   &bnode(),
-                   "node_composite_luminance_matte",
-                   inputs,
-                   outputs,
-                   GPU_uniform(&high),
-                   GPU_uniform(&low),
-                   GPU_constant(luminance_coefficients));
-  }
-};
-
-static ShaderNode *get_compositor_shader_node(DNode node)
+static int node_gpu_material(GPUMaterial *material,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *inputs,
+                             GPUNodeStack *outputs)
 {
-  return new LuminanceMatteShaderNode(node);
+  const float high = get_high(*node);
+  const float low = get_low(*node);
+  float luminance_coefficients[3];
+  IMB_colormanagement_get_luminance_coefficients(luminance_coefficients);
+
+  return GPU_stack_link(material,
+                        node,
+                        "node_composite_luminance_matte",
+                        inputs,
+                        outputs,
+                        GPU_uniform(&high),
+                        GPU_uniform(&low),
+                        GPU_constant(luminance_coefficients));
 }
 
 static void node_build_multi_function(blender::nodes::NodeMultiFunctionBuilder &builder)
@@ -129,15 +126,19 @@ void register_node_type_cmp_luma_matte()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_LUMA_MATTE, "Luminance Key", NODE_CLASS_MATTE);
+  cmp_node_type_base(&ntype, "CompositorNodeLumaMatte", CMP_NODE_LUMA_MATTE);
+  ntype.ui_name = "Luminance Key";
+  ntype.ui_description = "Create a matte based on luminance (brightness) difference";
+  ntype.enum_name_legacy = "LUMA_MATTE";
+  ntype.nclass = NODE_CLASS_MATTE;
   ntype.declare = file_ns::cmp_node_luma_matte_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_luma_matte;
   ntype.flag |= NODE_PREVIEW;
   ntype.initfunc = file_ns::node_composit_init_luma_matte;
   blender::bke::node_type_storage(
-      &ntype, "NodeChroma", node_free_standard_storage, node_copy_standard_storage);
-  ntype.get_compositor_shader_node = file_ns::get_compositor_shader_node;
+      ntype, "NodeChroma", node_free_standard_storage, node_copy_standard_storage);
+  ntype.gpu_fn = file_ns::node_gpu_material;
   ntype.build_multi_function = file_ns::node_build_multi_function;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

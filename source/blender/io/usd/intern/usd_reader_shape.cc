@@ -2,7 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BKE_attribute.hh"
 #include "BKE_geometry_set.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_mesh.hh"
@@ -18,14 +17,18 @@
 #include "usd_reader_shape.hh"
 
 #include <pxr/usd/usdGeom/capsule.h>
+#include <pxr/usd/usdGeom/capsule_1.h>
 #include <pxr/usd/usdGeom/cone.h>
 #include <pxr/usd/usdGeom/cube.h>
 #include <pxr/usd/usdGeom/cylinder.h>
+#include <pxr/usd/usdGeom/cylinder_1.h>
+#include <pxr/usd/usdGeom/plane.h>
 #include <pxr/usd/usdGeom/sphere.h>
 #include <pxr/usdImaging/usdImaging/capsuleAdapter.h>
 #include <pxr/usdImaging/usdImaging/coneAdapter.h>
 #include <pxr/usdImaging/usdImaging/cubeAdapter.h>
 #include <pxr/usdImaging/usdImaging/cylinderAdapter.h>
+#include <pxr/usdImaging/usdImaging/planeAdapter.h>
 #include <pxr/usdImaging/usdImaging/sphereAdapter.h>
 
 namespace blender::io::usd {
@@ -88,13 +91,13 @@ bool USDShapeReader::read_mesh_values(double motionSampleTime,
                                       pxr::VtIntArray &face_indices,
                                       pxr::VtIntArray &face_counts) const
 {
-  if (prim_.IsA<pxr::UsdGeomCapsule>()) {
+  if (prim_.IsA<pxr::UsdGeomCapsule>() || prim_.IsA<pxr::UsdGeomCapsule_1>()) {
     read_values<pxr::UsdImagingCapsuleAdapter>(
         motionSampleTime, positions, face_indices, face_counts);
     return true;
   }
 
-  if (prim_.IsA<pxr::UsdGeomCylinder>()) {
+  if (prim_.IsA<pxr::UsdGeomCylinder>() || prim_.IsA<pxr::UsdGeomCylinder_1>()) {
     read_values<pxr::UsdImagingCylinderAdapter>(
         motionSampleTime, positions, face_indices, face_counts);
     return true;
@@ -118,6 +121,12 @@ bool USDShapeReader::read_mesh_values(double motionSampleTime,
     return true;
   }
 
+  if (prim_.IsA<pxr::UsdGeomPlane>()) {
+    read_values<pxr::UsdImagingPlaneAdapter>(
+        motionSampleTime, positions, face_indices, face_counts);
+    return true;
+  }
+
   BKE_reportf(reports(),
               RPT_ERROR,
               "Unhandled Gprim type: %s (%s)",
@@ -130,19 +139,22 @@ Mesh *USDShapeReader::read_mesh(Mesh *existing_mesh,
                                 const USDMeshReadParams params,
                                 const char ** /*r_err_str*/)
 {
-  pxr::VtIntArray face_indices;
-  pxr::VtIntArray face_counts;
-
   if (!prim_) {
     return existing_mesh;
   }
 
+  pxr::VtIntArray usd_face_indices;
+  pxr::VtIntArray usd_face_counts;
+
   /* Should have a good set of data by this point-- copy over. */
-  Mesh *active_mesh = mesh_from_prim(existing_mesh, params, face_indices, face_counts);
+  Mesh *active_mesh = mesh_from_prim(existing_mesh, params, usd_face_indices, usd_face_counts);
 
   if (active_mesh == existing_mesh) {
     return existing_mesh;
   }
+
+  Span<int> face_indices = Span(usd_face_indices.cdata(), usd_face_indices.size());
+  Span<int> face_counts = Span(usd_face_counts.cdata(), usd_face_counts.size());
 
   MutableSpan<int> face_offsets = active_mesh->face_offsets_for_write();
   for (const int i : IndexRange(active_mesh->faces_num)) {
@@ -187,18 +199,9 @@ void USDShapeReader::apply_primvars_to_mesh(Mesh *mesh, const double motionSampl
   pxr::TfToken active_color_name;
 
   for (const pxr::UsdGeomPrimvar &pv : primvars) {
-    if (!pv.HasValue()) {
-      BKE_reportf(reports(),
-                  RPT_WARNING,
-                  "Skipping primvar %s, mesh %s -- no value",
-                  pv.GetName().GetText(),
-                  &mesh->id.name[2]);
-      continue;
-    }
-
-    if (!pv.GetAttr().GetTypeName().IsArray()) {
-      /* Non-array attributes are technically improper USD. */
-      continue;
+    const pxr::SdfValueTypeName pv_type = pv.GetTypeName();
+    if (!pv_type.IsArray()) {
+      continue; /* Skip non-array primvar attributes. */
     }
 
     const pxr::TfToken name = pxr::UsdGeomPrimvar::StripPrimvarsName(pv.GetPrimvarName());
@@ -208,9 +211,7 @@ void USDShapeReader::apply_primvars_to_mesh(Mesh *mesh, const double motionSampl
       continue;
     }
 
-    const pxr::SdfValueTypeName sdf_type = pv.GetTypeName();
-
-    const std::optional<eCustomDataType> type = convert_usd_type_to_blender(sdf_type);
+    const std::optional<eCustomDataType> type = convert_usd_type_to_blender(pv_type);
     if (type == CD_PROP_COLOR) {
       /* Set the active color name to 'displayColor', if a color primvar
        * with this name exists.  Otherwise, use the name of the first
@@ -260,7 +261,7 @@ Mesh *USDShapeReader::mesh_from_prim(Mesh *existing_mesh,
   }
 
   MutableSpan<float3> vert_positions = active_mesh->vert_positions_for_write();
-  vert_positions.copy_from(Span(positions.data(), positions.size()).cast<float3>());
+  vert_positions.copy_from(Span(positions.cdata(), positions.size()).cast<float3>());
 
   if (params.read_flags & MOD_MESHSEQ_READ_COLOR) {
     if (active_mesh != existing_mesh) {
@@ -288,11 +289,27 @@ bool USDShapeReader::is_time_varying()
             geom.GetRadiusAttr().ValueMightBeTimeVarying());
   }
 
+  if (prim_.IsA<pxr::UsdGeomCapsule_1>()) {
+    pxr::UsdGeomCapsule_1 geom(prim_);
+    return (geom.GetAxisAttr().ValueMightBeTimeVarying() ||
+            geom.GetHeightAttr().ValueMightBeTimeVarying() ||
+            geom.GetRadiusTopAttr().ValueMightBeTimeVarying() ||
+            geom.GetRadiusBottomAttr().ValueMightBeTimeVarying());
+  }
+
   if (prim_.IsA<pxr::UsdGeomCylinder>()) {
     pxr::UsdGeomCylinder geom(prim_);
     return (geom.GetAxisAttr().ValueMightBeTimeVarying() ||
             geom.GetHeightAttr().ValueMightBeTimeVarying() ||
             geom.GetRadiusAttr().ValueMightBeTimeVarying());
+  }
+
+  if (prim_.IsA<pxr::UsdGeomCylinder_1>()) {
+    pxr::UsdGeomCylinder_1 geom(prim_);
+    return (geom.GetAxisAttr().ValueMightBeTimeVarying() ||
+            geom.GetHeightAttr().ValueMightBeTimeVarying() ||
+            geom.GetRadiusTopAttr().ValueMightBeTimeVarying() ||
+            geom.GetRadiusBottomAttr().ValueMightBeTimeVarying());
   }
 
   if (prim_.IsA<pxr::UsdGeomCone>()) {
@@ -310,6 +327,13 @@ bool USDShapeReader::is_time_varying()
   if (prim_.IsA<pxr::UsdGeomSphere>()) {
     pxr::UsdGeomSphere geom(prim_);
     return geom.GetRadiusAttr().ValueMightBeTimeVarying();
+  }
+
+  if (prim_.IsA<pxr::UsdGeomPlane>()) {
+    pxr::UsdGeomPlane geom(prim_);
+    return (geom.GetWidthAttr().ValueMightBeTimeVarying() ||
+            geom.GetLengthAttr().ValueMightBeTimeVarying() ||
+            geom.GetAxisAttr().ValueMightBeTimeVarying());
   }
 
   BKE_reportf(reports(),

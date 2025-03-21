@@ -8,10 +8,7 @@
 
 #include <algorithm>
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_math_vector.h"
-#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "BLT_translation.hh"
@@ -110,6 +107,9 @@ static std::string ensure_weight_attribute_meta_data(Mesh &mesh,
 static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh *mesh)
 {
   using namespace blender;
+  if (mesh->verts_num == 0) {
+    return mesh;
+  }
   Mesh *result;
   BMesh *bm;
   BMIter iter;
@@ -172,11 +172,9 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
           continue;
         }
       }
-      else if (vgroup != -1) {
-        weight = invert_vgroup ?
-                     1.0f -
-                         BKE_defvert_array_find_weight_safe(dvert, BM_elem_index_get(v), vgroup) :
-                     BKE_defvert_array_find_weight_safe(dvert, BM_elem_index_get(v), vgroup);
+      else {
+        weight = BKE_defvert_array_find_weight_safe(
+            dvert, BM_elem_index_get(v), vgroup, invert_vgroup);
         /* Check is against 0.5 rather than != 0.0 because cascaded bevel modifiers will
          * interpolate weights for newly created vertices, and may cause unexpected "selection" */
         if (weight < 0.5f) {
@@ -209,15 +207,11 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
             continue;
           }
         }
-        else if (vgroup != -1) {
-          weight = invert_vgroup ?
-                       1.0f - BKE_defvert_array_find_weight_safe(
-                                  dvert, BM_elem_index_get(e->v1), vgroup) :
-                       BKE_defvert_array_find_weight_safe(dvert, BM_elem_index_get(e->v1), vgroup);
-          weight2 = invert_vgroup ? 1.0f - BKE_defvert_array_find_weight_safe(
-                                               dvert, BM_elem_index_get(e->v2), vgroup) :
-                                    BKE_defvert_array_find_weight_safe(
-                                        dvert, BM_elem_index_get(e->v2), vgroup);
+        else {
+          weight = BKE_defvert_array_find_weight_safe(
+              dvert, BM_elem_index_get(e->v1), vgroup, invert_vgroup);
+          weight2 = BKE_defvert_array_find_weight_safe(
+              dvert, BM_elem_index_get(e->v2), vgroup, invert_vgroup);
           if (weight < 0.5f || weight2 < 0.5f) {
             continue;
           }
@@ -296,37 +290,37 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
 
   bool edge_bevel = RNA_enum_get(ptr, "affect") != MOD_BEVEL_AFFECT_VERTICES;
 
-  uiItemR(layout, ptr, "affect", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "affect", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 
   uiLayoutSetPropSep(layout, true);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "offset_type", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "offset_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   if (RNA_enum_get(ptr, "offset_type") == BEVEL_AMT_PERCENT) {
-    uiItemR(col, ptr, "width_pct", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, ptr, "width_pct", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
   else {
     uiItemR(col, ptr, "width", UI_ITEM_NONE, IFACE_("Amount"), ICON_NONE);
   }
 
-  uiItemR(layout, ptr, "segments", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "segments", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   uiItemS(layout);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "limit_method", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "limit_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   int limit_method = RNA_enum_get(ptr, "limit_method");
   if (limit_method == MOD_BEVEL_ANGLE) {
     sub = uiLayoutColumn(col, false);
     uiLayoutSetActive(sub, edge_bevel);
-    uiItemR(col, ptr, "angle_limit", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, ptr, "angle_limit", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
   else if (limit_method == MOD_BEVEL_WEIGHT) {
     const char *prop_name = edge_bevel ? "edge_weight" : "vertex_weight";
-    uiItemR(col, ptr, prop_name, UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, ptr, prop_name, UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
   else if (limit_method == MOD_BEVEL_VGROUP) {
-    modifier_vgroup_ui(col, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", nullptr);
+    modifier_vgroup_ui(col, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", std::nullopt);
   }
 
   modifier_panel_end(layout, ptr);
@@ -344,7 +338,7 @@ static void profile_panel_draw(const bContext * /*C*/, Panel *panel)
   int miter_outer = RNA_enum_get(ptr, "miter_outer");
   bool edge_bevel = RNA_enum_get(ptr, "affect") != MOD_BEVEL_AFFECT_VERTICES;
 
-  uiItemR(layout, ptr, "profile_type", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "profile_type", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 
   uiLayoutSetPropSep(layout, true);
 
@@ -391,17 +385,17 @@ static void geometry_panel_draw(const bContext * /*C*/, Panel *panel)
   if (RNA_enum_get(ptr, "miter_inner") == BEVEL_MITER_ARC) {
     row = uiLayoutRow(layout, false);
     uiLayoutSetActive(row, edge_bevel);
-    uiItemR(row, ptr, "spread", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(row, ptr, "spread", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
   uiItemS(layout);
 
   row = uiLayoutRow(layout, false);
   uiLayoutSetActive(row, edge_bevel);
   uiItemR(row, ptr, "vmesh_method", UI_ITEM_NONE, IFACE_("Intersections"), ICON_NONE);
-  uiItemR(layout, ptr, "use_clamp_overlap", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "use_clamp_overlap", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   row = uiLayoutRow(layout, false);
   uiLayoutSetActive(row, edge_bevel);
-  uiItemR(row, ptr, "loop_slide", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(row, ptr, "loop_slide", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void shading_panel_draw(const bContext * /*C*/, Panel *panel)
@@ -415,15 +409,15 @@ static void shading_panel_draw(const bContext * /*C*/, Panel *panel)
 
   uiLayoutSetPropSep(layout, true);
 
-  uiItemR(layout, ptr, "harden_normals", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "harden_normals", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumnWithHeading(layout, true, IFACE_("Mark"));
   uiLayoutSetActive(col, edge_bevel);
   uiItemR(col, ptr, "mark_seam", UI_ITEM_NONE, IFACE_("Seam"), ICON_NONE);
   uiItemR(col, ptr, "mark_sharp", UI_ITEM_NONE, IFACE_("Sharp"), ICON_NONE);
 
-  uiItemR(layout, ptr, "material", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, ptr, "face_strength_mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "material", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(layout, ptr, "face_strength_mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void panel_register(ARegionType *region_type)

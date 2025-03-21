@@ -8,7 +8,6 @@
 
 #include "BLI_hash.h"
 #include "BLI_rand.h"
-#include "BLI_task.h"
 
 #include "BLT_translation.hh"
 
@@ -22,7 +21,6 @@
 #include "BKE_curves.hh"
 #include "BKE_geometry_set.hh"
 #include "BKE_grease_pencil.hh"
-#include "BKE_lib_query.hh"
 #include "BKE_modifier.hh"
 
 #include "UI_interface.hh"
@@ -277,7 +275,7 @@ static void panel_draw(const bContext *C, Panel *panel)
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, nullptr);
 
   uiLayoutSetPropSep(layout, true);
-  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   uiLayout *col = uiLayoutColumn(layout, true);
 
@@ -292,35 +290,35 @@ static void panel_draw(const bContext *C, Panel *panel)
 
   uiItemR(layout, ptr, "overshoot_factor", UI_ITEM_R_SLIDER, IFACE_("Used Length"), ICON_NONE);
 
-  if (uiLayout *random_layout = uiLayoutPanelProp(
-          C, layout, ptr, "open_random_panel", IFACE_("Randomize")))
+  if (uiLayout *random_layout =
+          uiLayoutPanelPropWithBoolHeader(
+              C, layout, ptr, "open_random_panel", ptr, "use_random", IFACE_("Randomize"))
+              .body)
   {
-    uiItemR(random_layout, ptr, "use_random", UI_ITEM_NONE, IFACE_("Randomize"), ICON_NONE);
-
     uiLayout *subcol = uiLayoutColumn(random_layout, false);
     uiLayoutSetPropSep(subcol, true);
     uiLayoutSetActive(subcol, RNA_boolean_get(ptr, "use_random"));
 
-    uiItemR(subcol, ptr, "step", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(subcol, ptr, "step", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
     uiItemR(subcol, ptr, "random_start_factor", UI_ITEM_NONE, IFACE_("Offset Start"), ICON_NONE);
     uiItemR(subcol, ptr, "random_end_factor", UI_ITEM_NONE, IFACE_("End"), ICON_NONE);
     uiItemR(subcol, ptr, "random_offset", UI_ITEM_NONE, IFACE_("Noise Offset"), ICON_NONE);
-    uiItemR(subcol, ptr, "seed", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(subcol, ptr, "seed", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
-  if (uiLayout *curvature_layout = uiLayoutPanelProp(
-          C, layout, ptr, "open_curvature_panel", IFACE_("Curvature")))
+  if (uiLayout *curvature_layout =
+          uiLayoutPanelPropWithBoolHeader(
+              C, layout, ptr, "open_curvature_panel", ptr, "use_curvature", IFACE_("Curvature"))
+              .body)
   {
-    uiItemR(curvature_layout, ptr, "use_curvature", UI_ITEM_NONE, IFACE_("Curvature"), ICON_NONE);
-
     uiLayout *subcol = uiLayoutColumn(curvature_layout, false);
     uiLayoutSetPropSep(subcol, true);
     uiLayoutSetActive(subcol, RNA_boolean_get(ptr, "use_curvature"));
 
-    uiItemR(subcol, ptr, "point_density", UI_ITEM_NONE, nullptr, ICON_NONE);
-    uiItemR(subcol, ptr, "segment_influence", UI_ITEM_NONE, nullptr, ICON_NONE);
-    uiItemR(subcol, ptr, "max_angle", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(subcol, ptr, "point_density", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    uiItemR(subcol, ptr, "segment_influence", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    uiItemR(subcol, ptr, "max_angle", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     uiItemR(subcol, ptr, "invert_curvature", UI_ITEM_NONE, IFACE_("Invert"), ICON_NONE);
   }
 

@@ -2,6 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_generic_virtual_array.hh"
+#include "BLI_math_quaternion.hh"
+#include "BLI_virtual_array.hh"
+
 #include "BKE_attribute_math.hh"
 #include "BKE_deform.hh"
 #include "BKE_mesh.hh"
@@ -109,8 +113,8 @@ static GVArray adapt_mesh_domain_corner_to_face(const Mesh &mesh, const GVArray 
         new_varray = VArray<T>::ForFunc(
             faces.size(), [faces, varray = varray.typed<bool>()](const int face_index) {
               /* A face is selected if all of its corners were selected. */
-              for (const int loop_index : faces[face_index]) {
-                if (!varray[loop_index]) {
+              for (const int corner : faces[face_index]) {
+                if (!varray[corner]) {
                   return false;
                 }
               }
@@ -122,8 +126,8 @@ static GVArray adapt_mesh_domain_corner_to_face(const Mesh &mesh, const GVArray 
             faces.size(), [faces, varray = varray.typed<T>()](const int face_index) {
               T return_value;
               attribute_math::DefaultMixer<T> mixer({&return_value, 1});
-              for (const int loop_index : faces[face_index]) {
-                const T value = varray[loop_index];
+              for (const int corner : faces[face_index]) {
+                const T value = varray[corner];
                 mixer.mix_in(0, value);
               }
               mixer.finalize();
@@ -410,13 +414,8 @@ static GVArray adapt_mesh_domain_point_to_edge(const Mesh &mesh, const GVArray &
       else {
         new_varray = VArray<T>::ForFunc(
             edges.size(), [edges, varray = varray.typed<T>()](const int edge_index) {
-              T return_value;
-              attribute_math::DefaultMixer<T> mixer({&return_value, 1});
               const int2 &edge = edges[edge_index];
-              mixer.mix_in(0, varray[edge[0]]);
-              mixer.mix_in(0, varray[edge[1]]);
-              mixer.finalize();
-              return return_value;
+              return attribute_math::mix2(0.5f, varray[edge[0]], varray[edge[1]]);
             });
       }
     }
@@ -439,12 +438,12 @@ void adapt_mesh_domain_edge_to_corner_impl(const Mesh &mesh,
     const IndexRange face = faces[face_index];
 
     /* For every corner, mix the values from the adjacent edges on the face. */
-    for (const int loop_index : face) {
-      const int loop_index_prev = mesh::face_corner_prev(face, loop_index);
-      const int edge = corner_edges[loop_index];
-      const int edge_prev = corner_edges[loop_index_prev];
-      mixer.mix_in(loop_index, old_values[edge]);
-      mixer.mix_in(loop_index, old_values[edge_prev]);
+    for (const int corner : face) {
+      const int corner_prev = mesh::face_corner_prev(face, corner);
+      const int edge = corner_edges[corner];
+      const int edge_prev = corner_edges[corner_prev];
+      mixer.mix_in(corner, old_values[edge]);
+      mixer.mix_in(corner, old_values[edge_prev]);
     }
   }
 
@@ -466,12 +465,12 @@ void adapt_mesh_domain_edge_to_corner_impl(const Mesh &mesh,
   threading::parallel_for(faces.index_range(), 2048, [&](const IndexRange range) {
     for (const int face_index : range) {
       const IndexRange face = faces[face_index];
-      for (const int loop_index : face) {
-        const int loop_index_prev = mesh::face_corner_prev(face, loop_index);
-        const int edge = corner_edges[loop_index];
-        const int edge_prev = corner_edges[loop_index_prev];
+      for (const int corner : face) {
+        const int corner_prev = mesh::face_corner_prev(face, corner);
+        const int edge = corner_edges[corner];
+        const int edge_prev = corner_edges[corner_prev];
         if (old_values[edge] && old_values[edge_prev]) {
-          r_values[loop_index] = true;
+          r_values[corner] = true;
         }
       }
     }
@@ -720,6 +719,13 @@ static void tag_component_sharpness_changed(void *owner)
   }
 }
 
+static void tag_material_index_changed(void *owner)
+{
+  if (Mesh *mesh = static_cast<Mesh *>(owner)) {
+    mesh->tag_material_index_changed();
+  }
+}
+
 /**
  * This provider makes vertex groups available as float attributes.
  */
@@ -727,9 +733,6 @@ class MeshVertexGroupsAttributeProvider final : public DynamicAttributesProvider
  public:
   GAttributeReader try_get_for_read(const void *owner, const StringRef attribute_id) const final
   {
-    if (bke::attribute_name_is_anonymous(attribute_id)) {
-      return {};
-    }
     const Mesh *mesh = static_cast<const Mesh *>(owner);
     if (mesh == nullptr) {
       return {};
@@ -756,9 +759,6 @@ class MeshVertexGroupsAttributeProvider final : public DynamicAttributesProvider
 
   GAttributeWriter try_get_for_write(void *owner, const StringRef attribute_id) const final
   {
-    if (bke::attribute_name_is_anonymous(attribute_id)) {
-      return {};
-    }
     Mesh *mesh = static_cast<Mesh *>(owner);
     if (mesh == nullptr) {
       return {};
@@ -773,21 +773,16 @@ class MeshVertexGroupsAttributeProvider final : public DynamicAttributesProvider
     return {varray_for_mutable_deform_verts(dverts, vertex_group_index), AttrDomain::Point};
   }
 
-  bool try_delete(void *owner, const StringRef attribute_id) const final
+  bool try_delete(void *owner, const StringRef name) const final
   {
-    if (bke::attribute_name_is_anonymous(attribute_id)) {
-      return false;
-    }
     Mesh *mesh = static_cast<Mesh *>(owner);
     if (mesh == nullptr) {
       return true;
     }
 
-    const std::string name = attribute_id;
-
     int index;
     bDeformGroup *group;
-    if (!BKE_id_defgroup_name_find(&mesh->id, name.c_str(), &index, &group)) {
+    if (!BKE_id_defgroup_name_find(&mesh->id, name, &index, &group)) {
       return false;
     }
     BLI_remlink(&mesh->vertex_group_names, group);
@@ -911,7 +906,7 @@ static GeometryAttributeProviders create_attribute_providers_for_mesh()
                                                        CD_PROP_INT32,
                                                        BuiltinAttributeProvider::Deletable,
                                                        face_access,
-                                                       nullptr,
+                                                       tag_material_index_changed,
                                                        AttributeValidator{&material_index_clamp});
 
   static const auto int2_index_clamp = mf::build::SI1_SO<int2, int2>(

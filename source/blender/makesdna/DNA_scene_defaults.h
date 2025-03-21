@@ -129,6 +129,9 @@
     .ffcodecdata = _DNA_DEFAULT_FFMpegCodecData, \
  \
     .motion_blur_shutter = 0.5f, \
+\
+    .compositor_denoise_final_quality = SCE_COMPOSITOR_DENOISE_HIGH, \
+    .compositor_denoise_preview_quality = SCE_COMPOSITOR_DENOISE_BALANCED, \
   }
 
 #define _DNA_DEFAULT_AudioData \
@@ -277,6 +280,7 @@
     .paint.flags = PAINT_SHOW_BRUSH, \
     .normal_angle = 80, \
     .seam_bleed = 2, \
+    .clone_alpha = 0.5f, \
   }
 
 #define _DNA_DEFAULTS_ParticleBrushData \

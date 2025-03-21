@@ -18,7 +18,7 @@
 #include "BKE_customdata.hh"
 #include "BKE_data_transfer.h"
 #include "BKE_deform.hh"
-#include "BKE_mesh_mapping.hh"
+#include "BKE_library.hh"
 #include "BKE_mesh_remap.hh"
 #include "BKE_object.hh"
 #include "BKE_report.hh"
@@ -419,7 +419,7 @@ static bool data_transfer_exec_is_object_valid(wmOperator *op,
   return false;
 }
 
-static int data_transfer_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus data_transfer_exec(bContext *C, wmOperator *op)
 {
   Object *ob_src = context_active_object(C);
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
@@ -819,7 +819,7 @@ static bool datalayout_transfer_poll(bContext *C)
           data_transfer_poll(C));
 }
 
-static int datalayout_transfer_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus datalayout_transfer_exec(bContext *C, wmOperator *op)
 {
   Object *ob_act = context_active_object(C);
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
@@ -897,7 +897,9 @@ static int datalayout_transfer_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int datalayout_transfer_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus datalayout_transfer_invoke(bContext *C,
+                                                   wmOperator *op,
+                                                   const wmEvent *event)
 {
   if (edit_modifier_invoke_properties(C, op)) {
     return datalayout_transfer_exec(C, op);

@@ -46,11 +46,11 @@ int GPU_texture_size_with_limit(int res);
 bool GPU_use_parallel_compilation();
 
 bool GPU_stencil_clasify_buffer_workaround();
+bool GPU_node_link_instancing_workaround();
 bool GPU_mip_render_workaround();
 bool GPU_depth_blitting_workaround();
 bool GPU_use_main_context_workaround();
 bool GPU_use_hq_normals_workaround();
-bool GPU_clear_viewport_workaround();
 bool GPU_crappy_amd_driver();
 
 bool GPU_vulkan_render_pass_workaround();
@@ -70,7 +70,6 @@ void GPU_mem_stats_get(int *r_totalmem, int *r_freemem);
 bool GPU_stereo_quadbuffer_support();
 
 int GPU_minimum_per_vertex_stride();
-bool GPU_transform_feedback_support();
 
 /** WARNING: Should only be called at startup from creator_args. Never call it at runtime. */
 void GPU_compilation_subprocess_override_set(int count);

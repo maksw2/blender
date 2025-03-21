@@ -2,19 +2,22 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
-#ifndef __UTIL_MATH_INTERSECT_H__
-#define __UTIL_MATH_INTERSECT_H__
+#pragma once
+
+#include "util/math_float2.h"
+#include "util/math_float3.h"
+#include "util/math_float4.h"
 
 CCL_NAMESPACE_BEGIN
 
 /* Ray Intersection */
 
-ccl_device bool ray_sphere_intersect(float3 ray_P,
-                                     float3 ray_D,
-                                     float ray_tmin,
-                                     float ray_tmax,
-                                     float3 sphere_P,
-                                     float sphere_radius,
+ccl_device bool ray_sphere_intersect(const float3 ray_P,
+                                     const float3 ray_D,
+                                     const float ray_tmin,
+                                     const float ray_tmax,
+                                     const float3 sphere_P,
+                                     const float sphere_radius,
                                      ccl_private float3 *isect_P,
                                      ccl_private float *isect_t)
 {
@@ -47,12 +50,12 @@ ccl_device bool ray_sphere_intersect(float3 ray_P,
   return false;
 }
 
-ccl_device bool ray_aligned_disk_intersect(float3 ray_P,
-                                           float3 ray_D,
-                                           float ray_tmin,
-                                           float ray_tmax,
-                                           float3 disk_P,
-                                           float disk_radius,
+ccl_device bool ray_aligned_disk_intersect(const float3 ray_P,
+                                           const float3 ray_D,
+                                           const float ray_tmin,
+                                           const float ray_tmax,
+                                           const float3 disk_P,
+                                           const float disk_radius,
                                            ccl_private float3 *isect_P,
                                            ccl_private float *isect_t)
 {
@@ -69,7 +72,7 @@ ccl_device bool ray_aligned_disk_intersect(float3 ray_P,
     return false;
   }
   /* Test if within radius. */
-  float3 P = ray_P + ray_D * t;
+  const float3 P = ray_P + ray_D * t;
   if (len_squared(P - disk_P) > disk_radius * disk_radius) {
     return false;
   }
@@ -78,13 +81,13 @@ ccl_device bool ray_aligned_disk_intersect(float3 ray_P,
   return true;
 }
 
-ccl_device bool ray_disk_intersect(float3 ray_P,
-                                   float3 ray_D,
-                                   float ray_tmin,
-                                   float ray_tmax,
-                                   float3 disk_P,
-                                   float3 disk_N,
-                                   float disk_radius,
+ccl_device bool ray_disk_intersect(const float3 ray_P,
+                                   const float3 ray_D,
+                                   const float ray_tmin,
+                                   const float ray_tmax,
+                                   const float3 disk_P,
+                                   const float3 disk_N,
+                                   const float disk_radius,
                                    ccl_private float3 *isect_P,
                                    ccl_private float *isect_t)
 {
@@ -93,12 +96,12 @@ ccl_device bool ray_disk_intersect(float3 ray_P,
   const float cos_angle = dot(disk_N, -ray_D);
   if (dp * cos_angle > 0.f)  // front of light
   {
-    float t = dp / cos_angle;
+    const float t = dp / cos_angle;
     if (t < 0.f) { /* Ray points away from the light. */
       return false;
     }
-    float3 P = ray_P + t * ray_D;
-    float3 T = P - disk_P;
+    const float3 P = ray_P + t * ray_D;
+    const float3 T = P - disk_P;
 
     if (dot(T, T) < sqr(disk_radius) && (t > ray_tmin && t < ray_tmax)) {
       *isect_P = ray_P + t * ray_D;
@@ -110,16 +113,16 @@ ccl_device bool ray_disk_intersect(float3 ray_P,
 }
 
 /* Custom rcp, cross and dot implementations that match Embree bit for bit. */
-ccl_device_forceinline float ray_triangle_rcp(const float x)
+ccl_device_forceinline float ray_triangle_reciprocal(const float x)
 {
 #ifdef __KERNEL_NEON__
   /* Move scalar to vector register and do rcp. */
   __m128 a = {0};
   a = vsetq_lane_f32(x, a, 0);
-  float32x4_t reciprocal = vrecpeq_f32(a);
-  reciprocal = vmulq_f32(vrecpsq_f32(a, reciprocal), reciprocal);
-  reciprocal = vmulq_f32(vrecpsq_f32(a, reciprocal), reciprocal);
-  return vgetq_lane_f32(reciprocal, 0);
+  float32x4_t rt_rcp = vrecpeq_f32(a);
+  rt_rcp = vmulq_f32(vrecpsq_f32(a, rt_rcp), rt_rcp);
+  rt_rcp = vmulq_f32(vrecpsq_f32(a, rt_rcp), rt_rcp);
+  return vgetq_lane_f32(rt_rcp, 0);
 #elif defined(__KERNEL_SSE__)
   const __m128 a = _mm_set_ss(x);
   const __m128 r = _mm_rcp_ss(a);
@@ -211,7 +214,7 @@ ccl_device_forceinline bool ray_triangle_intersect(const float3 ray_P,
     return false;
   }
 
-  const float rcp_uvw = (fabsf(UVW) < 1e-18f) ? 0.0f : ray_triangle_rcp(UVW);
+  const float rcp_uvw = (fabsf(UVW) < 1e-18f) ? 0.0f : ray_triangle_reciprocal(UVW);
   *isect_u = min(U * rcp_uvw, 1.0f);
   *isect_v = min(V * rcp_uvw, 1.0f);
   *isect_t = t;
@@ -254,14 +257,14 @@ ccl_device_forceinline bool ray_triangle_intersect_self(const float3 ray_P,
  * If ellipse is true, hits outside the ellipse that's enclosed by the
  * quad are rejected.
  */
-ccl_device bool ray_quad_intersect(float3 ray_P,
-                                   float3 ray_D,
-                                   float ray_tmin,
-                                   float ray_tmax,
-                                   float3 quad_P,
-                                   float3 inv_quad_u,
-                                   float3 inv_quad_v,
-                                   float3 quad_n,
+ccl_device bool ray_quad_intersect(const float3 ray_P,
+                                   const float3 ray_D,
+                                   const float ray_tmin,
+                                   const float ray_tmax,
+                                   const float3 quad_P,
+                                   const float3 inv_quad_u,
+                                   const float3 inv_quad_v,
+                                   const float3 quad_n,
                                    ccl_private float3 *isect_P,
                                    ccl_private float *isect_t,
                                    ccl_private float *isect_u,
@@ -269,7 +272,7 @@ ccl_device bool ray_quad_intersect(float3 ray_P,
                                    bool ellipse)
 {
   /* Perform intersection test. */
-  float t = -(dot(ray_P, quad_n) - dot(quad_P, quad_n)) / dot(ray_D, quad_n);
+  const float t = -(dot(ray_P, quad_n) - dot(quad_P, quad_n)) / dot(ray_D, quad_n);
   if (!(t > ray_tmin && t < ray_tmax)) {
     return false;
   }
@@ -288,16 +291,20 @@ ccl_device bool ray_quad_intersect(float3 ray_P,
   }
   /* Store the result. */
   /* TODO(sergey): Check whether we can avoid some checks here. */
-  if (isect_P != NULL)
+  if (isect_P != nullptr) {
     *isect_P = hit;
-  if (isect_t != NULL)
+  }
+  if (isect_t != nullptr) {
     *isect_t = t;
+  }
 
   /* NOTE: Return barycentric coordinates in the same notation as Embree and OptiX. */
-  if (isect_u != NULL)
+  if (isect_u != nullptr) {
     *isect_u = v + 0.5f;
-  if (isect_v != NULL)
+  }
+  if (isect_v != nullptr) {
     *isect_v = -u - v;
+  }
 
   return true;
 }
@@ -332,15 +339,15 @@ ccl_device bool ray_aabb_intersect(const float3 bbox_min,
                                    const float3 ray_D,
                                    ccl_private Interval<float> *t_range)
 {
-  const float3 inv_ray_D = rcp(ray_D);
+  const float3 inv_ray_D = reciprocal(ray_D);
 
   /* Absolute distances to lower and upper box coordinates; */
   const float3 t_lower = (bbox_min - ray_P) * inv_ray_D;
   const float3 t_upper = (bbox_max - ray_P) * inv_ray_D;
 
   /* The four t-intervals (for x-/y-/z-slabs, and ray p(t)). */
-  const float4 tmins = float3_to_float4(min(t_lower, t_upper), t_range->min);
-  const float4 tmaxes = float3_to_float4(max(t_lower, t_upper), t_range->max);
+  const float4 tmins = make_float4(min(t_lower, t_upper), t_range->min);
+  const float4 tmaxes = make_float4(max(t_lower, t_upper), t_range->max);
 
   /* Max of mins and min of maxes. */
   const float tmin = reduce_max(tmins);
@@ -361,8 +368,8 @@ ccl_device_inline bool ray_infinite_cylinder_intersect(const float3 P,
 {
   /* Convert to a 2D problem. */
   const float2 inv_len = 1.0f / make_float2(len_u, len_v);
-  float2 P_proj = float3_to_float2(P) * inv_len;
-  const float2 D_proj = float3_to_float2(D) * inv_len;
+  float2 P_proj = make_float2(P) * inv_len;
+  const float2 D_proj = make_float2(D) * inv_len;
 
   /* Solve quadratic equation a*t^2 + 2b*t + c = 0. */
   const float a = dot(D_proj, D_proj);
@@ -376,7 +383,8 @@ ccl_device_inline bool ray_infinite_cylinder_intersect(const float3 P,
   b = dot(P_proj, D_proj);
   const float c = dot(P_proj, P_proj) - 1.0f;
 
-  float tmin, tmax;
+  float tmin;
+  float tmax;
   const bool valid = solve_quadratic(a, 2.0f * b, c, tmin, tmax);
 
   *t_range = intervals_intersection(*t_range, {tmin + t_mid, tmax + t_mid});
@@ -417,7 +425,8 @@ ccl_device_inline bool ray_cone_intersect(const float3 axis,
   const float b = 2.0f * (AD * AP - cos_angle_sq * dot(D, P));
   const float c = sqr(AP) - cos_angle_sq * dot(P, P);
 
-  float tmin = 0.0f, tmax = FLT_MAX;
+  float tmin = 0.0f;
+  float tmax = FLT_MAX;
   bool valid = solve_quadratic(a, b, c, tmin, tmax);
 
   /* Check if the intersections are in the same hemisphere as the cone. */
@@ -441,5 +450,3 @@ ccl_device_inline bool ray_cone_intersect(const float3 axis,
 }
 
 CCL_NAMESPACE_END
-
-#endif /* __UTIL_MATH_INTERSECT_H__ */

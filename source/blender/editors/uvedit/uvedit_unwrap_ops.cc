@@ -16,7 +16,6 @@
 #include "DNA_meshdata_types.h"
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
-#include "DNA_scene_defaults.h"
 #include "DNA_scene_types.h"
 
 #include "BKE_global.hh"
@@ -41,7 +40,6 @@
 #include "BKE_customdata.hh"
 #include "BKE_deform.hh"
 #include "BKE_editmesh.hh"
-#include "BKE_global.hh"
 #include "BKE_image.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
@@ -106,9 +104,9 @@ static bool ED_uvedit_ensure_uvs(Object *obedit)
   }
 
   const char *active_uv_name = CustomData_get_active_layer_name(&em->bm->ldata, CD_PROP_FLOAT2);
-  BM_uv_map_ensure_vert_select_attr(em->bm, active_uv_name);
-  BM_uv_map_ensure_edge_select_attr(em->bm, active_uv_name);
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+  BM_uv_map_attr_vert_select_ensure(em->bm, active_uv_name);
+  BM_uv_map_attr_edge_select_ensure(em->bm, active_uv_name);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
 
   /* select new UVs (ignore UV_SYNC_SELECTION in this case) */
   BM_ITER_MESH (efa, &iter, em->bm, BM_FACES_OF_MESH) {
@@ -122,6 +120,22 @@ static bool ED_uvedit_ensure_uvs(Object *obedit)
   }
 
   return true;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Shared Properties
+ * \{ */
+
+static void uv_map_operator_property_correct_aspect(wmOperatorType *ot)
+{
+  RNA_def_boolean(
+      ot->srna,
+      "correct_aspect",
+      true,
+      "Correct Aspect",
+      "Map UVs taking aspect ratio of the image associated with the material into account");
 }
 
 /** \} */
@@ -430,7 +444,7 @@ static bool uvedit_have_selection(const Scene *scene, BMEditMesh *em, const Unwr
   BMFace *efa;
   BMLoop *l;
   BMIter iter, liter;
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
 
   if (offsets.uv == -1) {
     return (em->bm->totfacesel != 0);
@@ -520,7 +534,7 @@ float ED_uvedit_get_aspect_y(Object *ob)
 static bool uvedit_is_face_affected(const Scene *scene,
                                     BMFace *efa,
                                     const UnwrapOptions *options,
-                                    const BMUVOffsets offsets)
+                                    const BMUVOffsets &offsets)
 {
   if (BM_elem_flag_test(efa, BM_ELEM_HIDDEN)) {
     return false;
@@ -550,7 +564,7 @@ static void uvedit_prepare_pinned_indices(ParamHandle *handle,
                                           const Scene *scene,
                                           BMFace *efa,
                                           const UnwrapOptions *options,
-                                          const BMUVOffsets offsets)
+                                          const BMUVOffsets &offsets)
 {
   BMIter liter;
   BMLoop *l;
@@ -572,7 +586,7 @@ static void construct_param_handle_face_add(ParamHandle *handle,
                                             BMFace *efa,
                                             blender::geometry::ParamKey face_index,
                                             const UnwrapOptions *options,
-                                            const BMUVOffsets offsets,
+                                            const BMUVOffsets &offsets,
                                             const int cd_weight_offset,
                                             const int cd_weight_index)
 {
@@ -632,7 +646,7 @@ static void construct_param_edge_set_seams(ParamHandle *handle,
     return; /* Seams are not required with these options. */
   }
 
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(bm);
   if (offsets.uv == -1) {
     return; /* UVs aren't present on BMesh. Nothing to do. */
   }
@@ -685,7 +699,7 @@ static ParamHandle *construct_param_handle(const Scene *scene,
   /* we need the vert indices */
   BM_mesh_elem_index_ensure(bm, BM_VERT);
 
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(bm);
   const int cd_weight_offset = CustomData_get_offset(&bm->vdata, CD_MDEFORMVERT);
   const int cd_weight_index = BKE_object_defgroup_name_index(ob, options->weight_group);
 
@@ -737,7 +751,7 @@ static ParamHandle *construct_param_handle_multi(const Scene *scene,
     BMEditMesh *em = BKE_editmesh_from_object(obedit);
     BMesh *bm = em->bm;
 
-    const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+    const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
 
     if (offsets.uv == -1) {
       continue;
@@ -771,7 +785,7 @@ static ParamHandle *construct_param_handle_multi(const Scene *scene,
 }
 
 static void texface_from_original_index(const Scene *scene,
-                                        const BMUVOffsets offsets,
+                                        const BMUVOffsets &offsets,
                                         BMFace *efa,
                                         int index,
                                         float **r_uv,
@@ -855,7 +869,7 @@ static ParamHandle *construct_param_handle_subsurfed(const Scene *scene,
   /* Similar to the above, we need a way to map edges to their original ones. */
   BMEdge **edgeMap;
 
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
   const int cd_weight_index = BKE_object_defgroup_name_index(ob, options->weight_group);
 
   ParamHandle *handle = new blender::geometry::ParamHandle();
@@ -1157,7 +1171,7 @@ static void minimize_stretch_exit(bContext *C, wmOperator *op, bool cancel)
   op->customdata = nullptr;
 }
 
-static int minimize_stretch_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus minimize_stretch_exec(bContext *C, wmOperator *op)
 {
   int i, iterations;
 
@@ -1174,7 +1188,9 @@ static int minimize_stretch_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int minimize_stretch_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus minimize_stretch_invoke(bContext *C,
+                                                wmOperator *op,
+                                                const wmEvent * /*event*/)
 {
   if (!minimize_stretch_init(C, op)) {
     return OPERATOR_CANCELLED;
@@ -1189,7 +1205,7 @@ static int minimize_stretch_invoke(bContext *C, wmOperator *op, const wmEvent * 
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int minimize_stretch_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus minimize_stretch_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   MinStretch *ms = static_cast<MinStretch *>(op->customdata);
 
@@ -1438,7 +1454,7 @@ static void uvedit_pack_islands_multi(const Scene *scene,
     }
     BLI_assert(bm);
 
-    const BMUVOffsets offsets = BM_uv_map_get_offsets(bm);
+    const BMUVOffsets offsets = BM_uv_map_offsets_get(bm);
     if (offsets.uv == -1) {
       continue;
     }
@@ -1698,7 +1714,7 @@ static void pack_islands_freejob(void *pidv)
   MEM_delete(pid);
 }
 
-static int pack_islands_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus pack_islands_exec(bContext *C, wmOperator *op)
 {
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const Scene *scene = CTX_data_scene(C);
@@ -1874,31 +1890,31 @@ static void uv_pack_islands_ui(bContext * /*C*/, wmOperator *op)
   uiLayout *layout = op->layout;
   uiLayoutSetPropSep(layout, true);
   uiLayoutSetPropDecorate(layout, false);
-  uiItemR(layout, op->ptr, "shape_method", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, op->ptr, "scale", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, op->ptr, "shape_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(layout, op->ptr, "scale", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   {
-    uiItemR(layout, op->ptr, "rotate", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, op->ptr, "rotate", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     uiLayout *sub = uiLayoutRow(layout, true);
     uiLayoutSetActive(sub, RNA_boolean_get(op->ptr, "rotate"));
-    uiItemR(sub, op->ptr, "rotate_method", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(sub, op->ptr, "rotate_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     uiItemS(layout);
   }
-  uiItemR(layout, op->ptr, "margin_method", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, op->ptr, "margin", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, op->ptr, "margin_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(layout, op->ptr, "margin", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   uiItemS(layout);
   {
-    uiItemR(layout, op->ptr, "pin", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, op->ptr, "pin", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     uiLayout *sub = uiLayoutRow(layout, true);
     uiLayoutSetActive(sub, RNA_boolean_get(op->ptr, "pin"));
     uiItemR(sub, op->ptr, "pin_method", UI_ITEM_NONE, IFACE_("Lock Method"), ICON_NONE);
     uiItemS(layout);
   }
-  uiItemR(layout, op->ptr, "merge_overlap", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, op->ptr, "udim_source", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, op->ptr, "merge_overlap", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(layout, op->ptr, "udim_source", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   uiItemS(layout);
 }
 
-static int uv_pack_islands_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus uv_pack_islands_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   return WM_operator_props_popup_confirm_ex(C, op, event, IFACE_("Pack Islands"), IFACE_("Pack"));
 }
@@ -1988,7 +2004,7 @@ void UV_OT_pack_islands(wmOperatorType *ot)
 /** \name Average UV Islands Scale Operator
  * \{ */
 
-static int average_islands_scale_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus average_islands_scale_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -2532,11 +2548,7 @@ static void correct_uv_aspect_per_face(Object *ob, BMEditMesh *em)
 
 static void uv_map_clip_correct_properties_ex(wmOperatorType *ot, bool clip_to_bounds)
 {
-  RNA_def_boolean(ot->srna,
-                  "correct_aspect",
-                  true,
-                  "Correct Aspect",
-                  "Map UVs taking image aspect ratio into account");
+  uv_map_operator_property_correct_aspect(ot);
   /* Optional, since not all unwrapping types need to be clipped. */
   if (clip_to_bounds) {
     RNA_def_boolean(ot->srna,
@@ -2583,7 +2595,7 @@ static void uv_map_clip_correct(const Scene *scene,
 
   for (Object *ob : objects) {
     BMEditMesh *em = BKE_editmesh_from_object(ob);
-    const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+    const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
 
     /* Correct for image aspect ratio. */
     if (correct_aspect) {
@@ -2650,7 +2662,7 @@ static void uv_map_clip_correct(const Scene *scene,
 
     for (Object *ob : objects) {
       BMEditMesh *em = BKE_editmesh_from_object(ob);
-      const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+      const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
 
       BM_ITER_MESH (efa, &iter, em->bm, BM_FACES_OF_MESH) {
         if (!BM_elem_flag_test(efa, BM_ELEM_SELECT)) {
@@ -2756,7 +2768,7 @@ enum {
   UNWRAP_ERROR_NEGATIVE = (1 << 1),
 };
 
-static int unwrap_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus unwrap_exec(bContext *C, wmOperator *op)
 {
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const Scene *scene = CTX_data_scene(C);
@@ -2874,38 +2886,38 @@ static void unwrap_draw(bContext * /*C*/, wmOperator *op)
   uiLayoutSetPropDecorate(layout, false);
 
   /* Main draw call */
-  PointerRNA ptr = RNA_pointer_create(nullptr, op->type->srna, op->properties);
+  PointerRNA ptr = RNA_pointer_create_discrete(nullptr, op->type->srna, op->properties);
 
   uiLayout *col;
 
   col = uiLayoutColumn(layout, true);
-  uiItemR(col, &ptr, "method", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, &ptr, "method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   bool is_slim = RNA_enum_get(op->ptr, "method") == UVCALC_UNWRAP_METHOD_MINIMUM_STRETCH;
 
   if (is_slim) {
-    uiItemR(col, &ptr, "iterations", UI_ITEM_NONE, nullptr, ICON_NONE);
-    uiItemR(col, &ptr, "no_flip", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, &ptr, "iterations", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    uiItemR(col, &ptr, "no_flip", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
     uiItemS(col);
-    uiItemR(col, &ptr, "use_weights", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, &ptr, "use_weights", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
     if (RNA_boolean_get(op->ptr, "use_weights")) {
       col = uiLayoutColumn(layout, true);
-      uiItemR(col, &ptr, "weight_group", UI_ITEM_NONE, nullptr, ICON_NONE);
-      uiItemR(col, &ptr, "weight_factor", UI_ITEM_NONE, nullptr, ICON_NONE);
+      uiItemR(col, &ptr, "weight_group", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+      uiItemR(col, &ptr, "weight_factor", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     }
   }
   else {
-    uiItemR(col, &ptr, "fill_holes", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, &ptr, "fill_holes", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
   uiItemS(col);
-  uiItemR(col, &ptr, "use_subsurf_data", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, &ptr, "use_subsurf_data", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   uiItemS(col);
-  uiItemR(col, &ptr, "correct_aspect", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, &ptr, "margin_method", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, &ptr, "margin", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, &ptr, "correct_aspect", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, &ptr, "margin_method", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, &ptr, "margin", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 void UV_OT_unwrap(wmOperatorType *ot)
@@ -2947,11 +2959,9 @@ void UV_OT_unwrap(wmOperatorType *ot)
                   "Fill Holes",
                   "Virtually fill holes in mesh before unwrapping, to better avoid overlaps and "
                   "preserve symmetry");
-  RNA_def_boolean(ot->srna,
-                  "correct_aspect",
-                  !(tool_settings_default->uvcalc_flag & UVCALC_NO_ASPECT_CORRECT),
-                  "Correct Aspect",
-                  "Map UVs taking image aspect ratio into account");
+
+  uv_map_operator_property_correct_aspect(ot);
+
   RNA_def_boolean(
       ot->srna,
       "use_subsurf_data",
@@ -3141,7 +3151,7 @@ static blender::Vector<blender::float3> smart_uv_project_calculate_project_norma
   return project_normal_array;
 }
 
-static int smart_project_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus smart_project_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -3182,7 +3192,7 @@ static int smart_project_exec(bContext *C, wmOperator *op)
       continue;
     }
 
-    const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+    const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
     BLI_assert(offsets.uv >= 0);
     ThickFace *thick_faces = static_cast<ThickFace *>(
         MEM_mallocN(sizeof(*thick_faces) * em->bm->totface, __func__));
@@ -3320,7 +3330,7 @@ static int smart_project_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int smart_project_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus smart_project_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   return WM_operator_props_popup_confirm_ex(
       C, op, event, IFACE_("Smart UV Project"), IFACE_("Unwrap"));
@@ -3397,9 +3407,9 @@ void UV_OT_smart_project(wmOperatorType *ot)
 /** \name Project UV From View Operator
  * \{ */
 
-static int uv_from_view_exec(bContext *C, wmOperator *op);
+static wmOperatorStatus uv_from_view_exec(bContext *C, wmOperator *op);
 
-static int uv_from_view_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus uv_from_view_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
 {
   View3D *v3d = CTX_wm_view3d(C);
   RegionView3D *rv3d = CTX_wm_region_view3d(C);
@@ -3418,7 +3428,7 @@ static int uv_from_view_invoke(bContext *C, wmOperator *op, const wmEvent * /*ev
   return uv_from_view_exec(C, op);
 }
 
-static int uv_from_view_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus uv_from_view_exec(bContext *C, wmOperator *op)
 {
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const Scene *scene = CTX_data_scene(C);
@@ -3499,7 +3509,7 @@ static int uv_from_view_exec(bContext *C, wmOperator *op)
           changed = true;
         }
 
-        MEM_freeN(uci);
+        BLI_uvproject_camera_info_free(uci);
       }
     }
     else {
@@ -3577,7 +3587,7 @@ void UV_OT_project_from_view(wmOperatorType *ot)
 /** \name Reset UV Operator
  * \{ */
 
-static int reset_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus reset_exec(bContext *C, wmOperator * /*op*/)
 {
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -3755,7 +3765,7 @@ static float uv_sphere_project(const Scene *scene,
                                const float center[3],
                                const float rotmat[3][3],
                                const bool fan,
-                               const BMUVOffsets offsets,
+                               const BMUVOffsets &offsets,
                                const bool only_selected_uvs,
                                const bool use_seams,
                                const float branch_init)
@@ -3832,7 +3842,7 @@ static float uv_sphere_project(const Scene *scene,
   return max_u;
 }
 
-static int sphere_project_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus sphere_project_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   View3D *v3d = CTX_wm_view3d(C);
@@ -3860,7 +3870,7 @@ static int sphere_project_exec(bContext *C, wmOperator *op)
       continue;
     }
 
-    const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+    const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
     float center[3], rotmat[3][3];
 
     uv_map_transform(C, op, rotmat);
@@ -3929,7 +3939,7 @@ static float uv_cylinder_project(const Scene *scene,
                                  const float center[3],
                                  const float rotmat[3][3],
                                  const bool fan,
-                                 const BMUVOffsets offsets,
+                                 const BMUVOffsets &offsets,
                                  const bool only_selected_uvs,
                                  const bool use_seams,
                                  const float branch_init)
@@ -4010,7 +4020,7 @@ static float uv_cylinder_project(const Scene *scene,
   return max_u;
 }
 
-static int cylinder_project_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus cylinder_project_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   View3D *v3d = CTX_wm_view3d(C);
@@ -4038,7 +4048,7 @@ static int cylinder_project_exec(bContext *C, wmOperator *op)
       continue;
     }
 
-    const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+    const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
     float center[3], rotmat[3][3];
 
     uv_map_transform(C, op, rotmat);
@@ -4123,7 +4133,7 @@ static void uvedit_unwrap_cube_project(const Scene *scene,
   float loc[3];
   int cox, coy;
 
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(bm);
 
   if (center) {
     copy_v3_v3(loc, center);
@@ -4158,7 +4168,7 @@ static void uvedit_unwrap_cube_project(const Scene *scene,
   }
 }
 
-static int cube_project_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus cube_project_exec(bContext *C, wmOperator *op)
 {
   const Scene *scene = CTX_data_scene(C);
   View3D *v3d = CTX_wm_view3d(C);

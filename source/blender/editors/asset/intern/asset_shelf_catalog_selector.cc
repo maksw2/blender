@@ -15,6 +15,8 @@
 
 #include "DNA_screen_types.h"
 
+#include "BLI_listbase.h"
+
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
 
@@ -141,7 +143,7 @@ class AssetCatalogSelectorTree : public ui::AbstractTreeView {
 
       uiLayout *subrow = uiLayoutRow(&row, false);
       uiLayoutSetActive(subrow, catalog_path_enabled_);
-      uiItemL(subrow, catalog_item_.get_name().c_str(), ICON_NONE);
+      uiItemL(subrow, catalog_item_.get_name(), ICON_NONE);
       UI_block_layout_set_current(block, &row);
 
       uiBut *toggle_but = uiDefButC(block,
@@ -152,7 +154,7 @@ class AssetCatalogSelectorTree : public ui::AbstractTreeView {
                                     0,
                                     UI_UNIT_X,
                                     UI_UNIT_Y,
-                                    (char *)&catalog_path_enabled_,
+                                    &catalog_path_enabled_,
                                     0,
                                     0,
                                     TIP_("Toggle catalog visibility in the asset shelf"));
@@ -183,7 +185,8 @@ void library_selector_draw(const bContext *C, uiLayout *layout, AssetShelf &shel
 {
   uiLayoutSetOperatorContext(layout, WM_OP_INVOKE_DEFAULT);
 
-  PointerRNA shelf_ptr = RNA_pointer_create(&CTX_wm_screen(C)->id, &RNA_AssetShelf, &shelf);
+  PointerRNA shelf_ptr = RNA_pointer_create_discrete(
+      &CTX_wm_screen(C)->id, &RNA_AssetShelf, &shelf);
 
   uiLayout *row = uiLayoutRow(layout, true);
   uiItemR(row, &shelf_ptr, "asset_library_reference", UI_ITEM_NONE, "", ICON_NONE);
@@ -226,7 +229,7 @@ void catalog_selector_panel_register(ARegionType *region_type)
     return;
   }
 
-  PanelType *pt = MEM_cnew<PanelType>(__func__);
+  PanelType *pt = MEM_callocN<PanelType>(__func__);
   STRNCPY(pt->idname, "ASSETSHELF_PT_catalog_selector");
   STRNCPY(pt->label, N_("Catalog Selector"));
   STRNCPY(pt->translation_context, BLT_I18NCONTEXT_DEFAULT_BPYRNA);

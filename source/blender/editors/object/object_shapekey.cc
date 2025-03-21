@@ -6,7 +6,6 @@
  * \ingroup edobj
  */
 
-#include <cmath>
 #include <cstring>
 
 #ifndef WIN32
@@ -17,6 +16,7 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "BLI_listbase.h"
 #include "BLI_math_vector.h"
 #include "BLI_utildefines.h"
 
@@ -30,13 +30,12 @@
 #include "BKE_context.hh"
 #include "BKE_key.hh"
 #include "BKE_lattice.hh"
+#include "BKE_library.hh"
 #include "BKE_object.hh"
 #include "BKE_report.hh"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
-
-#include "BLI_sys_types.h" /* for intptr_t support */
 
 #include "ED_curve.hh"
 #include "ED_lattice.hh"
@@ -136,8 +135,8 @@ bool shape_key_report_if_any_locked(Object *ob, ReportList *reports)
 static void ED_object_shape_key_add(bContext *C, Object *ob, const bool from_mix)
 {
   Main *bmain = CTX_data_main(C);
-  KeyBlock *kb;
-  if ((kb = BKE_object_shapekey_insert(bmain, ob, nullptr, from_mix))) {
+  KeyBlock *kb = BKE_object_shapekey_insert(bmain, ob, nullptr, from_mix);
+  if (kb) {
     Key *key = BKE_key_from_object(ob);
     /* for absolute shape keys, new keys may not be added last */
     ob->shapenr = BLI_findindex(&key->block, kb) + 1;
@@ -340,7 +339,7 @@ static bool shape_key_move_poll(bContext *C)
 /** \name Shape Key Add Operator
  * \{ */
 
-static int shape_key_add_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus shape_key_add_exec(bContext *C, wmOperator *op)
 {
   Object *ob = context_object(C);
   const bool from_mix = RNA_boolean_get(op->ptr, "from_mix");
@@ -381,7 +380,7 @@ void OBJECT_OT_shape_key_add(wmOperatorType *ot)
 /** \name Shape Key Remove Operator
  * \{ */
 
-static int shape_key_remove_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus shape_key_remove_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   Object *ob = context_object(C);
@@ -474,7 +473,7 @@ void OBJECT_OT_shape_key_remove(wmOperatorType *ot)
 /** \name Shape Key Clear Operator
  * \{ */
 
-static int shape_key_clear_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus shape_key_clear_exec(bContext *C, wmOperator * /*op*/)
 {
   Object *ob = context_object(C);
   Key *key = BKE_key_from_object(ob);
@@ -510,7 +509,7 @@ void OBJECT_OT_shape_key_clear(wmOperatorType *ot)
 }
 
 /* starting point and step size could be optional */
-static int shape_key_retime_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus shape_key_retime_exec(bContext *C, wmOperator * /*op*/)
 {
   Object *ob = context_object(C);
   Key *key = BKE_key_from_object(ob);
@@ -552,7 +551,7 @@ void OBJECT_OT_shape_key_retime(wmOperatorType *ot)
 /** \name Shape Key Mirror Operator
  * \{ */
 
-static int shape_key_mirror_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus shape_key_mirror_exec(bContext *C, wmOperator *op)
 {
   Object *ob = context_object(C);
   int totmirr = 0, totfail = 0;
@@ -607,7 +606,7 @@ enum {
   KB_MOVE_BOTTOM = 2,
 };
 
-static int shape_key_move_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus shape_key_move_exec(bContext *C, wmOperator *op)
 {
   Object *ob = context_object(C);
 
@@ -677,7 +676,7 @@ enum {
   SHAPE_KEY_UNLOCK,
 };
 
-static int shape_key_lock_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus shape_key_lock_exec(bContext *C, wmOperator *op)
 {
   Object *ob = CTX_data_active_object(C);
   const int action = RNA_enum_get(op->ptr, "action");

@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 4.4.0 Alpha (b'62b2bb48e8bf')\n"
+"Project-Id-Version: Blender 4.4.0 Release Candidate (b'f896f7ffc32a')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-12-02 16:18+0000\n"
+"POT-Creation-Date: 2025-03-17 16:18+0000\n"
 "PO-Revision-Date: \n"
 "Last-Translator: Yudhir Khanal <yudhir.khanal@gmail.com>\n"
 "Language-Team: Yudhir\n"
@@ -61,10 +61,6 @@ msgid "Weight"
 msgstr "भार"
 
 
-msgid "Camera"
-msgstr "क्यामेरा"
-
-
 msgid "Level"
 msgstr "श्रेडी "
 
@@ -109,10 +105,6 @@ msgid "Local Location"
 msgstr "Local स्थान"
 
 
-msgid "Direction"
-msgstr "दिशा "
-
-
 msgid "Rotation"
 msgstr "घुमाव"
 
@@ -123,6 +115,10 @@ msgstr "डाल "
 
 msgid "Inverse Kinematics"
 msgstr "बिपरित 'गति-बिज्ञान'"
+
+
+msgid "Camera"
+msgstr "क्यामेरा"
 
 
 msgid "Location"
@@ -161,6 +157,10 @@ msgid "Reverse"
 msgstr "उल्टो"
 
 
+msgid "Direction"
+msgstr "दिशा "
+
+
 msgid "Path"
 msgstr "ठेगाना (पथ)"
 
@@ -171,6 +171,10 @@ msgstr "कम"
 
 msgid "Max"
 msgstr "अधिक "
+
+
+msgid "Pattern"
+msgstr "बुट्टा"
 
 
 msgid "Lock Rotation"
@@ -191,10 +195,6 @@ msgstr "देखाउन"
 
 msgid "Stiffness"
 msgstr "कडापन"
-
-
-msgid "Pattern"
-msgstr "बुट्टा"
 
 
 msgid "Names"

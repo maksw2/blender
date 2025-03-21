@@ -38,14 +38,6 @@ static IndexMask calc_mesh_edge_visibility(const MeshRenderData &mr,
   return visible;
 }
 
-/* In the GPU vertex buffers, the value for each vertex is duplicated to each of its vertex
- * corners. So the edges on the GPU connect face corners rather than vertices. */
-static uint2 edge_from_corners(const IndexRange face, const int corner)
-{
-  const int corner_next = bke::mesh::face_corner_next(face, corner);
-  return uint2(corner, corner_next);
-}
-
 static void fill_loose_lines_ibo(const MeshRenderData &mr,
                                  const IndexMask &visible,
                                  MutableSpan<uint2> data)
@@ -260,10 +252,8 @@ static void extract_lines_loose_geom_subdiv(const DRWSubdivCache &subdiv_cache,
   const int loose_edges_num = subdiv_loose_edges_num(mr, subdiv_cache);
 
   /* Update flags for loose edges, points are already handled. */
-  static GPUVertFormat format;
-  if (format.attr_len == 0) {
-    GPU_vertformat_attr_add(&format, "data", GPU_COMP_U32, 1, GPU_FETCH_INT);
-  }
+  static const GPUVertFormat format = GPU_vertformat_from_attribute(
+      "data", GPU_COMP_U32, 1, GPU_FETCH_INT);
 
   gpu::VertBuf *flags = GPU_vertbuf_calloc();
   GPU_vertbuf_init_with_format(*flags, format);

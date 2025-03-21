@@ -6,50 +6,26 @@
  * \ingroup edgpencil
  */
 
-#include <algorithm>
-#include <cmath>
-#include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
-#include "BLI_ghash.h"
-#include "BLI_hash.h"
-#include "BLI_lasso_2d.hh"
-#include "BLI_math_color.h"
 #include "BLI_math_matrix.h"
-#include "BLI_math_vector.hh"
-#include "BLI_time.h"
+#include "BLI_math_vector.h"
 #include "BLI_utildefines.h"
 
-#include "BLT_translation.hh"
-
-#include "DNA_brush_types.h"
 #include "DNA_gpencil_legacy_types.h"
 #include "DNA_material_types.h"
-#include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
 #include "DNA_view3d_types.h"
 
-#include "BKE_action.hh"
-#include "BKE_brush.hh"
-#include "BKE_collection.hh"
-#include "BKE_colortools.hh"
 #include "BKE_context.hh"
-#include "BKE_deform.hh"
-#include "BKE_gpencil_geom_legacy.h"
 #include "BKE_gpencil_legacy.h"
-#include "BKE_main.hh"
-#include "BKE_material.h"
-#include "BKE_object.hh"
 #include "BKE_paint.hh"
-#include "BKE_preview_image.hh"
 #include "BKE_tracking.h"
 
 #include "WM_api.hh"
@@ -57,60 +33,23 @@
 #include "WM_types.hh"
 
 #include "RNA_access.hh"
-#include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 #include "RNA_prototypes.hh"
 
-#include "UI_resources.hh"
 #include "UI_view2d.hh"
 
 #include "ED_clip.hh"
 #include "ED_gpencil_legacy.hh"
 #include "ED_object.hh"
 #include "ED_select_utils.hh"
-#include "ED_transform_snap_object_context.hh"
 #include "ED_view3d.hh"
 
-#include "GPU_immediate.hh"
-#include "GPU_immediate_util.hh"
-#include "GPU_state.hh"
-
-#include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_query.hh"
 
 #include "gpencil_intern.hh"
 
 /* ******************************************************** */
 /* Context Wrangling... */
-
-bGPdata **ED_gpencil_data_get_pointers_direct(ScrArea *area, Object *ob, PointerRNA *r_ptr)
-{
-  /* if there's an active area, check if the particular editor may
-   * have defined any special Grease Pencil context for editing...
-   */
-  if (area) {
-    switch (area->spacetype) {
-      case SPACE_PROPERTIES: /* properties */
-      case SPACE_INFO:       /* header info */
-      case SPACE_TOPBAR:     /* Top-bar */
-      case SPACE_VIEW3D:     /* 3D-View */
-      {
-        if (ob && (ob->type == OB_GPENCIL_LEGACY)) {
-          /* GP Object. */
-          if (r_ptr) {
-            *r_ptr = RNA_id_pointer_create(&ob->id);
-          }
-          return (bGPdata **)&ob->data;
-        }
-        return nullptr;
-      }
-      default: /* Unsupported space. */
-        return nullptr;
-    }
-  }
-
-  return nullptr;
-}
 
 bGPdata **ED_annotation_data_get_pointers_direct(ID *screen_id,
                                                  ScrArea *area,
@@ -161,7 +100,7 @@ bGPdata **ED_annotation_data_get_pointers_direct(ID *screen_id,
         /* For now, Grease Pencil data is associated with the space
          * (actually preview region only). */
         if (r_ptr) {
-          *r_ptr = RNA_pointer_create(screen_id, &RNA_SpaceSequenceEditor, sseq);
+          *r_ptr = RNA_pointer_create_discrete(screen_id, &RNA_SpaceSequenceEditor, sseq);
         }
         return &sseq->gpd;
       }
@@ -171,7 +110,7 @@ bGPdata **ED_annotation_data_get_pointers_direct(ID *screen_id,
 
         /* For now, Grease Pencil data is associated with the space... */
         if (r_ptr) {
-          *r_ptr = RNA_pointer_create(screen_id, &RNA_SpaceImageEditor, sima);
+          *r_ptr = RNA_pointer_create_discrete(screen_id, &RNA_SpaceImageEditor, sima);
         }
         return &sima->gpd;
       }
@@ -191,7 +130,7 @@ bGPdata **ED_annotation_data_get_pointers_direct(ID *screen_id,
             }
 
             if (r_ptr) {
-              *r_ptr = RNA_pointer_create(&clip->id, &RNA_MovieTrackingTrack, track);
+              *r_ptr = RNA_pointer_create_discrete(&clip->id, &RNA_MovieTrackingTrack, track);
             }
             return &track->gpd;
           }
@@ -208,14 +147,6 @@ bGPdata **ED_annotation_data_get_pointers_direct(ID *screen_id,
   }
 
   return nullptr;
-}
-
-bGPdata **ED_gpencil_data_get_pointers(const bContext *C, PointerRNA *r_ptr)
-{
-  ScrArea *area = CTX_wm_area(C);
-  Object *ob = CTX_data_active_object(C);
-
-  return ED_gpencil_data_get_pointers_direct(area, ob, r_ptr);
 }
 
 bGPdata **ED_annotation_data_get_pointers(const bContext *C, PointerRNA *r_ptr)
@@ -326,39 +257,6 @@ void gpencil_point_to_xy(
       *r_x = int((pt->x / 100) * BLI_rctf_size_x(subrect)) + subrect->xmin;
       *r_y = int((pt->y / 100) * BLI_rctf_size_y(subrect)) + subrect->ymin;
     }
-  }
-}
-
-void ED_gpencil_drawing_reference_get(const Scene *scene,
-                                      const Object *ob,
-                                      char align_flag,
-                                      float r_vec[3])
-{
-  const float *fp = scene->cursor.location;
-
-  /* if using a gpencil object at cursor mode, can use the location of the object */
-  if (align_flag & GP_PROJECT_VIEWSPACE) {
-    if (ob && (ob->type == OB_GPENCIL_LEGACY)) {
-      /* fallback (no strokes) - use cursor or object location */
-      if (align_flag & GP_PROJECT_CURSOR) {
-        /* use 3D-cursor */
-        copy_v3_v3(r_vec, fp);
-      }
-      else {
-        /* use object location */
-        copy_v3_v3(r_vec, ob->object_to_world().location());
-        /* Apply layer offset. */
-        bGPdata *gpd = static_cast<bGPdata *>(ob->data);
-        bGPDlayer *gpl = BKE_gpencil_layer_active_get(gpd);
-        if (gpl != nullptr) {
-          add_v3_v3(r_vec, gpl->layer_mat[3]);
-        }
-      }
-    }
-  }
-  else {
-    /* use 3D-cursor */
-    copy_v3_v3(r_vec, fp);
   }
 }
 

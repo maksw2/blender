@@ -7,17 +7,13 @@
  */
 
 #include "BLI_array.hh"
-#include "BLI_hash.h"
-#include "BLI_rand.h"
 #include "BLI_sort.hh"
-#include "BLI_task.h"
 
 #include "BLT_translation.hh"
 
 #include "BLO_read_write.hh"
 
 #include "DNA_defaults.h"
-#include "DNA_gpencil_modifier_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
@@ -131,8 +127,11 @@ static Array<int> point_counts_to_keep_concurrent(const bke::CurvesGeometry &cur
 
   auto get_stroke_factor = [&](const float factor, const int index) {
     const bool stroke_cyclic = cyclic[index];
-    const float max_factor = max_length /
-                             curves.evaluated_length_total_for_curve(index, stroke_cyclic);
+    const float total_length = curves.evaluated_length_total_for_curve(index, stroke_cyclic);
+    if (total_length == 0) {
+      return factor > 0.5f ? 1.0f : 0.0f;
+    }
+    const float max_factor = max_length / total_length;
     if (time_alignment == MOD_GREASE_PENCIL_BUILD_TIMEALIGN_START) {
       if (clamp_points) {
         return std::clamp(factor * max_factor, 0.0f, 1.0f);
@@ -502,7 +501,8 @@ static float get_factor_from_draw_speed(const bke::CurvesGeometry &curves,
     const float previous_end_time = previous_start_time + previous_delta_time;
 
     const float shifted_start_time = init_times[curve] - accumulated_shift_delta_time;
-    const float gap_delta_time = math::min(shifted_start_time - previous_end_time, max_gap);
+    const float gap_delta_time = math::min(math::abs(shifted_start_time - previous_end_time),
+                                           max_gap);
 
     start_times[curve] = previous_end_time + gap_delta_time;
     accumulated_shift_delta_time += math::max(shifted_start_time - start_times[curve], 0.0f);
@@ -751,9 +751,9 @@ static void panel_draw(const bContext *C, Panel *panel)
   uiLayoutSetPropSep(layout, true);
 
   /* First: Build mode and build settings. */
-  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   if (mode == MOD_GREASE_PENCIL_BUILD_MODE_SEQUENTIAL) {
-    uiItemR(layout, ptr, "transition", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, ptr, "transition", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
   if (mode == MOD_GREASE_PENCIL_BUILD_MODE_CONCURRENT) {
     /* Concurrent mode doesn't support MOD_GREASE_PENCIL_BUILD_TIMEMODE_DRAWSPEED, so unset it. */
@@ -761,43 +761,45 @@ static void panel_draw(const bContext *C, Panel *panel)
       RNA_enum_set(ptr, "time_mode", MOD_GREASE_PENCIL_BUILD_TIMEMODE_FRAMES);
       time_mode = MOD_GREASE_PENCIL_BUILD_TIMEMODE_FRAMES;
     }
-    uiItemR(layout, ptr, "transition", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, ptr, "transition", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
   uiItemS(layout);
 
   /* Second: Time mode and time settings. */
 
-  uiItemR(layout, ptr, "time_mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "time_mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   if (mode == MOD_GREASE_PENCIL_BUILD_MODE_CONCURRENT) {
-    uiItemR(layout, ptr, "concurrent_time_alignment", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, ptr, "concurrent_time_alignment", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
   switch (time_mode) {
     case MOD_GREASE_PENCIL_BUILD_TIMEMODE_DRAWSPEED:
-      uiItemR(layout, ptr, "speed_factor", UI_ITEM_NONE, nullptr, ICON_NONE);
-      uiItemR(layout, ptr, "speed_maxgap", UI_ITEM_NONE, nullptr, ICON_NONE);
+      uiItemR(layout, ptr, "speed_factor", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+      uiItemR(layout, ptr, "speed_maxgap", UI_ITEM_NONE, std::nullopt, ICON_NONE);
       break;
     case MOD_GREASE_PENCIL_BUILD_TIMEMODE_FRAMES:
       uiItemR(layout, ptr, "length", UI_ITEM_NONE, IFACE_("Frames"), ICON_NONE);
       if (mode != MOD_GREASE_PENCIL_BUILD_MODE_ADDITIVE) {
-        uiItemR(layout, ptr, "start_delay", UI_ITEM_NONE, nullptr, ICON_NONE);
+        uiItemR(layout, ptr, "start_delay", UI_ITEM_NONE, std::nullopt, ICON_NONE);
       }
       break;
     case MOD_GREASE_PENCIL_BUILD_TIMEMODE_PERCENTAGE:
-      uiItemR(layout, ptr, "percentage_factor", UI_ITEM_NONE, nullptr, ICON_NONE);
+      uiItemR(layout, ptr, "percentage_factor", UI_ITEM_NONE, std::nullopt, ICON_NONE);
       break;
     default:
       break;
   }
   uiItemS(layout);
-  uiItemR(layout, ptr, "object", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "object", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  if (uiLayout *panel = uiLayoutPanelProp(
-          C, layout, ptr, "open_frame_range_panel", IFACE_("Effective Range")))
+  if (uiLayout *panel = uiLayoutPanelPropWithBoolHeader(C,
+                                                        layout,
+                                                        ptr,
+                                                        "open_frame_range_panel",
+                                                        ptr,
+                                                        "use_restrict_frame_range",
+                                                        IFACE_("Effective Range"))
+                            .body)
   {
-    uiLayoutSetPropSep(panel, true);
-    uiItemR(
-        panel, ptr, "use_restrict_frame_range", UI_ITEM_NONE, IFACE_("Custom Range"), ICON_NONE);
-
     const bool active = RNA_boolean_get(ptr, "use_restrict_frame_range");
     uiLayout *col = uiLayoutColumn(panel, false);
     uiLayoutSetActive(col, active);
@@ -805,10 +807,11 @@ static void panel_draw(const bContext *C, Panel *panel)
     uiItemR(col, ptr, "frame_end", UI_ITEM_NONE, IFACE_("End"), ICON_NONE);
   }
 
-  if (uiLayout *panel = uiLayoutPanelProp(C, layout, ptr, "open_fading_panel", IFACE_("Fading"))) {
-    uiLayoutSetPropSep(panel, true);
-    uiItemR(panel, ptr, "use_fading", UI_ITEM_NONE, IFACE_("Fade"), ICON_NONE);
-
+  if (uiLayout *panel =
+          uiLayoutPanelPropWithBoolHeader(
+              C, layout, ptr, "open_fading_panel", ptr, "use_fading", IFACE_("Fading"))
+              .body)
+  {
     const bool active = RNA_boolean_get(ptr, "use_fading");
     uiLayout *col = uiLayoutColumn(panel, false);
     uiLayoutSetActive(col, active);

@@ -24,20 +24,20 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_blenlib.h"
 #include "BLI_endian_switch.h"
 #include "BLI_ghash.h"
+#include "BLI_listbase.h"
 #include "BLI_math_color.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector.h"
 #include "BLI_session_uid.h"
+#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
 
 #include "BLT_translation.hh"
-
-#include "BLO_read_write.hh"
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
@@ -64,7 +64,6 @@
 
 #include "RNA_access.hh"
 #include "RNA_path.hh"
-#include "RNA_prototypes.hh"
 
 #include "BLO_read_write.hh"
 
@@ -72,6 +71,7 @@
 #include "ANIM_action_legacy.hh"
 #include "ANIM_bone_collections.hh"
 #include "ANIM_bonecolor.hh"
+#include "ANIM_versioning.hh"
 
 #include "CLG_log.h"
 
@@ -176,13 +176,13 @@ static void action_copy_data(Main * /*bmain*/,
   action_dst.last_slot_handle = action_src.last_slot_handle;
 
   /* Layers, and (recursively) Strips. */
-  action_dst.layer_array = MEM_cnew_array<ActionLayer *>(action_src.layer_array_num, __func__);
+  action_dst.layer_array = MEM_calloc_arrayN<ActionLayer *>(action_src.layer_array_num, __func__);
   for (int i : action_src.layers().index_range()) {
     action_dst.layer_array[i] = action_src.layer(i)->duplicate_with_shallow_strip_copies(__func__);
   }
 
   /* Strip data. */
-  action_dst.strip_keyframe_data_array = MEM_cnew_array<ActionStripKeyframeData *>(
+  action_dst.strip_keyframe_data_array = MEM_calloc_arrayN<ActionStripKeyframeData *>(
       action_src.strip_keyframe_data_array_num, __func__);
   for (int i : action_src.strip_keyframe_data().index_range()) {
     action_dst.strip_keyframe_data_array[i] = MEM_new<animrig::StripKeyframeData>(
@@ -190,7 +190,7 @@ static void action_copy_data(Main * /*bmain*/,
   }
 
   /* Slots. */
-  action_dst.slot_array = MEM_cnew_array<ActionSlot *>(action_src.slot_array_num, __func__);
+  action_dst.slot_array = MEM_calloc_arrayN<ActionSlot *>(action_src.slot_array_num, __func__);
   for (int i : action_src.slots().index_range()) {
     action_dst.slot_array[i] = MEM_new<animrig::Slot>(__func__, *action_src.slot(i));
   }
@@ -256,42 +256,32 @@ static void action_foreach_id(ID *id, LibraryForeachIDData *data)
    * NOTE: early-returns by BKE_LIB_FOREACHID_PROCESS_... macros are forbidden in non-readonly
    * cases (see #IDWALK_RET_STOP_ITER documentation). */
 
-  const int flag = BKE_lib_query_foreachid_process_flags_get(data);
-  const bool is_readonly = flag & IDWALK_READONLY;
+  const LibraryForeachIDFlag flag = BKE_lib_query_foreachid_process_flags_get(data);
+  constexpr LibraryForeachIDCallbackFlag idwalk_flags = IDWALK_CB_NEVER_SELF | IDWALK_CB_LOOPBACK;
 
-  constexpr int idwalk_flags = IDWALK_CB_NEVER_SELF | IDWALK_CB_LOOPBACK;
-
+  /* Note that `bmain` can be `nullptr`. An example is in
+   * `deg_eval_copy_on_write.cc`, function `deg_expand_eval_copy_datablock`. */
   Main *bmain = BKE_lib_query_foreachid_process_main_get(data);
 
-  if (is_readonly) {
-    /* bmain is still necessary to have, because in the read-only mode the cache
-     * may still be dirty, and we have no way to check. Without that knowledge
-     * it's possible to report invalid pointers, which should be avoided at all
-     * time. */
-    if (bmain) {
-      for (animrig::Slot *slot : action.slots()) {
-        for (ID *slot_user : slot->users(*bmain)) {
-          BKE_LIB_FOREACHID_PROCESS_ID(data, slot_user, idwalk_flags);
-        }
-      }
-    }
-  }
-  else if (bmain && !bmain->is_action_slot_to_id_map_dirty) {
-    /* Because BKE_library_foreach_ID_link() can be called with bmain=nullptr,
-     * there are cases where we do not know which `main` this is called for. An example is in
-     * `deg_eval_copy_on_write.cc`, function `deg_expand_eval_copy_datablock`.
-     *
-     * Also if the cache is already dirty, we shouldn't loop over the pointers in there. If we
-     * were to call `slot->users(*bmain)` in that case, it would rebuild the cache. But then
-     * another ID using the same Action may also trigger a rebuild of the cache, because another
-     * user pointer changed, forcing way too many rebuilds of the user map.  */
-    bool should_invalidate = false;
+  /* This function should not rebuild the slot user map, because that in turn loops over all IDs.
+   * It is really up to the caller to ensure things are clean when the slot user pointers should be
+   * reported.
+   *
+   * For things like ID remapping it's fine to skip the pointers when they're dirty. The next time
+   * somebody tries to actually use them, they will be rebuilt anyway. */
+  const bool slot_user_cache_is_known_clean = bmain && !bmain->is_action_slot_to_id_map_dirty;
 
+  if (slot_user_cache_is_known_clean) {
+    bool should_invalidate = false;
     for (animrig::Slot *slot : action.slots()) {
-      for (ID *slot_user : slot->runtime_users()) {
-        ID *old_pointer = slot_user;
+      for (ID *&slot_user : slot->runtime_users()) {
+        ID *const old_pointer = slot_user;
         BKE_LIB_FOREACHID_PROCESS_ID(data, slot_user, idwalk_flags);
-        /* If slot_user changed, the cache should be invalidated. */
+        /* If slot_user changed, the cache should be invalidated. Not all pointer changes are
+         * semantically correct for our use. For example, when ID-remapping is used to replace
+         * MECube with MESuzanne. If MECube is animated by some slot before the remap, it will
+         * remain animated by that slot after the remap, even when all `object->data` pointers now
+         * reference MESuzanne instead. */
         should_invalidate |= (slot_user != old_pointer);
       }
     }
@@ -299,6 +289,14 @@ static void action_foreach_id(ID *id, LibraryForeachIDData *data)
     if (should_invalidate) {
       animrig::Slot::users_invalidate(*bmain);
     }
+
+#ifndef NDEBUG
+    const bool is_readonly = flag & IDWALK_READONLY;
+    if (is_readonly) {
+      BLI_assert_msg(!should_invalidate,
+                     "pointers were changed while IDWALK_READONLY flag was set");
+    }
+#endif
   }
 
   /* Note that, even though `BKE_fcurve_foreach_id()` exists, it is not called here. That function
@@ -514,6 +512,20 @@ static void action_blend_write(BlendWriter *writer, ID *id, const void *id_addre
 
     const animrig::Slot &first_slot = *action.slot(0);
 
+    /* The forward-compat animation data we write is for IDs of the type that
+     * the first slot is intended for. Therefore, the Action should have that
+     * `idroot` when loaded in old versions of Blender.
+     *
+     * Note that if there is no slot, this code will never run and therefore the
+     * action will be written with `idroot = 0`. Despite that, old
+     * pre-slotted-action files are still guaranteed to round-trip losslessly,
+     * because old actions (even when empty) are versioned to have one slot with
+     * `idtype` set to whatever the old action's `idroot` was. In other words,
+     * zero-slot actions can only be created via non-legacy features, and
+     * therefore represent animation data that wasn't purely from old files
+     * anyway. */
+    action.idroot = first_slot.idtype;
+
     /* Note: channel group forward-compat data requires that fcurve
      * forward-compat legacy data is also written, and vice-versa. Both have
      * pointers to each other that won't resolve properly when loaded in older
@@ -534,6 +546,10 @@ static void action_blend_write(BlendWriter *writer, ID *id, const void *id_addre
   write_slots(writer, action.slots());
 
   if (do_write_forward_compat) {
+    /* Set the idroot back to 'unspecified', as it always should be for layered
+     * Actions. */
+    action.idroot = 0;
+
     /* The pointers to the first/last FCurve in the `action.curves` have already
      * been written as part of the Action struct data, so they can be cleared
      * here, such that the code writing legacy fcurves below does nothing (as
@@ -682,11 +698,20 @@ static void action_blend_read_data(BlendDataReader *reader, ID *id)
   read_layers(reader, action);
   read_slots(reader, action);
 
-  if (action.is_action_layered()) {
+  if (animrig::versioning::action_is_layered(action)) {
     /* Clear the forward-compatible storage (see action_blend_write_data()). */
-    BLI_listbase_clear(&action.chanbase);
     BLI_listbase_clear(&action.curves);
     BLI_listbase_clear(&action.groups);
+
+    /* Should never be stored as part of the forward-compatible data in a
+     * layered action, and thus should always be empty here. */
+    BLI_assert(BLI_listbase_is_empty(&action.chanbase));
+
+    /* Layered actions should always have `idroot == 0`, but when writing an
+     * action to a blend file `idroot` is typically set otherwise for forward
+     * compatibility reasons (see `action_blend_write()`). So we set it to zero
+     * here to put it back as it should be. */
+    action.idroot = 0;
   }
   else {
     /* Read legacy data. */
@@ -860,7 +885,7 @@ void action_group_colors_set(bActionGroup *grp, const BoneColor *color)
 {
   const blender::animrig::BoneColor &bone_color = color->wrap();
 
-  grp->customCol = bone_color.palette_index;
+  grp->customCol = int(bone_color.palette_index);
 
   const ThemeWireColor *effective_color = bone_color.effective_color();
   if (effective_color) {
@@ -884,7 +909,7 @@ bActionGroup *action_groups_add_new(bAction *act, const char name[])
   BLI_assert(act->wrap().is_action_legacy());
 
   /* allocate a new one */
-  agrp = static_cast<bActionGroup *>(MEM_callocN(sizeof(bActionGroup), "bActionGroup"));
+  agrp = MEM_callocN<bActionGroup>("bActionGroup");
 
   /* make it selected, with default name */
   agrp->flag = AGRP_SELECTED;
@@ -1117,7 +1142,7 @@ bPoseChannel *BKE_pose_channel_ensure(bPose *pose, const char *name)
   }
 
   /* If not, create it and add it */
-  chan = static_cast<bPoseChannel *>(MEM_callocN(sizeof(bPoseChannel), "verifyPoseChannel"));
+  chan = MEM_callocN<bPoseChannel>("verifyPoseChannel");
 
   BKE_pose_channel_session_uid_generate(chan);
 
@@ -1131,7 +1156,7 @@ bPoseChannel *BKE_pose_channel_ensure(bPose *pose, const char *name)
   /* init vars to prevent math errors */
   unit_qt(chan->quat);
   unit_axis_angle(chan->rotAxis, &chan->rotAngle);
-  chan->size[0] = chan->size[1] = chan->size[2] = 1.0f;
+  chan->scale[0] = chan->scale[1] = chan->scale[2] = 1.0f;
 
   copy_v3_fl(chan->scale_in, 1.0f);
   copy_v3_fl(chan->scale_out, 1.0f);
@@ -1260,7 +1285,7 @@ void BKE_pose_copy_data_ex(bPose **dst,
     return;
   }
 
-  outPose = static_cast<bPose *>(MEM_callocN(sizeof(bPose), "pose"));
+  outPose = MEM_callocN<bPose>("pose");
 
   BLI_duplicatelist(&outPose->chanbase, &src->chanbase);
 
@@ -1354,7 +1379,7 @@ void BKE_pose_ikparam_init(bPose *pose)
   bItasc *itasc;
   switch (pose->iksolver) {
     case IKSOLVER_ITASC:
-      itasc = static_cast<bItasc *>(MEM_callocN(sizeof(bItasc), "itasc"));
+      itasc = MEM_callocN<bItasc>("itasc");
       BKE_pose_itasc_init(itasc);
       pose->ikparam = itasc;
       break;
@@ -1753,7 +1778,7 @@ bActionGroup *BKE_pose_add_group(bPose *pose, const char *name)
     name = DATA_("Group");
   }
 
-  grp = static_cast<bActionGroup *>(MEM_callocN(sizeof(bActionGroup), "PoseGroup"));
+  grp = MEM_callocN<bActionGroup>("PoseGroup");
   STRNCPY(grp->name, name);
   BLI_addtail(&pose->agroups, grp);
   BLI_uniquename(&pose->agroups, grp, name, '.', offsetof(bActionGroup, name), sizeof(grp->name));
@@ -1831,7 +1856,7 @@ void BKE_pose_rest(bPose *pose, bool selected_bones_only)
     zero_v3(pchan->eul);
     unit_qt(pchan->quat);
     unit_axis_angle(pchan->rotAxis, &pchan->rotAngle);
-    pchan->size[0] = pchan->size[1] = pchan->size[2] = 1.0f;
+    pchan->scale[0] = pchan->scale[1] = pchan->scale[2] = 1.0f;
 
     pchan->roll1 = pchan->roll2 = 0.0f;
     pchan->curve_in_x = pchan->curve_in_z = 0.0f;
@@ -1841,7 +1866,7 @@ void BKE_pose_rest(bPose *pose, bool selected_bones_only)
     copy_v3_fl(pchan->scale_in, 1.0f);
     copy_v3_fl(pchan->scale_out, 1.0f);
 
-    pchan->flag &= ~(POSE_LOC | POSE_ROT | POSE_SIZE | POSE_BBONE_SHAPE);
+    pchan->flag &= ~(POSE_LOC | POSE_ROT | POSE_SCALE | POSE_BBONE_SHAPE);
   }
 }
 
@@ -1854,7 +1879,7 @@ void BKE_pose_copy_pchan_result(bPoseChannel *pchanto, const bPoseChannel *pchan
   copy_v3_v3(pchanto->loc, pchanfrom->loc);
   copy_qt_qt(pchanto->quat, pchanfrom->quat);
   copy_v3_v3(pchanto->eul, pchanfrom->eul);
-  copy_v3_v3(pchanto->size, pchanfrom->size);
+  copy_v3_v3(pchanto->scale, pchanfrom->scale);
 
   copy_v3_v3(pchanto->pose_head, pchanfrom->pose_head);
   copy_v3_v3(pchanto->pose_tail, pchanfrom->pose_tail);

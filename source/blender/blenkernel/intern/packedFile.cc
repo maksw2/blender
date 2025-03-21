@@ -6,6 +6,7 @@
  * \ingroup bke
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -18,6 +19,8 @@
 #include "MEM_guardedalloc.h"
 #include <cstring>
 
+#include "AS_essentials_library.hh"
+
 #include "DNA_ID.h"
 #include "DNA_image_types.h"
 #include "DNA_modifier_types.h"
@@ -26,13 +29,16 @@
 #include "DNA_vfont_types.h"
 #include "DNA_volume_types.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
+#include "BLI_path_utils.hh"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_bake_geometry_nodes_modifier.hh"
 #include "BKE_bake_geometry_nodes_modifier_pack.hh"
 #include "BKE_image.hh"
 #include "BKE_image_format.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_packedFile.hh"
 #include "BKE_report.hh"
@@ -43,9 +49,6 @@
 #include "DEG_depsgraph.hh"
 
 #include "IMB_imbuf.hh"
-#include "IMB_imbuf_types.hh"
-
-#include "MOD_nodes.hh"
 
 #include "BLO_read_write.hh"
 
@@ -211,7 +214,7 @@ PackedFile *BKE_packedfile_new_from_memory(const void *mem,
     sharing_info = blender::implicit_sharing::info_for_mem_free(const_cast<void *>(mem));
   }
 
-  PackedFile *pf = static_cast<PackedFile *>(MEM_callocN(sizeof(*pf), "PackedFile"));
+  PackedFile *pf = MEM_callocN<PackedFile>("PackedFile");
   pf->data = mem;
   pf->size = memlen;
   pf->sharing_info = sharing_info;
@@ -447,9 +450,7 @@ enum ePF_FileCompare BKE_packedfile_compare_to_file(const char *ref_file_name,
 
       for (int i = 0; i < pf->size; i += sizeof(buf)) {
         int len = pf->size - i;
-        if (len > sizeof(buf)) {
-          len = sizeof(buf);
-        }
+        len = std::min<ulong>(len, sizeof(buf));
 
         if (BLI_read(file, buf, len) != len) {
           /* read error ... */
@@ -777,8 +778,8 @@ int BKE_packedfile_unpack_all_libraries(Main *bmain, ReportList *reports)
 
       newname = BKE_packedfile_unpack_to_file(reports,
                                               BKE_main_blendfile_path(bmain),
-                                              lib->runtime.filepath_abs,
-                                              lib->runtime.filepath_abs,
+                                              lib->runtime->filepath_abs,
+                                              lib->runtime->filepath_abs,
                                               lib->packedfile,
                                               PF_WRITE_ORIGINAL);
       if (newname != nullptr) {
@@ -801,10 +802,20 @@ void BKE_packedfile_pack_all_libraries(Main *bmain, ReportList *reports)
 {
   Library *lib;
 
-  /* Test for relativeness. */
+  /* Only allow libraries with relative paths (to avoid issues when unpacking, a limitation that we
+   * might want to lift since the "relativeness" does not really ensure sanity significantly more).
+   */
   for (lib = static_cast<Library *>(bmain->libraries.first); lib;
        lib = static_cast<Library *>(lib->id.next))
   {
+    /* Exception to the above: essential assets have an absolute path and should not prevent to
+     * operator from continuing. */
+    if (BLI_path_contains(blender::asset_system::essentials_directory_path().c_str(),
+                          lib->filepath))
+    {
+      continue;
+    }
+
     if (!BLI_path_is_rel(lib->filepath)) {
       break;
     }
@@ -818,6 +829,12 @@ void BKE_packedfile_pack_all_libraries(Main *bmain, ReportList *reports)
   for (lib = static_cast<Library *>(bmain->libraries.first); lib;
        lib = static_cast<Library *>(lib->id.next))
   {
+    /* Do not really pack essential assets though (see above). */
+    if (BLI_path_contains(blender::asset_system::essentials_directory_path().c_str(),
+                          lib->filepath))
+    {
+      continue;
+    }
     if (lib->packedfile == nullptr) {
       lib->packedfile = BKE_packedfile_new(reports, lib->filepath, BKE_main_blendfile_path(bmain));
     }

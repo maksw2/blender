@@ -8,7 +8,6 @@
 #include "scene/mesh.h"
 #include "scene/pointcloud.h"
 
-#include "util/foreach.h"
 #include "util/log.h"
 #include "util/transform.h"
 
@@ -16,8 +15,11 @@ CCL_NAMESPACE_BEGIN
 
 /* Attribute */
 
-Attribute::Attribute(
-    ustring name, TypeDesc type, AttributeElement element, Geometry *geom, AttributePrimitive prim)
+Attribute::Attribute(ustring name,
+                     const TypeDesc type,
+                     AttributeElement element,
+                     Geometry *geom,
+                     AttributePrimitive prim)
     : name(name), std(ATTR_STD_NONE), type(type), element(element), flags(0), modified(true)
 {
   /* string and matrix not supported! */
@@ -37,7 +39,7 @@ Attribute::Attribute(
 Attribute::~Attribute()
 {
   /* For voxel data, we need to free the image handle. */
-  if (element == ATTR_ELEMENT_VOXEL && buffer.size()) {
+  if (element == ATTR_ELEMENT_VOXEL && !buffer.empty()) {
     ImageHandle &handle = data_voxel();
     handle.~ImageHandle();
   }
@@ -55,7 +57,7 @@ void Attribute::resize(Geometry *geom, AttributePrimitive prim, bool reserve_onl
   }
 }
 
-void Attribute::resize(size_t num_elements)
+void Attribute::resize(const size_t num_elements)
 {
   if (element != ATTR_ELEMENT_VOXEL) {
     buffer.resize(num_elements * data_sizeof(), 0);
@@ -67,7 +69,7 @@ void Attribute::add(const float &f)
   assert(data_sizeof() == sizeof(float));
 
   char *data = (char *)&f;
-  size_t size = sizeof(f);
+  const size_t size = sizeof(f);
 
   for (size_t i = 0; i < size; i++) {
     buffer.push_back(data[i]);
@@ -81,7 +83,7 @@ void Attribute::add(const uchar4 &f)
   assert(data_sizeof() == sizeof(uchar4));
 
   char *data = (char *)&f;
-  size_t size = sizeof(f);
+  const size_t size = sizeof(f);
 
   for (size_t i = 0; i < size; i++) {
     buffer.push_back(data[i]);
@@ -95,7 +97,7 @@ void Attribute::add(const float2 &f)
   assert(data_sizeof() == sizeof(float2));
 
   char *data = (char *)&f;
-  size_t size = sizeof(f);
+  const size_t size = sizeof(f);
 
   for (size_t i = 0; i < size; i++) {
     buffer.push_back(data[i]);
@@ -109,7 +111,7 @@ void Attribute::add(const float3 &f)
   assert(data_sizeof() == sizeof(float3));
 
   char *data = (char *)&f;
-  size_t size = sizeof(f);
+  const size_t size = sizeof(f);
 
   for (size_t i = 0; i < size; i++) {
     buffer.push_back(data[i]);
@@ -123,7 +125,7 @@ void Attribute::add(const Transform &f)
   assert(data_sizeof() == sizeof(Transform));
 
   char *data = (char *)&f;
-  size_t size = sizeof(f);
+  const size_t size = sizeof(f);
 
   for (size_t i = 0; i < size; i++) {
     buffer.push_back(data[i]);
@@ -134,7 +136,7 @@ void Attribute::add(const Transform &f)
 
 void Attribute::add(const char *data)
 {
-  size_t size = data_sizeof();
+  const size_t size = data_sizeof();
 
   for (size_t i = 0; i < size; i++) {
     buffer.push_back(data[i]);
@@ -166,37 +168,31 @@ size_t Attribute::data_sizeof() const
   if (element == ATTR_ELEMENT_VOXEL) {
     return sizeof(ImageHandle);
   }
-  else if (element == ATTR_ELEMENT_CORNER_BYTE) {
+  if (element == ATTR_ELEMENT_CORNER_BYTE) {
     return sizeof(uchar4);
   }
-  else if (type == TypeFloat) {
+  if (type == TypeFloat) {
     return sizeof(float);
   }
-  else if (type == TypeFloat2) {
+  if (type == TypeFloat2) {
     return sizeof(float2);
   }
-  else if (type == TypeMatrix) {
+  if (type == TypeMatrix) {
     return sizeof(Transform);
     // The float3 type is not interchangeable with float4
     // as it is now a packed type.
   }
-  else if (type == TypeFloat4) {
+  if (type == TypeFloat4) {
     return sizeof(float4);
   }
-  else if (type == TypeRGBA) {
+  if (type == TypeRGBA) {
     return sizeof(float4);
   }
-  else {
-    return sizeof(float3);
-  }
+  return sizeof(float3);
 }
 
 size_t Attribute::element_size(Geometry *geom, AttributePrimitive prim) const
 {
-  if (flags & ATTR_FINAL_SIZE) {
-    return buffer.size() / data_sizeof();
-  }
-
   size_t size = 0;
 
   switch (element) {
@@ -208,9 +204,11 @@ size_t Attribute::element_size(Geometry *geom, AttributePrimitive prim) const
     case ATTR_ELEMENT_VERTEX:
       if (geom->is_mesh() || geom->is_volume()) {
         Mesh *mesh = static_cast<Mesh *>(geom);
-        size = mesh->get_verts().size() + mesh->get_num_ngons();
         if (prim == ATTR_PRIM_SUBD) {
-          size -= mesh->get_num_subd_verts();
+          size = mesh->get_num_subd_base_verts();
+        }
+        else {
+          size = mesh->get_verts().size();
         }
       }
       else if (geom->is_pointcloud()) {
@@ -222,9 +220,11 @@ size_t Attribute::element_size(Geometry *geom, AttributePrimitive prim) const
       if (geom->is_mesh()) {
         Mesh *mesh = static_cast<Mesh *>(geom);
         DCHECK_GT(mesh->get_motion_steps(), 0);
-        size = (mesh->get_verts().size() + mesh->get_num_ngons()) * (mesh->get_motion_steps() - 1);
         if (prim == ATTR_PRIM_SUBD) {
-          size -= mesh->get_num_subd_verts() * (mesh->get_motion_steps() - 1);
+          size = mesh->get_num_subd_base_verts() * (mesh->get_motion_steps() - 1);
+        }
+        else {
+          size = mesh->get_verts().size() * (mesh->get_motion_steps() - 1);
         }
       }
       else if (geom->is_pointcloud()) {
@@ -235,11 +235,11 @@ size_t Attribute::element_size(Geometry *geom, AttributePrimitive prim) const
     case ATTR_ELEMENT_FACE:
       if (geom->is_mesh() || geom->is_volume()) {
         Mesh *mesh = static_cast<Mesh *>(geom);
-        if (prim == ATTR_PRIM_GEOMETRY) {
-          size = mesh->num_triangles();
+        if (prim == ATTR_PRIM_SUBD) {
+          size = mesh->get_num_subd_faces();
         }
         else {
-          size = mesh->get_num_subd_faces() + mesh->get_num_ngons();
+          size = mesh->num_triangles();
         }
       }
       break;
@@ -247,11 +247,11 @@ size_t Attribute::element_size(Geometry *geom, AttributePrimitive prim) const
     case ATTR_ELEMENT_CORNER_BYTE:
       if (geom->is_mesh()) {
         Mesh *mesh = static_cast<Mesh *>(geom);
-        if (prim == ATTR_PRIM_GEOMETRY) {
-          size = mesh->num_triangles() * 3;
+        if (prim == ATTR_PRIM_SUBD) {
+          size = mesh->get_subd_face_corners().size();
         }
         else {
-          size = mesh->get_subd_face_corners().size() + mesh->get_num_ngons();
+          size = mesh->num_triangles() * 3;
         }
       }
       break;
@@ -286,7 +286,7 @@ size_t Attribute::buffer_size(Geometry *geom, AttributePrimitive prim) const
   return element_size(geom, prim) * data_sizeof();
 }
 
-bool Attribute::same_storage(TypeDesc a, TypeDesc b)
+bool Attribute::same_storage(const TypeDesc a, const TypeDesc b)
 {
   if (a == b) {
     return true;
@@ -305,35 +305,11 @@ void Attribute::zero_data(void *dst)
   memset(dst, 0, data_sizeof());
 }
 
-void Attribute::add_with_weight(void *dst, void *src, float weight)
-{
-  if (element == ATTR_ELEMENT_CORNER_BYTE) {
-    for (int i = 0; i < 4; i++) {
-      ((uchar *)dst)[i] += uchar(((uchar *)src)[i] * weight);
-    }
-  }
-  else if (same_storage(type, TypeFloat)) {
-    *((float *)dst) += *((float *)src) * weight;
-  }
-  else if (same_storage(type, TypeFloat2)) {
-    *((float2 *)dst) += *((float2 *)src) * weight;
-  }
-  else if (same_storage(type, TypeVector)) {
-    // Points are float3s and not float4s
-    *((float3 *)dst) += *((float3 *)src) * weight;
-  }
-  else {
-    assert(!"not implemented for this type");
-  }
-}
-
 const char *Attribute::standard_name(AttributeStandard std)
 {
   switch (std) {
     case ATTR_STD_VERTEX_NORMAL:
       return "N";
-    case ATTR_STD_FACE_NORMAL:
-      return "Ng";
     case ATTR_STD_UV:
       return "uv";
     case ATTR_STD_GENERATED:
@@ -446,8 +422,10 @@ void Attribute::get_uv_tiles(Geometry *geom,
   const int num = element_size(geom, prim);
   const float2 *uv = data_float2();
   for (int i = 0; i < num; i++, uv++) {
-    float u = uv->x, v = uv->y;
-    int x = (int)u, y = (int)v;
+    const float u = uv->x;
+    const float v = uv->y;
+    int x = (int)u;
+    int y = (int)v;
 
     if (x < 0 || y < 0 || x >= 10) {
       continue;
@@ -473,9 +451,9 @@ AttributeSet::AttributeSet(Geometry *geometry, AttributePrimitive prim)
 {
 }
 
-AttributeSet::~AttributeSet() {}
+AttributeSet::~AttributeSet() = default;
 
-Attribute *AttributeSet::add(ustring name, TypeDesc type, AttributeElement element)
+Attribute *AttributeSet::add(ustring name, const TypeDesc type, AttributeElement element)
 {
   Attribute *attr = find(name);
 
@@ -497,12 +475,13 @@ Attribute *AttributeSet::add(ustring name, TypeDesc type, AttributeElement eleme
 
 Attribute *AttributeSet::find(ustring name) const
 {
-  foreach (const Attribute &attr, attributes)
+  for (const Attribute &attr : attributes) {
     if (attr.name == name) {
       return (Attribute *)&attr;
     }
+  }
 
-  return NULL;
+  return nullptr;
 }
 
 void AttributeSet::remove(ustring name)
@@ -523,9 +502,9 @@ void AttributeSet::remove(ustring name)
 
 Attribute *AttributeSet::add(AttributeStandard std, ustring name)
 {
-  Attribute *attr = NULL;
+  Attribute *attr = nullptr;
 
-  if (name == ustring()) {
+  if (name.empty()) {
     name = Attribute::standard_name(std);
   }
 
@@ -533,9 +512,6 @@ Attribute *AttributeSet::add(AttributeStandard std, ustring name)
     switch (std) {
       case ATTR_STD_VERTEX_NORMAL:
         attr = add(name, TypeNormal, ATTR_ELEMENT_VERTEX);
-        break;
-      case ATTR_STD_FACE_NORMAL:
-        attr = add(name, TypeNormal, ATTR_ELEMENT_FACE);
         break;
       case ATTR_STD_UV:
         attr = add(name, TypeFloat2, ATTR_ELEMENT_CORNER);
@@ -564,7 +540,7 @@ Attribute *AttributeSet::add(AttributeStandard std, ustring name)
         attr = add(name, TypeFloat, ATTR_ELEMENT_FACE);
         break;
       case ATTR_STD_PTEX_UV:
-        attr = add(name, TypePoint, ATTR_ELEMENT_VERTEX);
+        attr = add(name, TypeFloat2, ATTR_ELEMENT_CORNER);
         break;
       case ATTR_STD_GENERATED_TRANSFORM:
         attr = add(name, TypeMatrix, ATTR_ELEMENT_MESH);
@@ -606,9 +582,6 @@ Attribute *AttributeSet::add(AttributeStandard std, ustring name)
     switch (std) {
       case ATTR_STD_VERTEX_NORMAL:
         attr = add(name, TypeNormal, ATTR_ELEMENT_VERTEX);
-        break;
-      case ATTR_STD_FACE_NORMAL:
-        attr = add(name, TypeNormal, ATTR_ELEMENT_FACE);
         break;
       case ATTR_STD_VOLUME_DENSITY:
       case ATTR_STD_VOLUME_FLAME:
@@ -676,14 +649,22 @@ Attribute *AttributeSet::add(AttributeStandard std, ustring name)
   return attr;
 }
 
+Attribute &AttributeSet::copy(const Attribute &attr)
+{
+  Attribute &copy_attr = *add(attr.name, attr.type, attr.element);
+  copy_attr.std = attr.std;
+  return copy_attr;
+}
+
 Attribute *AttributeSet::find(AttributeStandard std) const
 {
-  foreach (const Attribute &attr, attributes)
+  for (const Attribute &attr : attributes) {
     if (attr.std == std) {
       return (Attribute *)&attr;
     }
+  }
 
-  return NULL;
+  return nullptr;
 }
 
 Attribute *AttributeSet::find_matching(const Attribute &other)
@@ -727,9 +708,7 @@ Attribute *AttributeSet::find(AttributeRequest &req)
   if (req.std == ATTR_STD_NONE) {
     return find(req.name);
   }
-  else {
-    return find(req.std);
-  }
+  return find(req.std);
 }
 
 void AttributeSet::remove(Attribute *attribute)
@@ -750,7 +729,7 @@ void AttributeSet::remove(list<Attribute>::iterator it)
 
 void AttributeSet::resize(bool reserve_only)
 {
-  foreach (Attribute &attr, attributes) {
+  for (Attribute &attr : attributes) {
     attr.resize(geometry, prim, reserve_only);
   }
 }
@@ -788,7 +767,7 @@ void AttributeSet::update(AttributeSet &&new_attributes)
   }
 
   /* Add or update old_attributes based on the new_attributes. */
-  foreach (Attribute &attr, new_attributes.attributes) {
+  for (Attribute &attr : new_attributes.attributes) {
     Attribute *nattr = add(attr.name, attr.type, attr.element);
     nattr->std = attr.std;
     nattr->set_data_from(std::move(attr));
@@ -800,7 +779,7 @@ void AttributeSet::update(AttributeSet &&new_attributes)
 
 void AttributeSet::clear_modified()
 {
-  foreach (Attribute &attr, attributes) {
+  for (Attribute &attr : attributes) {
     attr.modified = false;
   }
 
@@ -812,11 +791,10 @@ void AttributeSet::tag_modified(const Attribute &attr)
   /* Some attributes are not stored in the various kernel attribute arrays
    * (DeviceScene::attribute_*), so the modified flags are only set if the associated standard
    * corresponds to an attribute which will be stored in the kernel's attribute arrays. */
-  const bool modifies_device_array = (attr.std != ATTR_STD_FACE_NORMAL &&
-                                      attr.std != ATTR_STD_VERTEX_NORMAL);
+  const bool modifies_device_array = (attr.std != ATTR_STD_VERTEX_NORMAL);
 
   if (modifies_device_array) {
-    AttrKernelDataType kernel_type = Attribute::kernel_type(attr);
+    const AttrKernelDataType kernel_type = Attribute::kernel_type(attr);
     modified_flag |= (1u << kernel_type);
   }
 }
@@ -837,11 +815,6 @@ AttributeRequest::AttributeRequest(ustring name_)
   desc.element = ATTR_ELEMENT_NONE;
   desc.offset = 0;
   desc.type = NODE_ATTR_FLOAT;
-
-  subd_type = TypeFloat;
-  subd_desc.element = ATTR_ELEMENT_NONE;
-  subd_desc.offset = 0;
-  subd_desc.type = NODE_ATTR_FLOAT;
 }
 
 AttributeRequest::AttributeRequest(AttributeStandard std_)
@@ -853,18 +826,13 @@ AttributeRequest::AttributeRequest(AttributeStandard std_)
   desc.element = ATTR_ELEMENT_NONE;
   desc.offset = 0;
   desc.type = NODE_ATTR_FLOAT;
-
-  subd_type = TypeFloat;
-  subd_desc.element = ATTR_ELEMENT_NONE;
-  subd_desc.offset = 0;
-  subd_desc.type = NODE_ATTR_FLOAT;
 }
 
 /* AttributeRequestSet */
 
-AttributeRequestSet::AttributeRequestSet() {}
+AttributeRequestSet::AttributeRequestSet() = default;
 
-AttributeRequestSet::~AttributeRequestSet() {}
+AttributeRequestSet::~AttributeRequestSet() = default;
 
 bool AttributeRequestSet::modified(const AttributeRequestSet &other)
 {
@@ -891,7 +859,7 @@ bool AttributeRequestSet::modified(const AttributeRequestSet &other)
 
 void AttributeRequestSet::add(ustring name)
 {
-  foreach (AttributeRequest &req, requests) {
+  for (const AttributeRequest &req : requests) {
     if (req.name == name) {
       return;
     }
@@ -902,17 +870,18 @@ void AttributeRequestSet::add(ustring name)
 
 void AttributeRequestSet::add(AttributeStandard std)
 {
-  foreach (AttributeRequest &req, requests)
+  for (const AttributeRequest &req : requests) {
     if (req.std == std) {
       return;
     }
+  }
 
   requests.push_back(AttributeRequest(std));
 }
 
 void AttributeRequestSet::add(AttributeRequestSet &reqs)
 {
-  foreach (AttributeRequest &req, reqs.requests) {
+  for (const AttributeRequest &req : reqs.requests) {
     if (req.std == ATTR_STD_NONE) {
       add(req.name);
     }
@@ -928,7 +897,7 @@ void AttributeRequestSet::add_standard(ustring name)
     return;
   }
 
-  AttributeStandard std = Attribute::name_standard(name.c_str());
+  const AttributeStandard std = Attribute::name_standard(name.c_str());
 
   if (std) {
     add(std);
@@ -940,20 +909,22 @@ void AttributeRequestSet::add_standard(ustring name)
 
 bool AttributeRequestSet::find(ustring name)
 {
-  foreach (AttributeRequest &req, requests)
+  for (const AttributeRequest &req : requests) {
     if (req.name == name) {
       return true;
     }
+  }
 
   return false;
 }
 
 bool AttributeRequestSet::find(AttributeStandard std)
 {
-  foreach (AttributeRequest &req, requests)
+  for (const AttributeRequest &req : requests) {
     if (req.std == std) {
       return true;
     }
+  }
 
   return false;
 }

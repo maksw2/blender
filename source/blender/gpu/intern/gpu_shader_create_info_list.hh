@@ -38,8 +38,8 @@
 #include "gpu_shader_text_info.hh"
 #include "gpu_srgb_to_framebuffer_space_info.hh"
 
-#ifdef WITH_GTEST
-#  ifdef WITH_GPU_DRAW_TESTS
+#ifdef WITH_GTESTS
+#  ifdef WITH_GPU_BACKEND_TESTS
 #    include "gpu_shader_test_info.hh"
 #  endif
 #endif
@@ -50,7 +50,7 @@
 #  include "gpu_shader_fullscreen_blit_info.hh"
 #endif
 
-/* Realtime compositor. */
+/* Compositor. */
 #include "compositor_alpha_crop_info.hh"
 #include "compositor_bilateral_blur_info.hh"
 #include "compositor_bokeh_blur_info.hh"
@@ -70,6 +70,7 @@
 #include "compositor_ellipse_mask_info.hh"
 #include "compositor_filter_info.hh"
 #include "compositor_flip_info.hh"
+#include "compositor_gamma_correct_info.hh"
 #include "compositor_glare_info.hh"
 #include "compositor_id_mask_info.hh"
 #include "compositor_image_crop_info.hh"
@@ -88,6 +89,7 @@
 #include "compositor_movie_distortion_info.hh"
 #include "compositor_normalize_info.hh"
 #include "compositor_parallel_reduction_info.hh"
+#include "compositor_pixel_coordinates_info.hh"
 #include "compositor_pixelate_info.hh"
 #include "compositor_plane_deform_info.hh"
 #include "compositor_premultiply_alpha_info.hh"
@@ -104,8 +106,10 @@
 #include "compositor_symmetric_blur_variable_size_info.hh"
 #include "compositor_symmetric_separable_blur_info.hh"
 #include "compositor_symmetric_separable_blur_variable_size_info.hh"
+#include "compositor_texture_coordinates_info.hh"
 #include "compositor_tone_map_photoreceptor_info.hh"
 #include "compositor_tone_map_simple_info.hh"
+#include "compositor_translate_wrapped_info.hh"
 #include "compositor_van_vliet_gaussian_blur_info.hh"
 #include "compositor_write_output_info.hh"
 #include "compositor_z_combine_info.hh"
@@ -116,6 +120,9 @@
 #include "draw_hair_refine_info.hh"
 #include "draw_object_infos_info.hh"
 #include "draw_view_info.hh"
+#ifdef WITH_OPENSUBDIV
+#  include "subdiv_info.hh"
+#endif
 
 /* EEVEE engine. */
 #include "eevee_ambient_occlusion_info.hh"
@@ -148,6 +155,7 @@
 #include "overlay_antialiasing_info.hh"
 #include "overlay_armature_info.hh"
 #include "overlay_background_info.hh"
+#include "overlay_common_info.hh"
 #include "overlay_edit_mode_info.hh"
 #include "overlay_extra_info.hh"
 #include "overlay_facing_info.hh"

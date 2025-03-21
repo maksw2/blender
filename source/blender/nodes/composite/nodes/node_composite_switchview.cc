@@ -6,11 +6,12 @@
  * \ingroup cmpnodes
  */
 
+#include "BLI_listbase.h"
+
 #include "BKE_context.hh"
 #include "BKE_lib_id.hh"
 
 #include "UI_interface.hh"
-#include "UI_resources.hh"
 
 #include "COM_node_operation.hh"
 
@@ -52,7 +53,7 @@ static void init_switch_view(const bContext *C, PointerRNA *ptr)
   id_us_plus(node->id);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class SwitchViewOperation : public NodeOperation {
  public:
@@ -64,13 +65,13 @@ class SwitchViewOperation : public NodeOperation {
 
     /* A context that is not multi view, pass the first input through as a fallback. */
     if (context().get_view_name().is_empty()) {
-      Result &input = get_input(node().input(0)->identifier);
-      input.pass_through(result);
+      const Result &input = get_input(node().input(0)->identifier);
+      result.share_data(input);
       return;
     }
 
-    Result &input = get_input(context().get_view_name());
-    input.pass_through(result);
+    const Result &input = get_input(context().get_view_name());
+    result.share_data(input);
   }
 };
 
@@ -87,10 +88,14 @@ void register_node_type_cmp_switch_view()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_SWITCH_VIEW, "Switch View", NODE_CLASS_CONVERTER);
+  cmp_node_type_base(&ntype, "CompositorNodeSwitchView", CMP_NODE_SWITCH_VIEW);
+  ntype.ui_name = "Switch View";
+  ntype.ui_description = "Combine the views (left and right) into a single stereo 3D output";
+  ntype.enum_name_legacy = "VIEWSWITCH";
+  ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = file_ns::node_declare;
   ntype.initfunc_api = file_ns::init_switch_view;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

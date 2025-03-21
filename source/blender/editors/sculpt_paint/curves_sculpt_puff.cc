@@ -2,7 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BKE_attribute_math.hh"
 #include "BKE_brush.hh"
 #include "BKE_bvhutils.hh"
 #include "BKE_context.hh"
@@ -76,7 +75,7 @@ struct PuffOperationExecutor {
   Span<int> surface_corner_verts_;
   Span<int3> surface_corner_tris_;
   Span<float3> corner_normals_su_;
-  BVHTreeFromMesh surface_bvh_;
+  bke::BVHTreeFromMesh surface_bvh_;
 
   PuffOperationExecutor(const bContext &C) : ctx_(C) {}
 
@@ -121,7 +120,7 @@ struct PuffOperationExecutor {
     surface_bvh_ = surface_->bvh_corner_tris();
 
     if (stroke_extension.is_first) {
-      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE) {
+      if (falloff_shape == PAINT_FALLOFF_SHAPE_SPHERE || (U.uiflag & USER_ORBIT_SELECTION)) {
         self.brush_3d_ = *sample_curves_3d_brush(*ctx_.depsgraph,
                                                  *ctx_.region,
                                                  *ctx_.v3d,
@@ -129,10 +128,15 @@ struct PuffOperationExecutor {
                                                  *object_,
                                                  brush_pos_re_,
                                                  brush_radius_base_re_);
+        remember_stroke_position(
+            *ctx_.scene,
+            math::transform_point(transforms_.curves_to_world, self_->brush_3d_.position_cu));
       }
 
-      self_->constraint_solver_.initialize(
-          *curves_, curve_selection_, curves_id_->flag & CV_SCULPT_COLLISION_ENABLED);
+      self_->constraint_solver_.initialize(*curves_,
+                                           curve_selection_,
+                                           curves_id_->flag & CV_SCULPT_COLLISION_ENABLED,
+                                           curves_id_->surface_collision_distance);
     }
 
     Array<float> curve_weights(curves_->curves_num(), 0.0f);

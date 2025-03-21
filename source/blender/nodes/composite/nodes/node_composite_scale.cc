@@ -7,6 +7,7 @@
  */
 
 #include "BLI_assert.h"
+#include "BLI_listbase.h"
 #include "BLI_math_angle_types.hh"
 #include "BLI_math_base.hh"
 #include "BLI_math_matrix.hh"
@@ -23,7 +24,6 @@
 #include "GPU_shader.hh"
 #include "GPU_texture.hh"
 
-#include "COM_algorithm_transform.hh"
 #include "COM_node_operation.hh"
 #include "COM_utilities.hh"
 
@@ -37,6 +37,7 @@ static void cmp_node_scale_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Color>("Image")
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
+      .compositor_realization_mode(CompositorInputRealizationMode::None)
       .compositor_domain_priority(0);
   b.add_input<decl::Float>("X")
       .default_value(1.0f)
@@ -58,7 +59,7 @@ static void node_composite_update_scale(bNodeTree *ntree, bNode *node)
   /* Only show X/Y scale factor inputs for modes using them! */
   LISTBASE_FOREACH (bNodeSocket *, sock, &node->inputs) {
     if (STR_ELEM(sock->name, "X", "Y")) {
-      bke::node_set_socket_availability(ntree, sock, use_xy_scale);
+      bke::node_set_socket_availability(*ntree, *sock, use_xy_scale);
     }
   }
 }
@@ -73,7 +74,7 @@ static void node_composit_buts_scale(uiLayout *layout, bContext * /*C*/, Pointer
             ptr,
             "frame_method",
             UI_ITEM_R_SPLIT_EMPTY_NAME | UI_ITEM_R_EXPAND,
-            nullptr,
+            std::nullopt,
             ICON_NONE);
     row = uiLayoutRow(layout, true);
     uiItemR(row, ptr, "offset_x", UI_ITEM_R_SPLIT_EMPTY_NAME, "X", ICON_NONE);
@@ -81,7 +82,7 @@ static void node_composit_buts_scale(uiLayout *layout, bContext * /*C*/, Pointer
   }
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class ScaleOperation : public NodeOperation {
  public:
@@ -99,16 +100,17 @@ class ScaleOperation : public NodeOperation {
 
   void execute_constant_size()
   {
-    Result &input = get_input("Image");
-    Result &output = get_result("Image");
-
-    const float2 scale = get_scale();
+    const float2 scale = this->get_scale();
     const math::AngleRadian rotation = 0.0f;
-    const float2 translation = get_translation();
+    const float2 translation = this->get_translation();
     const float3x3 transformation = math::from_loc_rot_scale<float3x3>(
         translation, rotation, scale);
 
-    transform(context(), input, output, transformation, input.get_realization_options());
+    const Result &input = this->get_input("Image");
+    Result &output = this->get_result("Image");
+    output.share_data(input);
+    output.transform(transformation);
+    output.get_realization_options().interpolation = input.get_realization_options().interpolation;
   }
 
   void execute_variable_size()
@@ -166,7 +168,8 @@ class ScaleOperation : public NodeOperation {
       float2 coordinates = (float2(texel) + float2(0.5f)) / float2(size);
       float2 center = float2(0.5f);
 
-      float2 scale = float2(x_scale.load_pixel(texel).x, y_scale.load_pixel(texel).x);
+      float2 scale = float2(x_scale.load_pixel<float, true>(texel),
+                            y_scale.load_pixel<float, true>(texel));
       float2 scaled_coordinates = center +
                                   (coordinates - center) / math::max(scale, float2(0.0001f));
 
@@ -194,16 +197,16 @@ class ScaleOperation : public NodeOperation {
   /* Scale by the input factors. */
   float2 get_scale_relative()
   {
-    return float2(get_input("X").get_float_value_default(1.0f),
-                  get_input("Y").get_float_value_default(1.0f));
+    return float2(get_input("X").get_single_value_default(1.0f),
+                  get_input("Y").get_single_value_default(1.0f));
   }
 
   /* Scale such that the new size matches the input absolute size. */
   float2 get_scale_absolute()
   {
     const float2 input_size = float2(get_input("Image").domain().size);
-    const float2 absolute_size = float2(get_input("X").get_float_value_default(1.0f),
-                                        get_input("Y").get_float_value_default(1.0f));
+    const float2 absolute_size = float2(get_input("X").get_single_value_default(1.0f),
+                                        get_input("Y").get_single_value_default(1.0f));
     return absolute_size / input_size;
   }
 
@@ -316,11 +319,15 @@ void register_node_type_cmp_scale()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_SCALE, "Scale", NODE_CLASS_DISTORT);
+  cmp_node_type_base(&ntype, "CompositorNodeScale", CMP_NODE_SCALE);
+  ntype.ui_name = "Scale";
+  ntype.ui_description = "Change the size of the image";
+  ntype.enum_name_legacy = "SCALE";
+  ntype.nclass = NODE_CLASS_DISTORT;
   ntype.declare = file_ns::cmp_node_scale_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_scale;
   ntype.updatefunc = file_ns::node_composite_update_scale;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

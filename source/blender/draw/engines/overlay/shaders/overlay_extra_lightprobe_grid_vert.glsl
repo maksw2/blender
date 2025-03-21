@@ -2,8 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_clipping_lib.glsl"
-#include "common_view_lib.glsl"
+#include "infos/overlay_extra_info.hh"
+
+VERTEX_SHADER_CREATE_INFO(overlay_extra_grid_base)
+VERTEX_SHADER_CREATE_INFO(draw_modelmat)
+
+#include "draw_model_lib.glsl"
+#include "draw_view_clipping_lib.glsl"
+#include "draw_view_lib.glsl"
 #include "select_lib.glsl"
 
 vec4 color_from_id(float color_id)
@@ -28,7 +34,7 @@ vec4 color_from_id(float color_id)
 
 void main()
 {
-  select_id_set(drw_CustomID);
+  select_id_set(drw_custom_id());
   mat4 model_mat = gridModelMatrix;
   model_mat[0][3] = model_mat[1][3] = model_mat[2][3] = 0.0;
   model_mat[3][3] = 1.0;
@@ -47,7 +53,7 @@ void main()
   ls_cell_location = ls_cell_location * 2.0 - 1.0;
 
   vec3 ws_cell_location = (model_mat * vec4(ls_cell_location, 1.0)).xyz;
-  gl_Position = point_world_to_ndc(ws_cell_location);
+  gl_Position = drw_point_world_to_homogenous(ws_cell_location);
   gl_PointSize = sizeVertex * 2.0;
 
   finalColor = color_from_id(color_id);

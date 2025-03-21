@@ -20,7 +20,6 @@
 
 #include "BLI_fileops.h"
 #include "BLI_mmap.h"
-#include "BLI_utildefines.h"
 
 #include "IMB_allocimbuf.hh"
 #include "IMB_colormanagement.hh"
@@ -30,9 +29,9 @@
 
 #include "MEM_guardedalloc.h"
 
-bool imb_is_a_webp(const uchar *buf, size_t size)
+bool imb_is_a_webp(const uchar *mem, size_t size)
 {
-  if (WebPGetInfo(buf, size, nullptr, nullptr)) {
+  if (WebPGetInfo(mem, size, nullptr, nullptr)) {
     return true;
   }
   return false;
@@ -62,7 +61,7 @@ ImBuf *imb_loadwebp(const uchar *mem, size_t size, int flags, char colorspace[IM
 
   if ((flags & IB_test) == 0) {
     ibuf->ftype = IMB_FTYPE_WEBP;
-    imb_addrectImBuf(ibuf);
+    IMB_alloc_byte_pixels(ibuf);
     /* Flip the image during decoding to match Blender. */
     uchar *last_row = ibuf->byte_buffer.data + 4 * (ibuf->y - 1) * ibuf->x;
     if (WebPDecodeRGBAInto(mem, size, last_row, size_t(ibuf->x) * ibuf->y * 4, -4 * ibuf->x) ==
@@ -118,7 +117,7 @@ ImBuf *imb_load_filepath_thumbnail_webp(const char *filepath,
   const int dest_h = std::max(int(config.input.height * scale), 1);
 
   colorspace_set_default_role(colorspace, IM_MAX_SPACE, COLOR_ROLE_DEFAULT_BYTE);
-  ImBuf *ibuf = IMB_allocImBuf(dest_w, dest_h, 32, IB_rect);
+  ImBuf *ibuf = IMB_allocImBuf(dest_w, dest_h, 32, IB_byte_data);
   if (ibuf == nullptr) {
     fprintf(stderr, "WebP: Failed to allocate image memory\n");
     imb_mmap_lock();
@@ -168,8 +167,7 @@ bool imb_savewebp(ImBuf *ibuf, const char *filepath, int /*flags*/)
     /* We must convert the ImBuf RGBA buffer to RGB as WebP expects a RGB buffer. */
     const size_t num_pixels = ibuf->x * ibuf->y;
     const uint8_t *rgba_rect = ibuf->byte_buffer.data;
-    uint8_t *rgb_rect = static_cast<uint8_t *>(
-        MEM_mallocN(sizeof(uint8_t) * num_pixels * 3, "webp rgb_rect"));
+    uint8_t *rgb_rect = MEM_malloc_arrayN<uint8_t>(num_pixels * 3, "webp rgb_rect");
     for (int i = 0; i < num_pixels; i++) {
       rgb_rect[i * 3 + 0] = rgba_rect[i * 4 + 0];
       rgb_rect[i * 3 + 1] = rgba_rect[i * 4 + 1];

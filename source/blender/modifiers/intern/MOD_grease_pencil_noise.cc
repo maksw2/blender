@@ -211,24 +211,25 @@ static void deform_drawing(const GreasePencilNoiseModifierData &mmd,
   }
 
   if (mmd.factor_uvs > 0.0f) {
-    bke::SpanAttributeWriter<float> rotations = attributes.lookup_or_add_for_write_span<float>(
-        "rotation", bke::AttrDomain::Point);
-
-    filtered_strokes.foreach_index(GrainSize(512), [&](const int stroke_i) {
-      const IndexRange points = points_by_curve[stroke_i];
-      const int noise_len = math::ceil(points.size() * noise_scale) + 2;
-      const Array<float> table = noise_table(
-          noise_len, int(math::floor(mmd.noise_offset)), seed + 4 + stroke_i);
-      for (const int i : points.index_range()) {
-        const int point = points[i];
-        const float weight = get_weight(points, i);
-        const float noise = get_noise(table, i * noise_scale + math::fract(mmd.noise_offset));
-        const float delta_rot = (noise * 2.0f - 1.0f) * weight * mmd.factor_uvs * M_PI_2;
-        rotations.span[point] = math::clamp(
-            rotations.span[point] + delta_rot, float(-M_PI_2), float(M_PI_2));
-      }
-    });
-    rotations.finish();
+    if (bke::SpanAttributeWriter<float> rotations = attributes.lookup_or_add_for_write_span<float>(
+            "rotation", bke::AttrDomain::Point))
+    {
+      filtered_strokes.foreach_index(GrainSize(512), [&](const int stroke_i) {
+        const IndexRange points = points_by_curve[stroke_i];
+        const int noise_len = math::ceil(points.size() * noise_scale) + 2;
+        const Array<float> table = noise_table(
+            noise_len, int(math::floor(mmd.noise_offset)), seed + 4 + stroke_i);
+        for (const int i : points.index_range()) {
+          const int point = points[i];
+          const float weight = get_weight(points, i);
+          const float noise = get_noise(table, i * noise_scale + math::fract(mmd.noise_offset));
+          const float delta_rot = (noise * 2.0f - 1.0f) * weight * mmd.factor_uvs * M_PI_2;
+          rotations.span[point] = math::clamp(
+              rotations.span[point] + delta_rot, float(-M_PI_2), float(M_PI_2));
+        }
+      });
+      rotations.finish();
+    }
   }
 }
 
@@ -279,27 +280,30 @@ static void panel_draw(const bContext *C, Panel *panel)
 
   col = uiLayoutColumn(layout, false);
   uiItemR(col, ptr, "factor", UI_ITEM_NONE, IFACE_("Position"), ICON_NONE);
-  uiItemR(col, ptr, "factor_strength", UI_ITEM_NONE, IFACE_("Strength"), ICON_NONE);
+  uiItemR(col,
+          ptr,
+          "factor_strength",
+          UI_ITEM_NONE,
+          CTX_IFACE_(BLT_I18NCONTEXT_ID_GPENCIL, "Strength"),
+          ICON_NONE);
   uiItemR(col, ptr, "factor_thickness", UI_ITEM_NONE, IFACE_("Thickness"), ICON_NONE);
   uiItemR(col, ptr, "factor_uvs", UI_ITEM_NONE, IFACE_("UV"), ICON_NONE);
-  uiItemR(col, ptr, "noise_scale", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "noise_offset", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "seed", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "noise_scale", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "noise_offset", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "seed", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  if (uiLayout *random_layout = uiLayoutPanelProp(
-          C, layout, ptr, "open_random_panel", IFACE_("Random")))
+  if (uiLayout *random_layout =
+          uiLayoutPanelPropWithBoolHeader(
+              C, layout, ptr, "open_random_panel", ptr, "use_random", IFACE_("Random"))
+              .body)
   {
-    uiItemR(random_layout, ptr, "use_random", UI_ITEM_NONE, IFACE_("Randomize"), ICON_NONE);
-
     uiLayout *random_col = uiLayoutColumn(random_layout, false);
-
-    uiLayoutSetPropSep(random_col, true);
     uiLayoutSetActive(random_col, RNA_boolean_get(ptr, "use_random"));
 
-    uiItemR(random_col, ptr, "random_mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(random_col, ptr, "random_mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     const int mode = RNA_enum_get(ptr, "random_mode");
     if (mode != GP_NOISE_RANDOM_KEYFRAME) {
-      uiItemR(random_col, ptr, "step", UI_ITEM_NONE, nullptr, ICON_NONE);
+      uiItemR(random_col, ptr, "step", UI_ITEM_NONE, std::nullopt, ICON_NONE);
     }
   }
 

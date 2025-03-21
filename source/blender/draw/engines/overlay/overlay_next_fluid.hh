@@ -42,7 +42,7 @@ class Fluids : Overlay {
   void begin_sync(Resources &res, const State &state) final
   {
     /* Against design. Should not sync depending on view. */
-    float3 camera_direction = View("WorkaroundView", DRW_view_default_get()).viewinv().z_axis();
+    float3 camera_direction = blender::draw::View::default_get().viewinv().z_axis();
     dominant_axis = math::dominant_axis(camera_direction);
 
     {
@@ -55,22 +55,22 @@ class Fluids : Overlay {
       /* TODO(fclem): Use either specialization constants or push constants to reduce the amount of
        * shader variants. */
       velocity_needle_ps_ = &fluid_ps_.sub("Velocity Needles");
-      velocity_needle_ps_->shader_set(res.shaders.fluid_velocity_needle.get());
+      velocity_needle_ps_->shader_set(res.shaders->fluid_velocity_needle.get());
 
       velocity_mac_ps_ = &fluid_ps_.sub("Velocity Mac");
-      velocity_mac_ps_->shader_set(res.shaders.fluid_velocity_mac.get());
+      velocity_mac_ps_->shader_set(res.shaders->fluid_velocity_mac.get());
 
       velocity_streamline_ps_ = &fluid_ps_.sub("Velocity Line");
-      velocity_streamline_ps_->shader_set(res.shaders.fluid_velocity_streamline.get());
+      velocity_streamline_ps_->shader_set(res.shaders->fluid_velocity_streamline.get());
 
       grid_lines_flags_ps_ = &fluid_ps_.sub("Velocity Mac");
-      grid_lines_flags_ps_->shader_set(res.shaders.fluid_grid_lines_flags.get());
+      grid_lines_flags_ps_->shader_set(res.shaders->fluid_grid_lines_flags.get());
 
       grid_lines_flat_ps_ = &fluid_ps_.sub("Velocity Needles");
-      grid_lines_flat_ps_->shader_set(res.shaders.fluid_grid_lines_flat.get());
+      grid_lines_flat_ps_->shader_set(res.shaders->fluid_grid_lines_flat.get());
 
       grid_lines_range_ps_ = &fluid_ps_.sub("Velocity Line");
-      grid_lines_range_ps_->shader_set(res.shaders.fluid_grid_lines_range.get());
+      grid_lines_range_ps_->shader_set(res.shaders->fluid_grid_lines_range.get());
     }
 
     cube_buf_.clear();
@@ -235,8 +235,9 @@ class Fluids : Overlay {
 
   void end_sync(Resources &res, const State & /*state*/) final
   {
-    fluid_ps_.shader_set(res.shaders.extra_shape.get());
+    fluid_ps_.shader_set(res.shaders->extra_shape.get());
     fluid_ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+    fluid_ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
 
     cube_buf_.end_sync(fluid_ps_, res.shapes.cube.get());
   }

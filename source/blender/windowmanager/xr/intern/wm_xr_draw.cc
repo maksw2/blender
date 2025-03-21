@@ -12,7 +12,10 @@
 
 #include <cstring>
 
+#include "DNA_userdef_types.h"
+
 #include "BLI_listbase.h"
+#include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector.h"
@@ -20,10 +23,11 @@
 #include "ED_view3d_offscreen.hh"
 
 #include "GHOST_C-api.h"
+
 #include "GPU_batch_presets.hh"
 #include "GPU_immediate.hh"
 #include "GPU_matrix.hh"
-
+#include "GPU_state.hh"
 #include "GPU_viewport.hh"
 
 #include "WM_api.hh"
@@ -213,7 +217,7 @@ void wm_xr_disable_passthrough(void *customdata)
   XrSessionSettings *settings = &xr_data->session_settings;
 
   settings->draw_flags &= ~V3D_OFSDRAW_XR_SHOW_PASSTHROUGH;
-  WM_report(RPT_INFO, "Passthrough not available");
+  WM_global_report(RPT_INFO, "Passthrough not available");
 }
 
 static blender::gpu::Batch *wm_xr_controller_model_batch_create(GHOST_XrContextHandle xr_context,

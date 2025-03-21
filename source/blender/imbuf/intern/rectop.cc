@@ -6,6 +6,7 @@
  * \ingroup imbuf
  */
 
+#include <algorithm>
 #include <cstdlib>
 
 #include "BLI_math_base.h"
@@ -13,6 +14,7 @@
 #include "BLI_math_color_blend.h"
 #include "BLI_math_vector.h"
 #include "BLI_rect.h"
+#include "BLI_task.hh"
 #include "BLI_utildefines.h"
 
 #include "IMB_imbuf.hh"
@@ -272,7 +274,7 @@ static void rect_realloc_4bytes(void **buf_p, const uint size[2])
     return;
   }
   MEM_freeN(*buf_p);
-  *buf_p = MEM_mallocN(sizeof(uint) * size[0] * size[1], __func__);
+  *buf_p = MEM_malloc_arrayN<uint>(size[0] * size[1], __func__);
 }
 
 static void rect_realloc_16bytes(void **buf_p, const uint size[2])
@@ -281,7 +283,7 @@ static void rect_realloc_16bytes(void **buf_p, const uint size[2])
     return;
   }
   MEM_freeN(*buf_p);
-  *buf_p = MEM_mallocN(sizeof(uint[4]) * size[0] * size[1], __func__);
+  *buf_p = MEM_malloc_arrayN<uint>(4 * size[0] * size[1], __func__);
 }
 
 void IMB_rect_size_set(ImBuf *ibuf, const uint size[2])
@@ -340,23 +342,15 @@ void IMB_rectclip(ImBuf *dbuf,
   }
 
   tmp = dbuf->x - *destx;
-  if (*width > tmp) {
-    *width = tmp;
-  }
+  *width = std::min(*width, tmp);
   tmp = dbuf->y - *desty;
-  if (*height > tmp) {
-    *height = tmp;
-  }
+  *height = std::min(*height, tmp);
 
   if (sbuf) {
     tmp = sbuf->x - *srcx;
-    if (*width > tmp) {
-      *width = tmp;
-    }
+    *width = std::min(*width, tmp);
     tmp = sbuf->y - *srcy;
-    if (*height > tmp) {
-      *height = tmp;
-    }
+    *height = std::min(*height, tmp);
   }
 
   if ((*height <= 0) || (*width <= 0)) {
@@ -422,34 +416,22 @@ static void imb_rectclip3(ImBuf *dbuf,
   }
 
   tmp = dbuf->x - *destx;
-  if (*width > tmp) {
-    *width = tmp;
-  }
+  *width = std::min(*width, tmp);
   tmp = dbuf->y - *desty;
-  if (*height > tmp) {
-    *height = tmp;
-  }
+  *height = std::min(*height, tmp);
 
   if (obuf) {
     tmp = obuf->x - *origx;
-    if (*width > tmp) {
-      *width = tmp;
-    }
+    *width = std::min(*width, tmp);
     tmp = obuf->y - *origy;
-    if (*height > tmp) {
-      *height = tmp;
-    }
+    *height = std::min(*height, tmp);
   }
 
   if (sbuf) {
     tmp = sbuf->x - *srcx;
-    if (*width > tmp) {
-      *width = tmp;
-    }
+    *width = std::min(*width, tmp);
     tmp = sbuf->y - *srcy;
-    if (*height > tmp) {
-      *height = tmp;
-    }
+    *height = std::min(*height, tmp);
   }
 
   if ((*height <= 0) || (*width <= 0)) {
@@ -813,7 +795,7 @@ void IMB_rectblend(ImBuf *dbuf,
           else {
             for (x = width; x > 0; x--, dr++, outr++, sr++, cmr++) {
               uchar *src = (uchar *)sr;
-              float mask = float(mask_max) * float(*cmr);
+              float mask = mask_max * float(*cmr);
 
               if (texmaskrect) {
                 mask *= (float(*tmr++) / 65535.0f);
@@ -911,7 +893,7 @@ void IMB_rectblend(ImBuf *dbuf,
           /* No destination mask buffer, do regular blend with mask-texture if present. */
           else {
             for (x = width; x > 0; x--, drf += 4, orf += 4, srf += 4, cmr++) {
-              float mask = float(mask_max) * float(*cmr);
+              float mask = mask_max * float(*cmr);
 
               if (texmaskrect) {
                 mask *= (float(*tmr++) / 65535.0f);
@@ -954,41 +936,6 @@ void IMB_rectblend(ImBuf *dbuf,
   }
 }
 
-struct RectBlendThreadData {
-  ImBuf *dbuf;
-  const ImBuf *obuf, *sbuf;
-  ushort *dmask;
-  const ushort *curvemask, *texmask;
-  float mask_max;
-  int destx, desty, origx, origy;
-  int srcx, srcy, width;
-  IMB_BlendMode mode;
-  bool accumulate;
-};
-
-static void rectblend_thread_do(void *data_v, int scanline)
-{
-  const int num_scanlines = 1;
-  RectBlendThreadData *data = (RectBlendThreadData *)data_v;
-  IMB_rectblend(data->dbuf,
-                data->obuf,
-                data->sbuf,
-                data->dmask,
-                data->curvemask,
-                data->texmask,
-                data->mask_max,
-                data->destx,
-                data->desty + scanline,
-                data->origx,
-                data->origy + scanline,
-                data->srcx,
-                data->srcy + scanline,
-                data->width,
-                num_scanlines,
-                data->mode,
-                data->accumulate);
-}
-
 void IMB_rectblend_threaded(ImBuf *dbuf,
                             const ImBuf *obuf,
                             const ImBuf *sbuf,
@@ -1007,7 +954,8 @@ void IMB_rectblend_threaded(ImBuf *dbuf,
                             IMB_BlendMode mode,
                             bool accumulate)
 {
-  if (size_t(width) * height < 64 * 64) {
+  using namespace blender;
+  threading::parallel_for(IndexRange(height), 16, [&](const IndexRange y_range) {
     IMB_rectblend(dbuf,
                   obuf,
                   sbuf,
@@ -1016,36 +964,16 @@ void IMB_rectblend_threaded(ImBuf *dbuf,
                   texmask,
                   mask_max,
                   destx,
-                  desty,
+                  desty + y_range.first(),
                   origx,
-                  origy,
+                  origy + y_range.first(),
                   srcx,
-                  srcy,
+                  srcy + y_range.first(),
                   width,
-                  height,
+                  y_range.size(),
                   mode,
                   accumulate);
-  }
-  else {
-    RectBlendThreadData data;
-    data.dbuf = dbuf;
-    data.obuf = obuf;
-    data.sbuf = sbuf;
-    data.dmask = dmask;
-    data.curvemask = curvemask;
-    data.texmask = texmask;
-    data.mask_max = mask_max;
-    data.destx = destx;
-    data.desty = desty;
-    data.origx = origx;
-    data.origy = origy;
-    data.srcx = srcx;
-    data.srcy = srcy;
-    data.width = width;
-    data.mode = mode;
-    data.accumulate = accumulate;
-    IMB_processor_apply_threaded_scanlines(height, rectblend_thread_do, &data);
-  }
+  });
 }
 
 void IMB_rectfill(ImBuf *drect, const float col[4])

@@ -2,7 +2,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "gpu_shader_create_info.hh"
+#ifdef GPU_SHADER
+#  pragma once
+#  include "gpu_glsl_cpp_stubs.hh"
+
+#  include "draw_common_shader_shared.hh"
+#  include "draw_object_infos_info.hh"
+#  include "draw_view_info.hh"
+#endif
+
+#include "overlay_common_info.hh"
 
 /* -------------------------------------------------------------------- */
 /** \name OVERLAY_shader_paint_face.
@@ -18,14 +27,12 @@ PUSH_CONSTANT(VEC4, ucolor)
 FRAGMENT_OUT(0, VEC4, fragColor)
 VERTEX_SOURCE("overlay_paint_face_vert.glsl")
 FRAGMENT_SOURCE("overlay_uniform_color_frag.glsl")
+ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(draw_modelmat)
+ADDITIONAL_INFO(draw_globals)
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(overlay_paint_face_clipped)
-ADDITIONAL_INFO(overlay_paint_face)
-ADDITIONAL_INFO(drw_clipped)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
+OVERLAY_INFO_CLIP_VARIATION(overlay_paint_face)
 
 /** \} */
 
@@ -47,15 +54,12 @@ VERTEX_OUT(overlay_overlay_paint_point_iface)
 FRAGMENT_OUT(0, VEC4, fragColor)
 VERTEX_SOURCE("overlay_paint_point_vert.glsl")
 FRAGMENT_SOURCE("overlay_point_varying_color_frag.glsl")
+ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_globals)
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(overlay_paint_point_clipped)
-ADDITIONAL_INFO(overlay_paint_point)
-ADDITIONAL_INFO(drw_clipped)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
+OVERLAY_INFO_CLIP_VARIATION(overlay_paint_point)
 
 /** \} */
 
@@ -82,45 +86,12 @@ PUSH_CONSTANT(BOOL, maskImagePremultiplied)
 FRAGMENT_OUT(0, VEC4, fragColor)
 VERTEX_SOURCE("overlay_paint_texture_vert.glsl")
 FRAGMENT_SOURCE("overlay_paint_texture_frag.glsl")
+ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(draw_modelmat)
+ADDITIONAL_INFO(draw_globals)
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(overlay_paint_texture_clipped)
-ADDITIONAL_INFO(overlay_paint_texture)
-ADDITIONAL_INFO(drw_clipped)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
-
-/** \} */
-
-/* -------------------------------------------------------------------- */
-/** \name OVERLAY_shader_paint_vertcol.
- *
- * It should be used to draw a Vertex Paint overlay. But it is currently unreachable.
- * \{ */
-
-GPU_SHADER_INTERFACE_INFO(overlay_paint_vertcol_iface)
-SMOOTH(VEC3, finalColor)
-GPU_SHADER_INTERFACE_END()
-
-GPU_SHADER_CREATE_INFO(overlay_paint_vertcol)
-DO_STATIC_COMPILATION()
-VERTEX_IN(0, VEC3, pos)
-VERTEX_IN(1, VEC3, ac) /* Active color. */
-VERTEX_OUT(overlay_paint_vertcol_iface)
-PUSH_CONSTANT(FLOAT, opacity)      /* `1.0` by default. */
-PUSH_CONSTANT(BOOL, useAlphaBlend) /* `false` by default. */
-FRAGMENT_OUT(0, VEC4, fragColor)
-VERTEX_SOURCE("overlay_paint_vertcol_vert.glsl")
-FRAGMENT_SOURCE("overlay_paint_vertcol_frag.glsl")
-ADDITIONAL_INFO(draw_modelmat)
-GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(overlay_paint_vertcol_clipped)
-ADDITIONAL_INFO(overlay_paint_vertcol)
-ADDITIONAL_INFO(drw_clipped)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
+OVERLAY_INFO_CLIP_VARIATION(overlay_paint_texture)
 
 /** \} */
 
@@ -149,28 +120,21 @@ FRAGMENT_OUT(0, VEC4, fragColor)
 FRAGMENT_OUT(1, VEC4, lineOutput)
 VERTEX_SOURCE("overlay_paint_weight_vert.glsl")
 FRAGMENT_SOURCE("overlay_paint_weight_frag.glsl")
+ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_globals)
 GPU_SHADER_CREATE_END()
 
+OVERLAY_INFO_CLIP_VARIATION(overlay_paint_weight)
+
 GPU_SHADER_CREATE_INFO(overlay_paint_weight_fake_shading)
+DO_STATIC_COMPILATION()
 ADDITIONAL_INFO(overlay_paint_weight)
 DEFINE("FAKE_SHADING")
 PUSH_CONSTANT(VEC3, light_dir)
-DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(overlay_paint_weight_clipped)
-ADDITIONAL_INFO(overlay_paint_weight)
-ADDITIONAL_INFO(drw_clipped)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(overlay_paint_weight_fake_shading_clipped)
-ADDITIONAL_INFO(overlay_paint_weight_fake_shading)
-ADDITIONAL_INFO(drw_clipped)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
+OVERLAY_INFO_CLIP_VARIATION(overlay_paint_weight_fake_shading)
 
 /** \} */
 
@@ -194,14 +158,11 @@ PUSH_CONSTANT(BOOL, useSelect)
 FRAGMENT_OUT(0, VEC4, fragColor)
 VERTEX_SOURCE("overlay_paint_wire_vert.glsl")
 FRAGMENT_SOURCE("overlay_varying_color.glsl")
+ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(draw_modelmat)
 ADDITIONAL_INFO(draw_globals)
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(overlay_paint_wire_clipped)
-ADDITIONAL_INFO(overlay_paint_vertcol)
-ADDITIONAL_INFO(drw_clipped)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
+OVERLAY_INFO_CLIP_VARIATION(overlay_paint_wire)
 
 /** \} */

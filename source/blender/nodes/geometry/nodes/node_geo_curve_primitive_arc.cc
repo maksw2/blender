@@ -2,8 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <numeric>
-
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
@@ -120,12 +118,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryCurvePrimitiveArc *data = MEM_cnew<NodeGeometryCurvePrimitiveArc>(__func__);
+  NodeGeometryCurvePrimitiveArc *data = MEM_callocN<NodeGeometryCurvePrimitiveArc>(__func__);
 
   data->mode = GEO_NODE_CURVE_PRIMITIVE_ARC_TYPE_RADIUS;
   node->storage = data;
@@ -372,16 +370,20 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(&ntype, GEO_NODE_CURVE_PRIMITIVE_ARC, "Arc", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeCurveArc", GEO_NODE_CURVE_PRIMITIVE_ARC);
+  ntype.ui_name = "Arc";
+  ntype.ui_description = "Generate a poly spline arc";
+  ntype.enum_name_legacy = "CURVE_PRIMITIVE_ARC";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.initfunc = node_init;
-  blender::bke::node_type_storage(&ntype,
+  blender::bke::node_type_storage(ntype,
                                   "NodeGeometryCurvePrimitiveArc",
                                   node_free_standard_storage,
                                   node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

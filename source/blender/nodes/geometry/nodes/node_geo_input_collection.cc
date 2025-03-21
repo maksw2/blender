@@ -29,11 +29,15 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_INPUT_COLLECTION, "Collection", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeInputCollection", GEO_NODE_INPUT_COLLECTION);
+  ntype.ui_name = "Collection";
+  ntype.ui_description = "Output a single collection";
+  ntype.enum_name_legacy = "INPUT_COLLECTION";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.draw_buttons = node_layout;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

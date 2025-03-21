@@ -9,7 +9,6 @@
 #include "DNA_gpencil_legacy_types.h"
 #include "DNA_scene_types.h"
 
-#include "RNA_access.hh"
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
@@ -23,11 +22,15 @@
 
 #  include "BLT_translation.hh"
 
+#  include "BLI_math_base.h"
+#  include "BLI_string.h"
+#  include "BLI_string_utf8.h"
 #  include "BLI_string_utils.hh"
 
 #  include "BKE_animsys.h"
 #  include "BKE_gpencil_legacy.h"
 #  include "BKE_icons.h"
+#  include "BKE_report.hh"
 
 #  include "DEG_depsgraph.hh"
 
@@ -83,7 +86,7 @@ static void rna_annotation_frame_remove(bGPDlayer *layer,
   }
 
   BKE_gpencil_layer_frame_delete(layer, frame);
-  RNA_POINTER_INVALIDATE(frame_ptr);
+  frame_ptr->invalidate();
 
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, nullptr);
 }
@@ -121,7 +124,7 @@ static void rna_annotation_layer_remove(bGPdata *gpd, ReportList *reports, Point
   }
 
   BKE_gpencil_layer_delete(gpd, layer);
-  RNA_POINTER_INVALIDATE(layer_ptr);
+  layer_ptr->invalidate();
 
   WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_EDITED, nullptr);
 }
@@ -145,9 +148,7 @@ static int rna_annotation_layer_active_frame_editable(const PointerRNA *ptr,
   if (gpl->flag & GP_LAYER_LOCKED) {
     return 0;
   }
-  else {
-    return PROP_EDITABLE;
-  }
+  return PROP_EDITABLE;
 }
 
 static void rna_annotation_layer_info_set(PointerRNA *ptr, const char *value)

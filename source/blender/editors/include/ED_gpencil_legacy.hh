@@ -75,21 +75,6 @@ struct tGPspoint {
 /* Context-dependent */
 
 /**
- * Get pointer to active Grease Pencil data-block,
- * and an RNA-pointer to trace back to whatever owns it.
- */
-bGPdata **ED_gpencil_data_get_pointers(const bContext *C, PointerRNA *r_ptr);
-
-/**
- * Context independent (i.e. each required part is passed in instead).
- *
- * Get pointer to active Grease Pencil data-block,
- * and an RNA-pointer to trace back to whatever owns it,
- * when context info is not available.
- */
-bGPdata **ED_gpencil_data_get_pointers_direct(ScrArea *area, Object *ob, PointerRNA *r_ptr);
-
-/**
  * Get the active Grease Pencil data-block
  * \note This is the original (#G.main) copy of the data-block, stored in files.
  * Do not use for reading evaluated copies of GP Objects data.
@@ -245,23 +230,7 @@ bool ED_gpencil_anim_copybuf_copy(bAnimContext *ac);
  */
 bool ED_gpencil_anim_copybuf_paste(bAnimContext *ac, short offset_mode);
 
-/* ------------ Grease-Pencil Undo System ------------------ */
-int ED_gpencil_session_active();
-/**
- * \param step: eUndoStepDir.
- */
-int ED_undo_gpencil_step(bContext *C, int step); /* eUndoStepDir. */
-
 /* ----------- Add Primitive Utilities -------------- */
-
-/**
- * Get drawing reference point for conversion or projection of the stroke
- * \param r_vec: Reference point found
- */
-void ED_gpencil_drawing_reference_get(const Scene *scene,
-                                      const Object *ob,
-                                      char align_flag,
-                                      float r_vec[3]);
 
 /* texture coordinate utilities */
 

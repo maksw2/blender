@@ -25,7 +25,7 @@
 
 #include "gpu_select_private.hh"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 // #define DEBUG_PRINT
 
@@ -39,7 +39,7 @@
 /** \name #SubRectStride
  * \{ */
 
-/** For looping over a sub-region of a #rcti, could be moved into 'rct.c'. */
+/** For looping over a sub-region of a #rcti, could be moved into `rct.c`. */
 struct SubRectStride {
   /** Start here. */
   uint start;

@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include <algorithm>
-#include <iostream>
 #include <random>
 
 #include "GEO_randomize.hh"
@@ -12,8 +11,6 @@
 #include "DNA_mesh_types.h"
 #include "DNA_pointcloud_types.h"
 
-#include "BKE_attribute.hh"
-#include "BKE_attribute_math.hh"
 #include "BKE_curves.hh"
 #include "BKE_customdata.hh"
 #include "BKE_geometry_set.hh"
@@ -80,7 +77,7 @@ static void reorder_customdata(CustomData &data, const Span<int> new_by_old_map)
     const int new_i = new_by_old_map[old_i];
     CustomData_copy_data(&data, &new_data, old_i, new_i, 1);
   }
-  CustomData_free(&data, new_by_old_map.size());
+  CustomData_free(&data);
   data = new_data;
 }
 
@@ -151,7 +148,7 @@ static void reorder_customdata_groups(CustomData &data,
     BLI_assert(old_range.size() == new_range.size());
     CustomData_copy_data(&data, &new_data, old_range.start(), new_range.start(), old_range.size());
   }
-  CustomData_free(&data, elements_num);
+  CustomData_free(&data);
   data = new_data;
 }
 

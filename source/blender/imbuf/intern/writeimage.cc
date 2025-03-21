@@ -11,7 +11,6 @@
 #include <cstdlib>
 
 #include "BLI_path_utils.hh" /* For assertions. */
-#include "BLI_utildefines.h"
 
 #include "IMB_colormanagement.hh"
 #include "IMB_filetype.hh"
@@ -43,7 +42,7 @@ bool IMB_saveiff(ImBuf *ibuf, const char *filepath, int flags)
   if (!(type->flag & IM_FTYPE_FLOAT)) {
     if (ibuf->byte_buffer.data == nullptr && ibuf->float_buffer.data) {
       ibuf->byte_buffer.colorspace = colormanage_colorspace_get_roled(COLOR_ROLE_DEFAULT_BYTE);
-      IMB_rect_from_float(ibuf);
+      IMB_byte_from_float(ibuf);
     }
   }
 

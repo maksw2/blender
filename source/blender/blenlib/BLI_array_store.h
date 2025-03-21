@@ -9,9 +9,7 @@
  * \brief Efficient in-memory storage of multiple similar arrays.
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "BLI_sys_types.h"
 
 typedef struct BArrayState BArrayState;
 typedef struct BArrayStore BArrayStore;
@@ -98,7 +96,3 @@ void *BLI_array_store_state_data_get_alloc(BArrayState *state, size_t *r_data_le
  * \note Only for tests.
  */
 bool BLI_array_store_is_valid(BArrayStore *bs);
-
-#ifdef __cplusplus
-}
-#endif

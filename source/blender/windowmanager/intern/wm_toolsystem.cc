@@ -54,6 +54,10 @@ static void toolsystem_refresh_screen_from_active_tool(Main *bmain,
                                                        bToolRef *tref);
 static void toolsystem_ref_set_by_brush_type(bContext *C, const char *brush_type);
 
+static void toolsystem_ref_set_by_id_pending(Main *bmain,
+                                             bToolRef *tref,
+                                             const char *idname_pending);
+
 /* -------------------------------------------------------------------- */
 /** \name Tool Reference API
  * \{ */
@@ -111,7 +115,7 @@ bool WM_toolsystem_ref_ensure(WorkSpace *workspace, const bToolKey *tkey, bToolR
     *r_tref = tref;
     return false;
   }
-  tref = static_cast<bToolRef *>(MEM_callocN(sizeof(*tref), __func__));
+  tref = MEM_callocN<bToolRef>(__func__);
   BLI_addhead(&workspace->tools, tref);
   tref->space_type = tkey->space_type;
   tref->mode = tkey->mode;
@@ -265,7 +269,7 @@ static void toolsystem_brush_type_binding_update(Paint *paint,
   }
   /* Add new reference. */
   else {
-    NamedBrushAssetReference *new_brush_ref = MEM_cnew<NamedBrushAssetReference>(__func__);
+    NamedBrushAssetReference *new_brush_ref = MEM_callocN<NamedBrushAssetReference>(__func__);
 
     new_brush_ref->name = BLI_strdup(brush_type_name);
     new_brush_ref->brush_asset_reference = MEM_new<AssetWeakReference>(
@@ -315,11 +319,10 @@ bool WM_toolsystem_activate_brush_and_tool(bContext *C, Paint *paint, Brush *bru
   return true;
 }
 
-static void toolsystem_brush_activate_from_toolref_for_object_particle(const bContext *C,
+static void toolsystem_brush_activate_from_toolref_for_object_particle(const Main *bmain,
                                                                        const WorkSpace *workspace,
                                                                        const bToolRef *tref)
 {
-  const Main *bmain = CTX_data_main(C);
   const bToolRef_Runtime *tref_rt = tref->runtime;
 
   if (!tref_rt->data_block[0]) {
@@ -342,11 +345,10 @@ static void toolsystem_brush_activate_from_toolref_for_object_particle(const bCo
   }
 }
 
-static void toolsystem_brush_activate_from_toolref_for_object_paint(const bContext *C,
+static void toolsystem_brush_activate_from_toolref_for_object_paint(Main *bmain,
                                                                     const WorkSpace *workspace,
                                                                     const bToolRef *tref)
 {
-  Main *bmain = CTX_data_main(C);
   bToolRef_Runtime *tref_rt = tref->runtime;
 
   const PaintMode paint_mode = BKE_paintmode_get_from_tool(tref);
@@ -410,7 +412,7 @@ static void toolsystem_brush_activate_from_toolref_for_object_paint(const bConte
 /**
  * Activate a brush compatible with \a tref, call when the active tool changes.
  */
-static void toolsystem_brush_activate_from_toolref(const bContext *C,
+static void toolsystem_brush_activate_from_toolref(Main *bmain,
                                                    const WorkSpace *workspace,
                                                    const bToolRef *tref)
 {
@@ -418,22 +420,55 @@ static void toolsystem_brush_activate_from_toolref(const bContext *C,
 
   if (tref->space_type == SPACE_VIEW3D) {
     if (tref->mode == CTX_MODE_PARTICLE) {
-      toolsystem_brush_activate_from_toolref_for_object_particle(C, workspace, tref);
+      toolsystem_brush_activate_from_toolref_for_object_particle(bmain, workspace, tref);
     }
     else {
-      toolsystem_brush_activate_from_toolref_for_object_paint(C, workspace, tref);
+      toolsystem_brush_activate_from_toolref_for_object_paint(bmain, workspace, tref);
     }
   }
   else if (tref->space_type == SPACE_IMAGE) {
     if (tref->mode == SI_MODE_PAINT) {
-      toolsystem_brush_activate_from_toolref_for_object_paint(C, workspace, tref);
+      toolsystem_brush_activate_from_toolref_for_object_paint(bmain, workspace, tref);
+    }
+  }
+}
+
+/**
+ * Special case, the active brush data-block for the image & 3D viewport are shared.
+ * This means changing the active brush tool in one space must change the tool
+ * for the other space as well, see: #131062.
+ */
+static void toolsystem_brush_sync_for_texture_paint(Main *bmain,
+                                                    WorkSpace *workspace,
+                                                    bToolRef *tref)
+{
+  if (tref->space_type == SPACE_VIEW3D) {
+    if (tref->mode == CTX_MODE_PAINT_TEXTURE) {
+      bToolKey tkey{};
+      tkey.space_type = SPACE_IMAGE;
+      tkey.mode = SI_MODE_PAINT;
+      bToolRef *tref_other = WM_toolsystem_ref_find(workspace, &tkey);
+      if (tref_other) {
+        toolsystem_ref_set_by_id_pending(bmain, tref_other, tref->idname);
+      }
+    }
+  }
+  else if (tref->space_type == SPACE_IMAGE) {
+    if (tref->mode == SI_MODE_PAINT) {
+      bToolKey tkey{};
+      tkey.space_type = SPACE_VIEW3D;
+      tkey.mode = CTX_MODE_PAINT_TEXTURE;
+      bToolRef *tref_other = WM_toolsystem_ref_find(workspace, &tkey);
+      if (tref_other) {
+        toolsystem_ref_set_by_id_pending(bmain, tref_other, tref->idname);
+      }
     }
   }
 }
 
 /** \} */
 
-static void toolsystem_ref_link(const bContext *C, WorkSpace *workspace, bToolRef *tref)
+static void toolsystem_ref_link(Main *bmain, WorkSpace *workspace, bToolRef *tref)
 {
   bToolRef_Runtime *tref_rt = tref->runtime;
   if (tref_rt->gizmo_group[0]) {
@@ -455,7 +490,8 @@ static void toolsystem_ref_link(const bContext *C, WorkSpace *workspace, bToolRe
   }
 
   if (tref_rt->flag & TOOLREF_FLAG_USE_BRUSHES) {
-    toolsystem_brush_activate_from_toolref(C, workspace, tref);
+    toolsystem_brush_activate_from_toolref(bmain, workspace, tref);
+    toolsystem_brush_sync_for_texture_paint(bmain, workspace, tref);
   }
 }
 
@@ -465,7 +501,7 @@ static void toolsystem_refresh_ref(const bContext *C, WorkSpace *workspace, bToo
     return;
   }
   /* Currently same operation. */
-  toolsystem_ref_link(C, workspace, tref);
+  toolsystem_ref_link(CTX_data_main(C), workspace, tref);
 }
 void WM_toolsystem_refresh(const bContext *C, WorkSpace *workspace, const bToolKey *tkey)
 {
@@ -548,8 +584,11 @@ void WM_toolsystem_ref_set_from_runtime(bContext *C,
 
   STRNCPY(tref->idname, idname);
 
+  /* This immediate request supersedes any unhandled pending requests. */
+  tref->idname_pending[0] = '\0';
+
   if (tref->runtime == nullptr) {
-    tref->runtime = static_cast<bToolRef_Runtime *>(MEM_callocN(sizeof(*tref->runtime), __func__));
+    tref->runtime = MEM_callocN<bToolRef_Runtime>(__func__);
   }
 
   if (tref_rt != tref->runtime) {
@@ -578,7 +617,7 @@ void WM_toolsystem_ref_set_from_runtime(bContext *C,
     tref->runtime->keymap_fallback[0] = '\0';
   }
 
-  toolsystem_ref_link(C, workspace, tref);
+  toolsystem_ref_link(bmain, workspace, tref);
 
   toolsystem_refresh_screen_from_active_tool(bmain, workspace, tref);
 
@@ -652,7 +691,7 @@ static bool toolsystem_key_ensure_check(const bToolKey *tkey)
     case SPACE_VIEW3D:
       return true;
     case SPACE_IMAGE:
-      if (ELEM(tkey->mode, SI_MODE_PAINT, SI_MODE_UV)) {
+      if (ELEM(tkey->mode, SI_MODE_PAINT, SI_MODE_UV, SI_MODE_VIEW)) {
         return true;
       }
       break;
@@ -971,12 +1010,66 @@ static void toolsystem_ref_set_by_brush_type(bContext *C, const char *brush_type
   }
 }
 
+/**
+ * Request a tool ID be activated in a context where it's not known if the tool exists,
+ * when the areas using this tool are not visible.
+ * In this case, set the `idname` as pending and flag tools area for updating.
+ *
+ * If the tool doesn't exist then the current tool is to be left as-is.
+ */
+static void toolsystem_ref_set_by_id_pending(Main *bmain,
+                                             bToolRef *tref,
+                                             const char *idname_pending)
+{
+  BLI_assert(idname_pending[0]);
+
+  /* Check if the pending or current tool is already set to the requested value. */
+  const bool this_match = STREQ(idname_pending, tref->idname);
+  if (tref->idname_pending[0]) {
+    const bool next_match = STREQ(idname_pending, tref->idname_pending);
+    if (next_match) {
+      return;
+    }
+    /* Highly unlikely but possible the current active tool matches the name.
+     * In this case clear pending as there is nothing to do. */
+    if (this_match) {
+      tref->idname_pending[0] = '\0';
+      return;
+    }
+  }
+  else {
+    if (this_match) {
+      return;
+    }
+  }
+
+  STRNCPY(tref->idname_pending, idname_pending);
+
+  /* If there would be a convenient way to know which screens used which work-spaces,
+   * that could be used here. */
+  LISTBASE_FOREACH (bScreen *, screen, &bmain->screens) {
+    LISTBASE_FOREACH (ScrArea *, area, &screen->areabase) {
+      if (area->runtime.tool == tref) {
+        area->runtime.tool = nullptr;
+        area->runtime.is_tool_set = false;
+        area->flag |= AREA_FLAG_ACTIVE_TOOL_UPDATE;
+      }
+    }
+  }
+}
+
 static void toolsystem_reinit_with_toolref(bContext *C, WorkSpace *workspace, bToolRef *tref)
 {
   bToolKey tkey{};
   tkey.space_type = tref->space_type;
   tkey.mode = tref->mode;
-  WM_toolsystem_ref_set_by_id_ex(C, workspace, &tkey, tref->idname, false);
+
+  const char *idname = tref->idname_pending[0] ? tref->idname_pending : tref->idname;
+
+  WM_toolsystem_ref_set_by_id_ex(C, workspace, &tkey, idname, false);
+
+  /* Never attempt the pending name again, if it's not found, no need to keep trying. */
+  tref->idname_pending[0] = '\0';
 }
 
 static const char *toolsystem_default_tool(const bToolKey *tkey)
@@ -1008,6 +1101,8 @@ static const char *toolsystem_default_tool(const bToolKey *tkey)
       switch (tkey->mode) {
         case SI_MODE_PAINT:
           return "builtin.brush";
+        case SI_MODE_VIEW:
+          return "builtin.sample";
       }
       break;
     case SPACE_NODE: {
@@ -1169,7 +1264,7 @@ bool WM_toolsystem_ref_properties_get_ex(bToolRef *tref,
 {
   IDProperty *group = WM_toolsystem_ref_properties_get_idprops(tref);
   IDProperty *prop = group ? IDP_GetPropertyFromGroup(group, idname) : nullptr;
-  *r_ptr = RNA_pointer_create(nullptr, type, prop);
+  *r_ptr = RNA_pointer_create_discrete(nullptr, type, prop);
   return (prop != nullptr);
 }
 
@@ -1180,7 +1275,7 @@ void WM_toolsystem_ref_properties_ensure_ex(bToolRef *tref,
 {
   IDProperty *group = WM_toolsystem_ref_properties_ensure_idprops(tref);
   IDProperty *prop = idprops_ensure_named_group(group, idname);
-  *r_ptr = RNA_pointer_create(nullptr, type, prop);
+  *r_ptr = RNA_pointer_create_discrete(nullptr, type, prop);
 }
 
 void WM_toolsystem_ref_properties_init_for_keymap(bToolRef *tref,

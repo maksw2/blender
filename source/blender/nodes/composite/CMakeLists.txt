@@ -7,18 +7,12 @@ set(INC
   ..
   ../intern
   ../../editors/include
-  ../../blenkernel
-  ../../blentranslation
-  ../../functions
-  ../../gpu
-  ../../imbuf
+  ../../compositor
   ../../makesrna
-  ../../render
-  ../../windowmanager
-  ../../compositor/realtime_compositor
-  ../../compositor/realtime_compositor/algorithms
-  ../../compositor/realtime_compositor/cached_resources
-  ../../compositor/realtime_compositor/utilities
+  ../../compositor/algorithms
+  ../../compositor/cached_resources
+  ../../compositor/derived_resources
+  ../../compositor/utilities
 
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
@@ -69,6 +63,7 @@ set(SRC
   nodes/node_composite_huecorrect.cc
   nodes/node_composite_id_mask.cc
   nodes/node_composite_image.cc
+  nodes/node_composite_image_info.cc
   nodes/node_composite_inpaint.cc
   nodes/node_composite_invert.cc
   nodes/node_composite_keying.cc
@@ -127,13 +122,19 @@ set(SRC
 )
 
 set(LIB
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
+  PRIVATE bf::blentranslation
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
-  bf_functions
+  PRIVATE bf::functions
+  PRIVATE bf::gpu
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::extern::fmtlib
-  bf_realtime_compositor
+  bf_compositor
+  PRIVATE bf::render
+  PRIVATE bf::windowmanager
 )
 
 if(WITH_OPENCOLORIO)
@@ -142,13 +143,6 @@ endif()
 
 if(WITH_IMAGE_OPENEXR)
   add_definitions(-DWITH_OPENEXR)
-endif()
-
-if(WITH_COMPOSITOR_CPU)
-  list(APPEND INC
-    ../../compositor
-  )
-  add_definitions(-DWITH_COMPOSITOR_CPU)
 endif()
 
 if(WITH_OPENIMAGEDENOISE)

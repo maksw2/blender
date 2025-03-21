@@ -16,7 +16,6 @@
 #include "BLI_array_utils.hh"
 #include "BLI_bit_span_ops.hh"
 #include "BLI_enumerable_thread_specific.hh"
-#include "BLI_math_base.hh"
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
 
@@ -650,7 +649,7 @@ static void invert_mask(Main &bmain, const Scene &scene, Depsgraph &depsgraph, O
   }
 }
 
-static int mask_flood_fill_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus mask_flood_fill_exec(bContext *C, wmOperator *op)
 {
   Main &bmain = *CTX_data_main(C);
   const Scene &scene = *CTX_data_scene(C);
@@ -852,7 +851,7 @@ static void gesture_end(bContext &C, gesture::GestureData &gesture_data)
 static void init_operation(bContext &C, gesture::GestureData &gesture_data, wmOperator &op)
 {
   gesture_data.operation = reinterpret_cast<gesture::Operation *>(
-      MEM_cnew<MaskOperation>(__func__));
+      MEM_callocN<MaskOperation>(__func__));
 
   MaskOperation *mask_operation = (MaskOperation *)gesture_data.operation;
 
@@ -884,7 +883,7 @@ static void gesture_operator_properties(wmOperatorType *ot)
       1.0f);
 }
 
-static int gesture_box_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus gesture_box_exec(bContext *C, wmOperator *op)
 {
   std::unique_ptr<gesture::GestureData> gesture_data = gesture::init_from_box(C, op);
   if (!gesture_data) {
@@ -895,7 +894,7 @@ static int gesture_box_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int gesture_lasso_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus gesture_lasso_exec(bContext *C, wmOperator *op)
 {
   std::unique_ptr<gesture::GestureData> gesture_data = gesture::init_from_lasso(C, op);
   if (!gesture_data) {
@@ -906,7 +905,7 @@ static int gesture_lasso_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int gesture_line_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus gesture_line_exec(bContext *C, wmOperator *op)
 {
   std::unique_ptr<gesture::GestureData> gesture_data = gesture::init_from_line(C, op);
   if (!gesture_data) {
@@ -917,7 +916,7 @@ static int gesture_line_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int gesture_polyline_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus gesture_polyline_exec(bContext *C, wmOperator *op)
 {
   std::unique_ptr<gesture::GestureData> gesture_data = gesture::init_from_polyline(C, op);
   if (!gesture_data) {

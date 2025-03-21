@@ -117,7 +117,6 @@ class IndexBuf {
                                     uint max_idx,
                                     GPUPrimType prim_type,
                                     bool clamp_indices_in_range);
-  inline uint index_range(uint *r_min, uint *r_max);
   virtual void strip_restart_indices() = 0;
 };
 
@@ -222,6 +221,9 @@ void GPU_indexbuf_build_in_place_from_memory(blender::gpu::IndexBuf *ibo,
                                              int32_t index_max,
                                              bool uses_restart_indices);
 
+/**
+ * \note Sub-ranges are not taken into account, the whole buffer will be bound without any offset.
+ */
 void GPU_indexbuf_bind_as_ssbo(blender::gpu::IndexBuf *elem, int binding);
 
 blender::gpu::IndexBuf *GPU_indexbuf_build_curves_on_device(GPUPrimType prim_type,

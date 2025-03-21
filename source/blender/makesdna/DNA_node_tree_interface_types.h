@@ -65,8 +65,10 @@ typedef enum NodeTreeInterfaceSocketFlag {
   NODE_INTERFACE_SOCKET_LAYER_SELECTION = 1 << 6,
   /* INSPECT is used by Connect to Output operator to ensure socket that exits from node group. */
   NODE_INTERFACE_SOCKET_INSPECT = 1 << 7,
+  /* Socket is used in the panel header as a toggle. */
+  NODE_INTERFACE_SOCKET_PANEL_TOGGLE = 1 << 8,
 } NodeTreeInterfaceSocketFlag;
-ENUM_OPERATORS(NodeTreeInterfaceSocketFlag, NODE_INTERFACE_SOCKET_INSPECT);
+ENUM_OPERATORS(NodeTreeInterfaceSocketFlag, NODE_INTERFACE_SOCKET_PANEL_TOGGLE);
 
 typedef struct bNodeTreeInterfaceSocket {
   bNodeTreeInterfaceItem item;
@@ -90,7 +92,7 @@ typedef struct bNodeTreeInterfaceSocket {
   /* Socket default value and associated data, e.g. bNodeSocketValueFloat. */
   void *socket_data;
 
-  IDProperty *properties;
+  struct IDProperty *properties;
 
 #ifdef __cplusplus
   bNodeSocketTypeHandle *socket_typeinfo() const;
@@ -100,7 +102,7 @@ typedef struct bNodeTreeInterfaceSocket {
    * Set the \a socket_type and replace the \a socket_data.
    * \param new_socket_type: Socket type idname, e.g. "NodeSocketFloat"
    */
-  bool set_socket_type(const char *new_socket_type);
+  bool set_socket_type(blender::StringRef new_socket_type);
 
   /**
    * Use an existing socket to define an interface socket.
@@ -221,6 +223,10 @@ typedef struct bNodeTreeInterfacePanel {
   /** Same as above but for a const interface. */
   void foreach_item(blender::FunctionRef<bool(const bNodeTreeInterfaceItem &item)> fn,
                     bool include_self = false) const;
+
+  /** Get the socket that is part of the panel header if available. */
+  const bNodeTreeInterfaceSocket *header_toggle_socket() const;
+  bNodeTreeInterfaceSocket *header_toggle_socket();
 
  private:
   /** Find a valid position for inserting in the items span. */

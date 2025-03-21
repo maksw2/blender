@@ -24,6 +24,7 @@
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
+#include "DNA_texture_types.h"
 
 #include "BKE_bvhutils.hh"
 #include "BKE_colortools.hh" /* CurveMapping. */
@@ -74,7 +75,7 @@ struct Vert2GeomData {
 
   const SpaceTransform *loc2trgt;
 
-  BVHTreeFromMesh *treeData[3];
+  blender::bke::BVHTreeFromMesh *treeData[3];
 
   /* Write data, but not needing locking (two different threads will never write same index). */
   float *dist[3];
@@ -154,9 +155,9 @@ static void get_vert2geom_distance(int verts_num,
   Vert2GeomData data{};
   Vert2GeomDataChunk data_chunk = {{{0}}};
 
-  BVHTreeFromMesh treeData_v{};
-  BVHTreeFromMesh treeData_e{};
-  BVHTreeFromMesh treeData_f{};
+  blender::bke::BVHTreeFromMesh treeData_v{};
+  blender::bke::BVHTreeFromMesh treeData_e{};
+  blender::bke::BVHTreeFromMesh treeData_f{};
 
   if (dist_v) {
     /* Create a BVH-tree of the given target's verts. */
@@ -359,7 +360,7 @@ static void foreach_ID_link(ModifierData *md, Object *ob, IDWalkFunc walk, void 
 
 static void foreach_tex_link(ModifierData *md, Object *ob, TexWalkFunc walk, void *user_data)
 {
-  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_Modifier, md);
+  PointerRNA ptr = RNA_pointer_create_discrete(&ob->id, &RNA_Modifier, md);
   PropertyRNA *prop = RNA_struct_find_property(&ptr, "mask_texture");
   walk(user_data, ob, md, &ptr, prop);
 }
@@ -472,10 +473,9 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
   }
 
   /* Find out which vertices to work on (all vertices in vgroup), and get their relevant weight. */
-  tidx = static_cast<int *>(MEM_malloc_arrayN(verts_num, sizeof(int), __func__));
-  tw = static_cast<float *>(MEM_malloc_arrayN(verts_num, sizeof(float), __func__));
-  tdw = static_cast<MDeformWeight **>(
-      MEM_malloc_arrayN(verts_num, sizeof(MDeformWeight *), __func__));
+  tidx = MEM_malloc_arrayN<int>(size_t(verts_num), __func__);
+  tw = MEM_malloc_arrayN<float>(size_t(verts_num), __func__);
+  tdw = MEM_malloc_arrayN<MDeformWeight *>(size_t(verts_num), __func__);
   for (i = 0; i < verts_num; i++) {
     MDeformWeight *_dw = BKE_defvert_find_index(&dvert[i], defgrp_index);
     if (_dw) {
@@ -492,12 +492,11 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
     return mesh;
   }
   if (index_num != verts_num) {
-    indices = static_cast<int *>(MEM_malloc_arrayN(index_num, sizeof(int), __func__));
+    indices = MEM_malloc_arrayN<int>(size_t(index_num), __func__);
     memcpy(indices, tidx, sizeof(int) * index_num);
-    org_w = static_cast<float *>(MEM_malloc_arrayN(index_num, sizeof(float), __func__));
+    org_w = MEM_malloc_arrayN<float>(size_t(index_num), __func__);
     memcpy(org_w, tw, sizeof(float) * index_num);
-    dw = static_cast<MDeformWeight **>(
-        MEM_malloc_arrayN(index_num, sizeof(MDeformWeight *), __func__));
+    dw = MEM_malloc_arrayN<MDeformWeight *>(size_t(index_num), __func__);
     memcpy(dw, tdw, sizeof(MDeformWeight *) * index_num);
     MEM_freeN(tw);
     MEM_freeN(tdw);
@@ -506,7 +505,7 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
     org_w = tw;
     dw = tdw;
   }
-  new_w = static_cast<float *>(MEM_malloc_arrayN(index_num, sizeof(float), __func__));
+  new_w = MEM_malloc_arrayN<float>(size_t(index_num), __func__);
   MEM_freeN(tidx);
 
   const blender::Span<blender::float3> positions = mesh->vert_positions();
@@ -534,14 +533,11 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
         BKE_mesh_wrapper_ensure_mdata(target_mesh);
 
         SpaceTransform loc2trgt;
-        float *dists_v = use_trgt_verts ? static_cast<float *>(MEM_malloc_arrayN(
-                                              index_num, sizeof(float), __func__)) :
+        float *dists_v = use_trgt_verts ? MEM_malloc_arrayN<float>(size_t(index_num), __func__) :
                                           nullptr;
-        float *dists_e = use_trgt_edges ? static_cast<float *>(MEM_malloc_arrayN(
-                                              index_num, sizeof(float), __func__)) :
+        float *dists_e = use_trgt_edges ? MEM_malloc_arrayN<float>(size_t(index_num), __func__) :
                                           nullptr;
-        float *dists_f = use_trgt_faces ? static_cast<float *>(MEM_malloc_arrayN(
-                                              index_num, sizeof(float), __func__)) :
+        float *dists_f = use_trgt_faces ? MEM_malloc_arrayN<float>(size_t(index_num), __func__) :
                                           nullptr;
 
         BLI_SPACE_TRANSFORM_SETUP(&loc2trgt, ob, obr);
@@ -639,22 +635,22 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
   uiLayoutSetPropSep(layout, true);
 
   uiItemPointerR(
-      layout, ptr, "vertex_group", &ob_ptr, "vertex_groups", nullptr, ICON_GROUP_VERTEX);
+      layout, ptr, "vertex_group", &ob_ptr, "vertex_groups", std::nullopt, ICON_GROUP_VERTEX);
 
-  uiItemR(layout, ptr, "target", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "target", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   uiItemS(layout);
 
-  uiItemR(layout, ptr, "proximity_mode", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "proximity_mode", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   if (RNA_enum_get(ptr, "proximity_mode") == MOD_WVG_PROXIMITY_GEOMETRY) {
     uiItemR(layout, ptr, "proximity_geometry", UI_ITEM_R_EXPAND, IFACE_("Geometry"), ICON_NONE);
   }
 
   col = uiLayoutColumn(layout, true);
-  uiItemR(col, ptr, "min_dist", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "max_dist", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "min_dist", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "max_dist", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  uiItemR(layout, ptr, "normalize", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "normalize", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void falloff_panel_draw(const bContext * /*C*/, Panel *panel)

@@ -13,13 +13,10 @@
 
 #include "bpy_capi_utils.hh"
 
-#include "MEM_guardedalloc.h"
-
 #include "BKE_blender_cli_command.hh"
 
 #include "../generic/py_capi_utils.hh"
 #include "../generic/python_compat.hh"
-#include "../generic/python_utildefines.hh"
 
 #include "bpy_cli_command.hh" /* Own include. */
 
@@ -65,9 +62,10 @@ static int bpy_cli_command_exec(bContext *C,
                                 const int argc,
                                 const char **argv)
 {
-  int exit_code = EXIT_FAILURE;
   PyGILState_STATE gilstate;
   bpy_context_set(C, &gilstate);
+
+  int exit_code = EXIT_FAILURE;
 
   /* For the most part `sys.argv[-argc:]` is sufficient & less trouble than re-creating this
    * list. Don't do this because:

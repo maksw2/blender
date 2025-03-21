@@ -17,9 +17,10 @@
 
 #include "DNA_listBase.h"
 
+#include "BLI_assert.h"
 #include "BLI_listbase.h"
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 void BLI_movelisttolist(ListBase *dst, ListBase *src)
 {
@@ -250,8 +251,8 @@ void BLI_listbases_swaplinks(ListBase *listbasea, ListBase *listbaseb, void *vli
 
 void *BLI_pophead(ListBase *listbase)
 {
-  Link *link;
-  if ((link = static_cast<Link *>(listbase->first))) {
+  Link *link = static_cast<Link *>(listbase->first);
+  if (link) {
     BLI_remlink(listbase, link);
   }
   return link;
@@ -259,8 +260,8 @@ void *BLI_pophead(ListBase *listbase)
 
 void *BLI_poptail(ListBase *listbase)
 {
-  Link *link;
-  if ((link = static_cast<Link *>(listbase->last))) {
+  Link *link = static_cast<Link *>(listbase->last);
+  if (link) {
     BLI_remlink(listbase, link);
   }
   return link;
@@ -915,7 +916,7 @@ LinkData *BLI_genericNodeN(void *data)
   }
 
   /* create new link, and make it hold the given data */
-  ld = MEM_cnew<LinkData>(__func__);
+  ld = MEM_callocN<LinkData>(__func__);
   ld->data = data;
 
   return ld;

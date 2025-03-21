@@ -12,9 +12,13 @@
 #include "DNA_image_types.h"
 #include "DNA_scene_types.h"
 
+#include "BLI_math_vector.h"
+
 #include "IMB_imbuf_types.hh"
 
 #include "BKE_image.hh"
+
+#include "DRW_render.hh"
 
 #include "image_enums.hh"
 #include "image_space.hh"
@@ -23,8 +27,8 @@ namespace blender::image_engine {
 
 struct ShaderParameters {
   ImageDrawFlags flags = ImageDrawFlags::DEFAULT;
-  float shuffle[4];
-  float far_near[2];
+  float4 shuffle;
+  float2 far_near;
   bool use_premul_alpha = false;
 
   void update(AbstractSpaceAccessor *space,
@@ -33,14 +37,14 @@ struct ShaderParameters {
               ImBuf *image_buffer)
   {
     flags = ImageDrawFlags::DEFAULT;
-    copy_v4_fl(shuffle, 1.0f);
-    copy_v2_fl2(far_near, 100.0f, 0.0f);
+    shuffle = float4(1.0f);
+    far_near = float2(100.0f, 0.0f);
 
     use_premul_alpha = BKE_image_has_gpu_texture_premultiplied_alpha(image, image_buffer);
 
     if (scene->camera && scene->camera->type == OB_CAMERA) {
-      const Camera *camera = static_cast<const Camera *>(scene->camera->data);
-      copy_v2_fl2(far_near, camera->clip_end, camera->clip_start);
+      const Camera &camera = DRW_object_get_data_for_drawing<const Camera>(*scene->camera);
+      far_near = float2(camera.clip_end, camera.clip_start);
     }
     space->get_shader_parameters(*this, image_buffer);
   }

@@ -6,6 +6,7 @@
  * \ingroup spconsole
  */
 
+#include <algorithm>
 #include <cctype> /* #ispunct */
 #include <cstdlib>
 #include <cstring>
@@ -110,9 +111,7 @@ static int console_delete_editable_selection(SpaceConsole *sc)
     return 0;
   }
 
-  if (sc->sel_start < 0) {
-    sc->sel_start = 0;
-  }
+  sc->sel_start = std::max(sc->sel_start, 0);
 
   ConsoleLine *cl = static_cast<ConsoleLine *>(sc->history.last);
   if (!cl || sc->sel_start > cl->len) {
@@ -123,10 +122,7 @@ static int console_delete_editable_selection(SpaceConsole *sc)
   int del_start = sc->sel_start;
   int del_end = sc->sel_end;
 
-  if (del_end > cl->len) {
-    /* Adjust range to only editable portion. */
-    del_end = cl->len;
-  }
+  del_end = std::min(del_end, cl->len);
 
   const int len = del_end - del_start;
   memmove(cl->line + cl->len - del_end, cl->line + cl->len - del_start, del_start);
@@ -380,7 +376,7 @@ static const EnumPropertyItem console_move_type_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int console_move_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_move_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ConsoleLine *ci = console_history_verify(C);
@@ -475,7 +471,7 @@ void CONSOLE_OT_move(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
-static int console_insert_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_insert_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ScrArea *area = CTX_wm_area(C);
@@ -517,7 +513,7 @@ static int console_insert_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
-static int console_insert_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus console_insert_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   /* NOTE: the "text" property is always set from key-map,
    * so we can't use #RNA_struct_property_is_set, check the length instead. */
@@ -563,7 +559,7 @@ void CONSOLE_OT_insert(wmOperatorType *ot)
 /** \name Indent or Autocomplete Operator
  * \{ */
 
-static int console_indent_or_autocomplete_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus console_indent_or_autocomplete_exec(bContext *C, wmOperator * /*op*/)
 {
   ConsoleLine *ci = console_history_verify(C);
   bool text_before_cursor = false;
@@ -608,7 +604,7 @@ void CONSOLE_OT_indent_or_autocomplete(wmOperatorType *ot)
 /** \name Indent Operator
  * \{ */
 
-static int console_indent_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus console_indent_exec(bContext *C, wmOperator * /*op*/)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ConsoleLine *ci = console_history_verify(C);
@@ -657,7 +653,7 @@ void CONSOLE_OT_indent(wmOperatorType *ot)
 
 /** \} */
 
-static int console_unindent_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus console_unindent_exec(bContext *C, wmOperator * /*op*/)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ConsoleLine *ci = console_history_verify(C);
@@ -719,7 +715,7 @@ static const EnumPropertyItem console_delete_type_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static int console_delete_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_delete_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ConsoleLine *ci = console_history_verify(C);
@@ -824,7 +820,7 @@ void CONSOLE_OT_delete(wmOperatorType *ot)
                "Which part of the text to delete");
 }
 
-static int console_clear_line_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus console_clear_line_exec(bContext *C, wmOperator * /*op*/)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ConsoleLine *ci = console_history_verify(C);
@@ -861,7 +857,7 @@ void CONSOLE_OT_clear_line(wmOperatorType *ot)
 }
 
 /* the python exec operator uses this */
-static int console_clear_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_clear_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ScrArea *area = CTX_wm_area(C);
@@ -908,7 +904,7 @@ void CONSOLE_OT_clear(wmOperatorType *ot)
 }
 
 /* the python exec operator uses this */
-static int console_history_cycle_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_history_cycle_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ScrArea *area = CTX_wm_area(C);
@@ -994,7 +990,7 @@ void CONSOLE_OT_history_cycle(wmOperatorType *ot)
 }
 
 /* the python exec operator uses this */
-static int console_history_append_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_history_append_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ScrArea *area = CTX_wm_area(C);
@@ -1063,7 +1059,7 @@ void CONSOLE_OT_history_append(wmOperatorType *ot)
 }
 
 /* the python exec operator uses this */
-static int console_scrollback_append_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_scrollback_append_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ConsoleLine *ci;
@@ -1117,7 +1113,7 @@ void CONSOLE_OT_scrollback_append(wmOperatorType *ot)
                "Console output type");
 }
 
-static int console_copy_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_copy_exec(bContext *C, wmOperator *op)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   char *buf = console_select_to_buffer(sc);
@@ -1162,7 +1158,7 @@ void CONSOLE_OT_copy(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
-static int console_paste_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus console_paste_exec(bContext *C, wmOperator *op)
 {
   const bool selection = RNA_boolean_get(op->ptr, "selection");
   SpaceConsole *sc = CTX_wm_space_console(C);
@@ -1300,7 +1296,9 @@ static void console_cursor_set_exit(bContext *C, wmOperator *op)
   MEM_freeN(scu);
 }
 
-static int console_modal_select_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus console_select_set_invoke(bContext *C,
+                                                  wmOperator *op,
+                                                  const wmEvent *event)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ScrArea *area = CTX_wm_area(C);
@@ -1332,7 +1330,7 @@ static int console_modal_select_invoke(bContext *C, wmOperator *op, const wmEven
   return OPERATOR_RUNNING_MODAL;
 }
 
-static int console_modal_select(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus console_select_set_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   /* Move text cursor to the last selection point. */
   switch (event->type) {
@@ -1358,7 +1356,7 @@ static int console_modal_select(bContext *C, wmOperator *op, const wmEvent *even
   return OPERATOR_RUNNING_MODAL;
 }
 
-static void console_modal_select_cancel(bContext *C, wmOperator *op)
+static void console_select_set_cancel(bContext *C, wmOperator *op)
 {
   console_cursor_set_exit(C, op);
 }
@@ -1371,15 +1369,15 @@ void CONSOLE_OT_select_set(wmOperatorType *ot)
   ot->description = "Set the console selection";
 
   /* api callbacks */
-  ot->invoke = console_modal_select_invoke;
-  ot->modal = console_modal_select;
-  ot->cancel = console_modal_select_cancel;
+  ot->invoke = console_select_set_invoke;
+  ot->modal = console_select_set_modal;
+  ot->cancel = console_select_set_cancel;
   ot->poll = ED_operator_console_active;
 }
 
-static int console_modal_select_all_invoke(bContext *C,
-                                           wmOperator * /*op*/,
-                                           const wmEvent * /*event*/)
+static wmOperatorStatus console_modal_select_all_invoke(bContext *C,
+                                                        wmOperator * /*op*/,
+                                                        const wmEvent * /*event*/)
 {
   ScrArea *area = CTX_wm_area(C);
   SpaceConsole *sc = CTX_wm_space_console(C);
@@ -1415,7 +1413,9 @@ void CONSOLE_OT_select_all(wmOperatorType *ot)
   ot->poll = ED_operator_console_active;
 }
 
-static int console_selectword_invoke(bContext *C, wmOperator * /*op*/, const wmEvent *event)
+static wmOperatorStatus console_selectword_invoke(bContext *C,
+                                                  wmOperator * /*op*/,
+                                                  const wmEvent *event)
 {
   SpaceConsole *sc = CTX_wm_space_console(C);
   ScrArea *area = CTX_wm_area(C);
@@ -1423,7 +1423,7 @@ static int console_selectword_invoke(bContext *C, wmOperator * /*op*/, const wmE
 
   ConsoleLine cl_dummy = {nullptr};
   ConsoleLine *cl;
-  int ret = OPERATOR_CANCELLED;
+  wmOperatorStatus ret = OPERATOR_CANCELLED;
   int pos, offset, n;
 
   pos = console_char_pick(sc, region, event->mval);

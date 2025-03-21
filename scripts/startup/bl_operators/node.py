@@ -16,6 +16,7 @@ from bpy.props import (
     EnumProperty,
     FloatVectorProperty,
     StringProperty,
+    IntProperty,
 )
 from mathutils import (
     Vector,
@@ -300,15 +301,29 @@ class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
     bl_label = "New Item"
     bl_options = {'REGISTER', 'UNDO'}
 
-    item_type: EnumProperty(
-        name="Item Type",
-        description="Type of the item to create",
-        items=(
+    def get_items(_self, context):
+        snode = context.space_data
+        tree = snode.edit_tree
+        interface = tree.interface
+
+        items = [
             ('INPUT', "Input", ""),
             ('OUTPUT', "Output", ""),
             ('PANEL', "Panel", ""),
-        ),
-        default='INPUT',
+        ]
+
+        active_item = interface.active
+        # Panels have the extra option to add a toggle.
+        if active_item and active_item.item_type == 'PANEL' and tree.type in {'GEOMETRY', 'SHADER'}:
+            items.append(('PANEL_TOGGLE', "Panel Toggle", ""))
+
+        return items
+
+    item_type: EnumProperty(
+        name="Item Type",
+        description="Type of the item to create",
+        items=get_items,
+        default=0,
     )
 
     # Returns a valid socket type for the given tree or None.
@@ -346,6 +361,18 @@ class NODE_OT_interface_item_new(NodeInterfaceOperator, Operator):
             item = interface.new_socket("Socket", socket_type=self.find_valid_socket_type(tree), in_out='OUTPUT')
         elif self.item_type == 'PANEL':
             item = interface.new_panel("Panel")
+        elif self.item_type == 'PANEL_TOGGLE':
+            active_panel = active_item
+            if len(active_panel.interface_items) > 0:
+                first_item = active_panel.interface_items[0]
+                if type(first_item) is bpy.types.NodeTreeInterfaceSocketBool and first_item.is_panel_toggle:
+                    self.report({'INFO'}, "Panel already has a toggle")
+                    return {'CANCELLED'}
+            item = interface.new_socket(active_panel.name, socket_type='NodeSocketBool', in_out='INPUT')
+            item.is_panel_toggle = True
+            interface.move_to_parent(item, active_panel, 0)
+            # Return in this case because we don't want to move the item.
+            return {'FINISHED'}
         else:
             return {'CANCELLED'}
 
@@ -408,6 +435,218 @@ class NODE_OT_interface_item_remove(NodeInterfaceOperator, Operator):
         return {'FINISHED'}
 
 
+class NODE_OT_interface_item_make_panel_toggle(NodeInterfaceOperator, Operator):
+    """Make the active boolean socket a toggle for its parent panel"""
+    bl_idname = "node.interface_item_make_panel_toggle"
+    bl_label = "Make Panel Toggle"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        if not super().poll(context):
+            return False
+
+        snode = context.space_data
+        tree = snode.edit_tree
+        interface = tree.interface
+        active_item = interface.active
+        if not active_item:
+            return False
+        if type(active_item) is not bpy.types.NodeTreeInterfaceSocketBool:
+            cls.poll_message_set("Only boolean sockets are supported")
+            return False
+        parent_panel = active_item.parent
+        if parent_panel.parent is None:
+            cls.poll_message_set("Socket must be in a panel")
+            return False
+        if len(parent_panel.interface_items) > 0:
+            first_item = parent_panel.interface_items[0]
+            if first_item.is_panel_toggle:
+                cls.poll_message_set("Panel already has a toggle")
+                return False
+        return True
+
+    def execute(self, context):
+        snode = context.space_data
+        tree = snode.edit_tree
+        interface = tree.interface
+        active_item = interface.active
+
+        parent_panel = active_item.parent
+        if not parent_panel:
+            return {'CANCELLED'}
+
+        if type(active_item) is not bpy.types.NodeTreeInterfaceSocketBool:
+            return {'CANCELLED'}
+
+        active_item.is_panel_toggle = True
+        # Use the same name as the panel in the UI for clarity.
+        active_item.name = parent_panel.name
+
+        # Move the socket to the first position.
+        interface.move_to_parent(active_item, parent_panel, 0)
+        # Make the panel active.
+        interface.active = parent_panel
+
+        return {'FINISHED'}
+
+
+class NODE_OT_interface_item_unlink_panel_toggle(NodeInterfaceOperator, Operator):
+    """Make the panel toggle a stand-alone socket"""
+    bl_idname = "node.interface_item_unlink_panel_toggle"
+    bl_label = "Unlink Panel Toggle"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        if not super().poll(context):
+            return False
+
+        snode = context.space_data
+        tree = snode.edit_tree
+        interface = tree.interface
+        active_item = interface.active
+        if not active_item or active_item.item_type != 'PANEL':
+            return False
+        if len(active_item.interface_items) == 0:
+            return False
+
+        first_item = active_item.interface_items[0]
+        return first_item.is_panel_toggle
+
+    def execute(self, context):
+        snode = context.space_data
+        tree = snode.edit_tree
+        interface = tree.interface
+        active_item = interface.active
+
+        if not active_item or active_item.item_type != 'PANEL':
+            return {'CANCELLED'}
+
+        if len(active_item.interface_items) == 0:
+            return {'CANCELLED'}
+
+        first_item = active_item.interface_items[0]
+        if type(first_item) is not bpy.types.NodeTreeInterfaceSocketBool or not first_item.is_panel_toggle:
+            return {'CANCELLED'}
+
+        first_item.is_panel_toggle = False
+        first_item.name = active_item.name
+
+        # Make the socket active.
+        interface.active = first_item
+
+        return {'FINISHED'}
+
+
+class NODE_OT_viewer_shortcut_set(Operator):
+    """Create a compositor viewer shortcut for the selected node by pressing ctrl+1,2,..9"""
+    bl_idname = "node.viewer_shortcut_set"
+    bl_label = "Fast Preview"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    viewer_index: IntProperty(
+        name="Viewer Index",
+        description="Index corresponding to the shortcut, e.g. number key 1 corresponds to index 1 etc..")
+
+    def get_connected_viewer(self, node):
+        for out in node.outputs:
+            for link in out.links:
+                nv = link.to_node
+                if nv.type == 'VIEWER':
+                    return nv
+        return None
+
+    @classmethod
+    def poll(cls, context):
+        del cls
+        space = context.space_data
+        return (
+            (space is not None) and
+            space.type == 'NODE_EDITOR' and
+            space.node_tree is not None and
+            space.tree_type in {'CompositorNodeTree', 'GeometryNodeTree'}
+        )
+
+    def execute(self, context):
+        selected_nodes = context.selected_nodes
+
+        if len(selected_nodes) == 0:
+            self.report({'ERROR'}, "Select a node to assign a shortcut")
+            return {'CANCELLED'}
+
+        fav_node = selected_nodes[0]
+
+        # Only viewer nodes can be set to favorites. However, the user can
+        # create a new favorite viewer by selecting any node and pressing ctrl+1.
+        if fav_node.type == 'VIEWER':
+            viewer_node = fav_node
+        else:
+            viewer_node = self.get_connected_viewer(fav_node)
+            if not viewer_node:
+                # Calling `link_viewer()` if a viewer node is connected
+                # will connect the next available socket to the viewer node.
+                # This behavior is not desired as we want to create a shortcut to the existing connected viewer node.
+                # Therefore `link_viewer()` is called only when no viewer node is connected.
+                bpy.ops.node.link_viewer()
+                viewer_node = self.get_connected_viewer(fav_node)
+
+        if not viewer_node:
+            self.report(
+                {'ERROR'},
+                "Unable to set shortcut, selected node is not a viewer node or does not support viewing",
+            )
+            return {'CANCELLED'}
+
+        with bpy.context.temp_override(node=viewer_node):
+            bpy.ops.node.activate_viewer()
+
+        viewer_node.ui_shortcut = self.viewer_index
+        self.report({'INFO'}, "Assigned shortcut {:d} to {:s}".format(self.viewer_index, viewer_node.name))
+
+        return {'FINISHED'}
+
+
+class NODE_OT_viewer_shortcut_get(Operator):
+    """Activate a specific compositor viewer node using 1,2,..,9 keys"""
+    bl_idname = "node.viewer_shortcut_get"
+    bl_label = "Fast Preview"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    viewer_index: IntProperty(
+        name="Viewer Index",
+        description="Index corresponding to the shortcut, e.g. number key 1 corresponds to index 1 etc..")
+
+    @classmethod
+    def poll(cls, context):
+        del cls
+        space = context.space_data
+        return (
+            (space is not None) and
+            space.type == 'NODE_EDITOR' and
+            space.node_tree is not None and
+            space.tree_type in {'CompositorNodeTree', 'GeometryNodeTree'}
+        )
+
+    def execute(self, context):
+        nodes = context.space_data.edit_tree.nodes
+
+        # Get viewer node with existing shortcut.
+        viewer_node = None
+        for n in nodes:
+            if n.type == 'VIEWER' and n.ui_shortcut == self.viewer_index:
+                viewer_node = n
+
+        if not viewer_node:
+            self.report({'INFO'}, "Shortcut {:d} is not assigned to a Viewer node yet".format(self.viewer_index))
+            return {'CANCELLED'}
+
+        with bpy.context.temp_override(node=viewer_node):
+            bpy.ops.node.activate_viewer()
+
+        return {'FINISHED'}
+
+
 class NODE_FH_image_node(FileHandler):
     bl_idname = "NODE_FH_image_node"
     bl_label = "Image node"
@@ -437,5 +676,9 @@ classes = (
     NODE_OT_interface_item_new,
     NODE_OT_interface_item_duplicate,
     NODE_OT_interface_item_remove,
+    NODE_OT_interface_item_make_panel_toggle,
+    NODE_OT_interface_item_unlink_panel_toggle,
     NODE_OT_tree_path_parent,
+    NODE_OT_viewer_shortcut_get,
+    NODE_OT_viewer_shortcut_set,
 )

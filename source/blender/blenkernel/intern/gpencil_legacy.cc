@@ -8,7 +8,6 @@
 
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -17,23 +16,23 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
+#include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 
 #include "BLT_translation.hh"
 
-#include "IMB_interp.hh"
-
 /* Allow using deprecated functionality for .blend file I/O. */
 #define DNA_DEPRECATED_ALLOW
+#include "DNA_scene_types.h"
 
 #include "DNA_brush_types.h"
 #include "DNA_gpencil_legacy_types.h"
 #include "DNA_material_types.h"
 #include "DNA_meshdata_types.h"
-#include "DNA_space_types.h"
+#include "DNA_userdef_types.h"
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
@@ -49,12 +48,13 @@
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_paint.hh"
 
-#include "BLI_math_color.h"
+#include "DEG_depsgraph.hh"
 
-#include "DEG_depsgraph_query.hh"
+#include "BLI_math_color.h"
+#include "BLI_string_utf8.h"
 
 #include "BLO_read_write.hh"
 
@@ -463,7 +463,7 @@ bGPDframe *BKE_gpencil_frame_addnew(bGPDlayer *gpl, int cframe)
   }
 
   /* allocate memory for this frame */
-  gpf = static_cast<bGPDframe *>(MEM_callocN(sizeof(bGPDframe), "bGPDframe"));
+  gpf = MEM_callocN<bGPDframe>("bGPDframe");
   gpf->framenum = cframe;
 
   /* find appropriate place to add frame */
@@ -573,7 +573,7 @@ bGPDlayer *BKE_gpencil_layer_addnew(bGPdata *gpd,
   }
 
   /* allocate memory for frame and add to end of list */
-  gpl = static_cast<bGPDlayer *>(MEM_callocN(sizeof(bGPDlayer), "bGPDlayer"));
+  gpl = MEM_callocN<bGPDlayer>("bGPDlayer");
 
   gpl_active = BKE_gpencil_layer_active_get(gpd);
 

@@ -12,12 +12,11 @@
 #include "MEM_guardedalloc.h"
 
 #include "BKE_context.hh"
-#include "BKE_object.hh"
+#include "BKE_library.hh"
 #include "BKE_screen.hh"
 #include "BKE_shader_fx.h"
 
 #include "DNA_object_types.h"
-#include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_shader_fx_types.h"
 
@@ -98,7 +97,7 @@ PointerRNA *shaderfx_panel_get_property_pointers(Panel *panel, PointerRNA *r_ob_
   BLI_assert(RNA_struct_is_a(ptr->type, &RNA_ShaderFx));
 
   if (r_ob_ptr != nullptr) {
-    *r_ob_ptr = RNA_pointer_create(ptr->owner_id, &RNA_Object, ptr->owner_id);
+    *r_ob_ptr = RNA_pointer_create_discrete(ptr->owner_id, &RNA_Object, ptr->owner_id);
   }
 
   UI_panel_context_pointer_set(panel, "shaderfx", ptr);
@@ -115,7 +114,7 @@ static void gpencil_shaderfx_ops_extra_draw(bContext *C, uiLayout *layout, void 
   ShaderFxData *fx = (ShaderFxData *)fx_v;
 
   Object *ob = blender::ed::object::context_active_object(C);
-  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_ShaderFx, fx);
+  PointerRNA ptr = RNA_pointer_create_discrete(&ob->id, &RNA_ShaderFx, fx);
   uiLayoutSetContextPointer(layout, "shaderfx", &ptr);
   uiLayoutSetOperatorContext(layout, WM_OP_INVOKE_DEFAULT);
 
@@ -221,7 +220,7 @@ static bool shaderfx_ui_poll(const bContext *C, PanelType * /*pt*/)
 
 PanelType *shaderfx_panel_register(ARegionType *region_type, ShaderFxType type, PanelDrawFn draw)
 {
-  PanelType *panel_type = static_cast<PanelType *>(MEM_callocN(sizeof(PanelType), __func__));
+  PanelType *panel_type = MEM_callocN<PanelType>(__func__);
 
   BKE_shaderfxType_panel_id(type, panel_type->idname);
   STRNCPY(panel_type->label, "");
@@ -251,7 +250,7 @@ PanelType *shaderfx_subpanel_register(ARegionType *region_type,
                                       PanelDrawFn draw,
                                       PanelType *parent)
 {
-  PanelType *panel_type = static_cast<PanelType *>(MEM_callocN(sizeof(PanelType), __func__));
+  PanelType *panel_type = MEM_callocN<PanelType>(__func__);
 
   BLI_assert(parent != nullptr);
   SNPRINTF(panel_type->idname, "%s_%s", parent->idname, name);

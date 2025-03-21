@@ -50,12 +50,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryCurveFillet *data = MEM_cnew<NodeGeometryCurveFillet>(__func__);
+  NodeGeometryCurveFillet *data = MEM_callocN<NodeGeometryCurveFillet>(__func__);
   data->mode = GEO_NODE_CURVE_FILLET_BEZIER;
   node->storage = data;
 }
@@ -197,14 +197,18 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_FILLET_CURVE, "Fillet Curve", NODE_CLASS_GEOMETRY);
+  geo_node_type_base(&ntype, "GeometryNodeFilletCurve", GEO_NODE_FILLET_CURVE);
+  ntype.ui_name = "Fillet Curve";
+  ntype.ui_description = "Round corners by generating circular arcs on each control point";
+  ntype.enum_name_legacy = "FILLET_CURVE";
+  ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.draw_buttons = node_layout;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryCurveFillet", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryCurveFillet", node_free_standard_storage, node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
   ntype.geometry_node_execute = node_geo_exec;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

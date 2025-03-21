@@ -6,6 +6,7 @@
  * \ingroup edinterface
  */
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -45,13 +46,15 @@
 
 #include "interface_intern.hh"
 
+using blender::StringRefNull;
+
 /*************************** RNA Utilities ******************************/
 
 uiBut *uiDefAutoButR(uiBlock *block,
                      PointerRNA *ptr,
                      PropertyRNA *prop,
                      int index,
-                     const char *name,
+                     const std::optional<StringRefNull> name,
                      int icon,
                      int x,
                      int y,
@@ -66,7 +69,7 @@ uiBut *uiDefAutoButR(uiBlock *block,
         return nullptr;
       }
 
-      if (icon && name && name[0] == '\0') {
+      if (icon && name && name->is_empty()) {
         but = uiDefIconButR_prop(block,
                                  UI_BTYPE_ICON_TOGGLE,
                                  0,
@@ -80,7 +83,7 @@ uiBut *uiDefAutoButR(uiBlock *block,
                                  index,
                                  0,
                                  0,
-                                 nullptr);
+                                 std::nullopt);
       }
       else if (icon) {
         but = uiDefIconTextButR_prop(block,
@@ -97,7 +100,7 @@ uiBut *uiDefAutoButR(uiBlock *block,
                                      index,
                                      0,
                                      0,
-                                     nullptr);
+                                     std::nullopt);
       }
       else {
         but = uiDefButR_prop(block,
@@ -113,7 +116,7 @@ uiBut *uiDefAutoButR(uiBlock *block,
                              index,
                              0,
                              0,
-                             nullptr);
+                             std::nullopt);
       }
       break;
     }
@@ -121,8 +124,20 @@ uiBut *uiDefAutoButR(uiBlock *block,
     case PROP_FLOAT: {
       if (RNA_property_array_check(prop) && index == -1) {
         if (ELEM(RNA_property_subtype(prop), PROP_COLOR, PROP_COLOR_GAMMA)) {
-          but = uiDefButR_prop(
-              block, UI_BTYPE_COLOR, 0, name, x, y, width, height, ptr, prop, -1, 0, 0, nullptr);
+          but = uiDefButR_prop(block,
+                               UI_BTYPE_COLOR,
+                               0,
+                               name,
+                               x,
+                               y,
+                               width,
+                               height,
+                               ptr,
+                               prop,
+                               -1,
+                               0,
+                               0,
+                               std::nullopt);
         }
         else {
           return nullptr;
@@ -144,11 +159,23 @@ uiBut *uiDefAutoButR(uiBlock *block,
                              index,
                              0,
                              0,
-                             nullptr);
+                             std::nullopt);
       }
       else {
-        but = uiDefButR_prop(
-            block, UI_BTYPE_NUM, 0, name, x, y, width, height, ptr, prop, index, 0, 0, nullptr);
+        but = uiDefButR_prop(block,
+                             UI_BTYPE_NUM,
+                             0,
+                             name,
+                             x,
+                             y,
+                             width,
+                             height,
+                             ptr,
+                             prop,
+                             index,
+                             0,
+                             0,
+                             std::nullopt);
       }
 
       if (RNA_property_flag(prop) & PROP_TEXTEDIT_UPDATE) {
@@ -157,16 +184,28 @@ uiBut *uiDefAutoButR(uiBlock *block,
       break;
     }
     case PROP_ENUM:
-      if (icon && name && name[0] == '\0') {
-        but = uiDefIconButR_prop(
-            block, UI_BTYPE_MENU, 0, icon, x, y, width, height, ptr, prop, index, 0, 0, nullptr);
+      if (icon && name && name->is_empty()) {
+        but = uiDefIconButR_prop(block,
+                                 UI_BTYPE_MENU,
+                                 0,
+                                 icon,
+                                 x,
+                                 y,
+                                 width,
+                                 height,
+                                 ptr,
+                                 prop,
+                                 index,
+                                 0,
+                                 0,
+                                 std::nullopt);
       }
       else if (icon) {
         but = uiDefIconTextButR_prop(block,
                                      UI_BTYPE_MENU,
                                      0,
                                      icon,
-                                     nullptr,
+                                     std::nullopt,
                                      x,
                                      y,
                                      width,
@@ -176,17 +215,41 @@ uiBut *uiDefAutoButR(uiBlock *block,
                                      index,
                                      0,
                                      0,
-                                     nullptr);
+                                     std::nullopt);
       }
       else {
-        but = uiDefButR_prop(
-            block, UI_BTYPE_MENU, 0, name, x, y, width, height, ptr, prop, index, 0, 0, nullptr);
+        but = uiDefButR_prop(block,
+                             UI_BTYPE_MENU,
+                             0,
+                             name,
+                             x,
+                             y,
+                             width,
+                             height,
+                             ptr,
+                             prop,
+                             index,
+                             0,
+                             0,
+                             std::nullopt);
       }
       break;
     case PROP_STRING:
-      if (icon && name && name[0] == '\0') {
-        but = uiDefIconButR_prop(
-            block, UI_BTYPE_TEXT, 0, icon, x, y, width, height, ptr, prop, index, 0, 0, nullptr);
+      if (icon && name && name->is_empty()) {
+        but = uiDefIconButR_prop(block,
+                                 UI_BTYPE_TEXT,
+                                 0,
+                                 icon,
+                                 x,
+                                 y,
+                                 width,
+                                 height,
+                                 ptr,
+                                 prop,
+                                 index,
+                                 0,
+                                 0,
+                                 std::nullopt);
       }
       else if (icon) {
         but = uiDefIconTextButR_prop(block,
@@ -203,11 +266,23 @@ uiBut *uiDefAutoButR(uiBlock *block,
                                      index,
                                      0,
                                      0,
-                                     nullptr);
+                                     std::nullopt);
       }
       else {
-        but = uiDefButR_prop(
-            block, UI_BTYPE_TEXT, 0, name, x, y, width, height, ptr, prop, index, 0, 0, nullptr);
+        but = uiDefButR_prop(block,
+                             UI_BTYPE_TEXT,
+                             0,
+                             name,
+                             x,
+                             y,
+                             width,
+                             height,
+                             ptr,
+                             prop,
+                             index,
+                             0,
+                             0,
+                             std::nullopt);
       }
 
       if (RNA_property_flag(prop) & PROP_TEXTEDIT_UPDATE) {
@@ -239,14 +314,15 @@ uiBut *uiDefAutoButR(uiBlock *block,
                                    index,
                                    0,
                                    0,
-                                   nullptr);
+                                   std::nullopt);
       ui_but_add_search(but, ptr, prop, nullptr, nullptr, false);
       break;
     }
     case PROP_COLLECTION: {
       char text[256];
       SNPRINTF(text, IFACE_("%d items"), RNA_property_collection_length(ptr, prop));
-      but = uiDefBut(block, UI_BTYPE_LABEL, 0, text, x, y, width, height, nullptr, 0, 0, nullptr);
+      but = uiDefBut(
+          block, UI_BTYPE_LABEL, 0, text, x, y, width, height, nullptr, 0, 0, std::nullopt);
       UI_but_flag_enable(but, UI_BUT_DISABLED);
       break;
     }
@@ -293,7 +369,7 @@ eAutoPropButsReturn uiDefAutoButsRNA(uiLayout *layout,
 {
   eAutoPropButsReturn return_info = UI_PROP_BUTS_NONE_ADDED;
   uiLayout *col;
-  const char *name;
+  std::optional<StringRefNull> name;
 
   RNA_STRUCT_BEGIN (ptr, prop) {
     const int flag = RNA_property_flag(prop);
@@ -318,7 +394,7 @@ eAutoPropButsReturn uiDefAutoButsRNA(uiLayout *layout,
           col = uiLayoutColumn(layout, true);
 
           if (!is_boolean) {
-            uiItemL(col, name, ICON_NONE);
+            uiItemL(col, *name, ICON_NONE);
           }
         }
         else {
@@ -333,7 +409,7 @@ eAutoPropButsReturn uiDefAutoButsRNA(uiLayout *layout,
       case UI_BUT_LABEL_ALIGN_NONE:
       default:
         col = layout;
-        name = nullptr; /* no smart label alignment, show default name with button */
+        name = std::nullopt; /* no smart label alignment, show default name with button */
         break;
     }
 
@@ -393,7 +469,7 @@ static bool add_collection_search_item(CollItemSearch &cis,
   }
 
   return UI_search_item_add(items,
-                            cis.name.c_str(),
+                            cis.name,
                             cis.data,
                             cis.iconid,
                             cis.has_sep_char ? int(UI_BUT_HAS_SEP_CHAR) : 0,
@@ -600,13 +676,13 @@ int UI_icon_from_report_type(int type)
 int UI_icon_colorid_from_report_type(int type)
 {
   if (type & RPT_ERROR_ALL) {
-    return TH_INFO_ERROR;
+    return TH_ERROR;
   }
   if (type & RPT_WARNING_ALL) {
-    return TH_INFO_WARNING;
+    return TH_WARNING;
   }
   if (type & RPT_INFO_ALL) {
-    return TH_INFO_INFO;
+    return TH_INFO;
   }
   if (type & RPT_DEBUG_ALL) {
     return TH_INFO_DEBUG;
@@ -617,7 +693,7 @@ int UI_icon_colorid_from_report_type(int type)
   if (type & RPT_OPERATOR) {
     return TH_INFO_OPERATOR;
   }
-  return TH_INFO_WARNING;
+  return TH_WARNING;
 }
 
 int UI_text_colorid_from_report_type(int type)
@@ -686,9 +762,7 @@ int UI_calc_float_precision(int prec, double value)
         dec_flag = dec_flag >> 1;
       }
 
-      if (test_prec > prec) {
-        prec = test_prec;
-      }
+      prec = std::max(test_prec, prec);
     }
   }
 
@@ -827,7 +901,7 @@ struct uiButStoreElem {
 
 uiButStore *UI_butstore_create(uiBlock *block)
 {
-  uiButStore *bs_handle = MEM_cnew<uiButStore>(__func__);
+  uiButStore *bs_handle = MEM_callocN<uiButStore>(__func__);
 
   bs_handle->block = block;
   BLI_addtail(&block->butstore, bs_handle);
@@ -876,7 +950,7 @@ bool UI_butstore_is_registered(uiBlock *block, uiBut *but)
 
 void UI_butstore_register(uiButStore *bs_handle, uiBut **but_p)
 {
-  uiButStoreElem *bs_elem = MEM_cnew<uiButStoreElem>(__func__);
+  uiButStoreElem *bs_elem = MEM_callocN<uiButStoreElem>(__func__);
   BLI_assert(*but_p);
   bs_elem->but_p = but_p;
 
@@ -966,13 +1040,13 @@ void UI_butstore_update(uiBlock *block)
 /**
  * Follow the logic from #wm_keymap_item_find_in_keymap.
  */
-static bool ui_key_event_property_match(const char *opname,
+static bool ui_key_event_property_match(const StringRefNull opname,
                                         IDProperty *properties,
                                         const bool is_strict,
                                         wmOperatorType *ui_optype,
                                         PointerRNA *ui_opptr)
 {
-  if (!STREQ(ui_optype->idname, opname)) {
+  if (ui_optype->idname != opname) {
     return false;
   }
 
@@ -991,7 +1065,7 @@ static bool ui_key_event_property_match(const char *opname,
 }
 
 std::optional<std::string> UI_key_event_operator_string(const bContext *C,
-                                                        const char *opname,
+                                                        const StringRefNull opname,
                                                         IDProperty *properties,
                                                         const bool is_strict)
 {
@@ -1021,7 +1095,8 @@ std::optional<std::string> UI_key_event_operator_string(const bContext *C,
   short event_type = KM_NOTHING;
 
   uiBut *listbox = nullptr;
-  LISTBASE_FOREACH_BACKWARD (uiBut *, but_iter, &but->block->buttons) {
+  for (int i = but->block->buttons.size() - 1; i >= 0; i--) {
+    uiBut *but_iter = but->block->buttons[i].get();
     if ((but_iter->type == UI_BTYPE_LISTBOX) && ui_but_contains_rect(but_iter, &but->rect)) {
       listbox = but_iter;
       break;

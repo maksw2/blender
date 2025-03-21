@@ -8,6 +8,7 @@ from bl_ui.space_view3d import (
     VIEW3D_PT_shading_lighting,
     VIEW3D_PT_shading_color,
     VIEW3D_PT_shading_options,
+    VIEW3D_PT_shading_cavity,
 )
 from bl_ui.utils import PresetPanel
 
@@ -760,12 +761,40 @@ class CompositorPerformanceButtonsPanel:
         col = layout.column()
         row = col.row()
         row.prop(rd, "compositor_device", text="Device", expand=True)
-        col.prop(rd, "compositor_precision", text="Precision")
+        if rd.compositor_device == 'GPU':
+            col.prop(rd, "compositor_precision", text="Precision")
+
+
+class CompositorDenoisePerformanceButtonsPanel:
+    bl_label = "Denoise Nodes"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        rd = scene.render
+
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        col = layout.column()
+        col.prop(rd, "compositor_denoise_preview_quality", text="Preview Quality")
+        col.prop(rd, "compositor_denoise_final_quality", text="Final Quality")
 
 
 class RENDER_PT_eevee_performance_compositor(RenderButtonsPanel, CompositorPerformanceButtonsPanel, Panel):
     bl_options = {'DEFAULT_CLOSED'}
     bl_parent_id = "RENDER_PT_eevee_performance"
+    COMPAT_ENGINES = {
+        'BLENDER_EEVEE_NEXT',
+        'BLENDER_WORKBENCH',
+    }
+
+
+class RENDER_PT_eevee_performance_compositor_denoise_settings(
+        RenderButtonsPanel, CompositorDenoisePerformanceButtonsPanel, Panel,
+):
+    bl_options = {'DEFAULT_CLOSED'}
+    bl_parent_id = "RENDER_PT_eevee_performance_compositor"
     COMPAT_ENGINES = {
         'BLENDER_EEVEE_NEXT',
         'BLENDER_WORKBENCH',
@@ -908,6 +937,10 @@ class RENDER_PT_opengl_options(RenderButtonsPanel, Panel):
     def draw(self, context):
         VIEW3D_PT_shading_options.draw(self, context)
 
+        # Cavity properties.
+        VIEW3D_PT_shading_cavity.draw_header(self, context)
+        VIEW3D_PT_shading_cavity.draw(self, context)
+
 
 class RENDER_PT_simplify(RenderButtonsPanel, Panel):
     bl_label = "Simplify"
@@ -1044,6 +1077,7 @@ classes = (
     RENDER_PT_eevee_performance_memory,
     RENDER_PT_eevee_performance_viewport,
     RENDER_PT_eevee_performance_compositor,
+    RENDER_PT_eevee_performance_compositor_denoise_settings,
 
 
     RENDER_PT_gpencil,

@@ -7,17 +7,11 @@
  *
  * \brief Extraction of Mesh data into VBO to feed to GPU.
  */
-#include "MEM_guardedalloc.h"
 
 #include "DNA_mesh_types.h"
 #include "DNA_scene_types.h"
 
-#include "BLI_array.hh"
 #include "BLI_task.h"
-#include "BLI_vector.hh"
-
-#include "BKE_editmesh.hh"
-#include "BKE_object.hh"
 
 #include "GPU_capabilities.hh"
 
@@ -34,17 +28,6 @@
 #endif
 
 namespace blender::draw {
-
-int mesh_render_mat_len_get(const Object &object, const Mesh &mesh)
-{
-  if (mesh.runtime->edit_mesh != nullptr) {
-    const Mesh *editmesh_eval_final = BKE_object_get_editmesh_eval_final(&object);
-    if (editmesh_eval_final != nullptr) {
-      return std::max<int>(1, editmesh_eval_final->totcol);
-    }
-  }
-  return std::max<int>(1, mesh.totcol);
-}
 
 struct MeshRenderDataUpdateTaskData {
   std::unique_ptr<MeshRenderData> mr;
@@ -67,7 +50,10 @@ static void mesh_extract_render_data_node_exec(void *__restrict task_data)
   if (request_face_normals) {
     mesh_render_data_update_face_normals(mr);
   }
-  if ((request_corner_normals && !mr.use_simplify_normals) || force_corner_normals) {
+  if ((request_corner_normals && mr.normals_domain == bke::MeshNormalDomain::Corner &&
+       !mr.use_simplify_normals) ||
+      force_corner_normals)
+  {
     mesh_render_data_update_corner_normals(mr);
   }
 

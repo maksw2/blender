@@ -19,9 +19,9 @@
 #include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
+#include "DNA_texture_types.h"
 
 #include "BKE_attribute.hh"
-#include "BKE_customdata.hh"
 #include "BKE_deform.hh"
 #include "BKE_image.hh"
 #include "BKE_lib_query.hh"
@@ -92,7 +92,7 @@ static void foreach_ID_link(ModifierData *md, Object *ob, IDWalkFunc walk, void 
 
 static void foreach_tex_link(ModifierData *md, Object *ob, TexWalkFunc walk, void *user_data)
 {
-  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_Modifier, md);
+  PointerRNA ptr = RNA_pointer_create_discrete(&ob->id, &RNA_Modifier, md);
   PropertyRNA *prop = RNA_struct_find_property(&ptr, "texture");
   walk(user_data, ob, md, &ptr, prop);
 }
@@ -277,8 +277,7 @@ static void displaceModifier_do(DisplaceModifierData *dmd,
 
   Tex *tex_target = dmd->texture;
   if (tex_target != nullptr) {
-    tex_co = static_cast<float(*)[3]>(MEM_calloc_arrayN(
-        size_t(positions.size()), sizeof(*tex_co), "displaceModifier_do tex_co"));
+    tex_co = MEM_calloc_arrayN<float[3]>(size_t(positions.size()), "displaceModifier_do tex_co");
     MOD_get_texture_coords((MappingInfoModifierData *)dmd,
                            ctx,
                            ob,
@@ -294,8 +293,7 @@ static void displaceModifier_do(DisplaceModifierData *dmd,
 
   if (direction == MOD_DISP_DIR_CLNOR) {
     if (mesh->attributes().contains("custom_normal")) {
-      vert_clnors = static_cast<float(*)[3]>(
-          MEM_malloc_arrayN(positions.size(), sizeof(*vert_clnors), __func__));
+      vert_clnors = MEM_malloc_arrayN<float[3]>(size_t(positions.size()), __func__);
       BKE_mesh_normals_loop_to_vertex(
           positions.size(),
           mesh->corner_verts().data(),
@@ -397,29 +395,29 @@ static void panel_draw(const bContext *C, Panel *panel)
     }
   }
   else if (texture_coords == MOD_DISP_MAP_UV && RNA_enum_get(&ob_ptr, "type") == OB_MESH) {
-    uiItemPointerR(col, ptr, "uv_layer", &obj_data_ptr, "uv_layers", nullptr, ICON_GROUP_UVS);
+    uiItemPointerR(col, ptr, "uv_layer", &obj_data_ptr, "uv_layers", std::nullopt, ICON_GROUP_UVS);
   }
 
   uiItemS(layout);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "direction", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "direction", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   if (ELEM(RNA_enum_get(ptr, "direction"),
            MOD_DISP_DIR_X,
            MOD_DISP_DIR_Y,
            MOD_DISP_DIR_Z,
            MOD_DISP_DIR_RGB_XYZ))
   {
-    uiItemR(col, ptr, "space", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(col, ptr, "space", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 
   uiItemS(layout);
 
   col = uiLayoutColumn(layout, false);
-  uiItemR(col, ptr, "strength", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(col, ptr, "mid_level", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(col, ptr, "strength", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(col, ptr, "mid_level", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-  modifier_vgroup_ui(col, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", nullptr);
+  modifier_vgroup_ui(col, ptr, &ob_ptr, "vertex_group", "invert_vertex_group", std::nullopt);
 
   modifier_panel_end(layout, ptr);
 }

@@ -18,7 +18,10 @@
 
 #include "BLI_math_color.h"
 #include "BLI_math_matrix.h"
+#include "BLI_math_vector.h"
 #include "BLI_math_vector_types.hh"
+
+#include "DNA_userdef_types.h"
 
 #include "BKE_context.hh"
 
@@ -227,7 +230,7 @@ static void button2d_draw_intern(const bContext *C,
            * Use a low value instead of 50% so some darker primary colors
            * aren't considered being close to black. */
           float color_contrast[4];
-          copy_v3_fl(color_contrast, rgb_to_grayscale(color) < 0.2f ? 1 : 0);
+          copy_v3_fl(color_contrast, srgb_to_grayscale(color) < 0.2f ? 1 : 0);
           color_contrast[3] = color[3];
           GPU_shader_uniform_4f(button->shape_batch[i]->shader, "color", UNPACK4(color_contrast));
         }

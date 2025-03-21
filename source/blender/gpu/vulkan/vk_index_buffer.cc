@@ -29,11 +29,19 @@ void VKIndexBuffer::ensure_updated()
     return;
   }
 
-  VKContext &context = *VKContext::get();
-  VKStagingBuffer staging_buffer(buffer_, VKStagingBuffer::Direction::HostToDevice);
-  staging_buffer.host_buffer_get().update_immediately(data_);
-  staging_buffer.copy_to_device(context);
-  MEM_SAFE_FREE(data_);
+  if (!data_uploaded_ && buffer_.is_mapped()) {
+    buffer_.update_immediately(data_);
+    MEM_SAFE_FREE(data_);
+  }
+  else {
+    VKContext &context = *VKContext::get();
+    VKStagingBuffer staging_buffer(buffer_, VKStagingBuffer::Direction::HostToDevice);
+    staging_buffer.host_buffer_get().update_immediately(data_);
+    staging_buffer.copy_to_device(context);
+    MEM_SAFE_FREE(data_);
+  }
+
+  data_uploaded_ = true;
 }
 
 void VKIndexBuffer::upload_data()
@@ -43,6 +51,11 @@ void VKIndexBuffer::upload_data()
 
 void VKIndexBuffer::bind_as_ssbo(uint binding)
 {
+  if (is_subrange_) {
+    src_->bind_as_ssbo(binding);
+    return;
+  }
+
   VKContext::get()->state_manager_get().storage_buffer_bind(
       BindSpaceStorageBuffers::Type::IndexBuffer, this, binding);
 }
@@ -67,12 +80,12 @@ void VKIndexBuffer::strip_restart_indices()
 
 void VKIndexBuffer::allocate()
 {
-  GPUUsageType usage = data_ == nullptr ? GPU_USAGE_DEVICE_ONLY : GPU_USAGE_STATIC;
   buffer_.create(size_get(),
-                 usage,
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 false);
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                 VkMemoryPropertyFlags(0),
+                 VmaAllocationCreateFlags(0));
   debug::object_label(buffer_.vk_handle(), "IndexBuffer");
 }
 

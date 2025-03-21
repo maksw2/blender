@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 4.4.0 Alpha (b'62b2bb48e8bf')\n"
+"Project-Id-Version: Blender 4.4.0 Release Candidate (b'f896f7ffc32a')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-12-02 16:18+0000\n"
+"POT-Creation-Date: 2025-03-17 16:18+0000\n"
 "PO-Revision-Date: 2024-03-23 04:06+0000\n"
 "Last-Translator: Alexandru Buhnici <in@alexm.ro>\n"
 "Language-Team: Romanian <https://translate.blender.org/projects/blender-ui/ui/ro/>\n"
@@ -61,10 +61,6 @@ msgstr "Colecție de AOV-uri"
 
 msgid "Action F-Curves"
 msgstr "F-Curbe de Acțiune"
-
-
-msgid "Collection of action F-Curves"
-msgstr "Colecție de F-Curbe de acțiune"
 
 
 msgid "Action Group"
@@ -243,26 +239,6 @@ msgid "Collection of action groups"
 msgstr "Colecție de grupuri de acțiune"
 
 
-msgid "Replace"
-msgstr "Înlocuire"
-
-
-msgid "Offset"
-msgstr "Decalaj"
-
-
-msgid "Add"
-msgstr "Adăugare"
-
-
-msgid "Subtract"
-msgstr "Scădere"
-
-
-msgid "Multiply"
-msgstr "Înmulțire"
-
-
 msgid "Action Pose Markers"
 msgstr "Marcatori de poziție de acțiune"
 
@@ -438,14 +414,6 @@ msgid "Make more room for large scenes to fit by distributing memory across inte
 msgstr "Faceți mai mult spațiu pentru a se potrivi scene mari distribuind memoria pe dispozitive interconectate (de ex. Prin NVLink), mai degrabă decât duplicând"
 
 
-msgid "HIP RT (Experimental)"
-msgstr "HIP RT (Experimental)"
-
-
-msgid "HIP RT enables AMD hardware ray tracing on RDNA2 and above, with shader fallback on older cards. This feature is experimental and some scenes may render incorrectly"
-msgstr "HIP RT permite ray tracing pe hardware AMD cu RDNA2 și versiunile superioare și cu shader fallback pe plăcile mai vechi. Această caracteristică este experimentală și este posibil ca unele scene să fie randate incorect"
-
-
 msgid "Embree on GPU"
 msgstr "Embree pe GPU"
 
@@ -546,6 +514,10 @@ msgid "Method used for combining Active Action's result with result of NLA stack
 msgstr "Metoda folosită pentru combinarea rezultatului Combinării Acțiuni cu rezultatul stack-ului NLA"
 
 
+msgid "Replace"
+msgstr "Înlocuire"
+
+
 msgid "Combine"
 msgstr "Combinare"
 
@@ -554,12 +526,24 @@ msgid "The strip values are combined with accumulated results by appropriately u
 msgstr "Valorile benzii sunt combinate cu rezultatele acumulate utilizând în mod corespunzător adunarea, multiplicarea sau matematica cuaternară, pe baza tipului de canal"
 
 
+msgid "Add"
+msgstr "Adăugare"
+
+
 msgid "Weighted result of strip is added to the accumulated results"
 msgstr "Rezultatul ponderat al benzii se adaugă la rezultatele acumulate"
 
 
+msgid "Subtract"
+msgstr "Scădere"
+
+
 msgid "Weighted result of strip is removed from the accumulated results"
 msgstr "Rezultatul ponderat al benzii este eliminat din rezultate acumulate"
+
+
+msgid "Multiply"
+msgstr "Înmulțire"
 
 
 msgid "Weighted result of strip is multiplied with the accumulated results"
@@ -1738,42 +1722,6 @@ msgid "Textures"
 msgstr "Texturi"
 
 
-msgid "Curve"
-msgstr "Curbă"
-
-
-msgid "Image"
-msgstr "Imagine"
-
-
-msgid "Light"
-msgstr "Lumină"
-
-
-msgid "Material"
-msgstr "Material"
-
-
-msgid "Scene"
-msgstr "Scenă"
-
-
-msgid "Texture"
-msgstr "Textură"
-
-
-msgid "Window Manager"
-msgstr "Manager Ferestre"
-
-
-msgid "Workspace"
-msgstr "Spațiu de lucru"
-
-
-msgid "World"
-msgstr "Lume"
-
-
 msgid "Distance"
 msgstr "Distanță"
 
@@ -1796,8 +1744,8 @@ msgid "Mode"
 msgstr "Mod"
 
 
-msgid "Radius"
-msgstr "Rază"
+msgid "Material"
+msgstr "Material"
 
 
 msgid "Hue"
@@ -1828,6 +1776,14 @@ msgid "Collection of object paths"
 msgstr "Colecție de căi ale obiectelor"
 
 
+msgid "Image"
+msgstr "Imagine"
+
+
+msgid "Offset"
+msgstr "Decalaj"
+
+
 msgid "Rotation"
 msgstr "Rotație"
 
@@ -1846,6 +1802,10 @@ msgstr "Stânga"
 
 msgid "Right"
 msgstr "Dreapta"
+
+
+msgid "Curve"
+msgstr "Curbă"
 
 
 msgid "Gamma"
@@ -1900,12 +1860,20 @@ msgid "View"
 msgstr "Vedere"
 
 
+msgid "Radius"
+msgstr "Rază"
+
+
 msgid "Viewport"
 msgstr "Fereastra de Vizualizare"
 
 
 msgid "Render"
 msgstr "Render"
+
+
+msgid "Scene"
+msgstr "Scenă"
 
 
 msgid "Shading"
@@ -1918,6 +1886,10 @@ msgstr "Transformare"
 
 msgid "Shrink"
 msgstr "Micșorează"
+
+
+msgid "Texture"
+msgstr "Textură"
 
 
 msgid "Vertex"
@@ -2005,17 +1977,8 @@ msgid "Global"
 msgstr "Global"
 
 
-msgctxt "Curves"
-msgid "Curve Preset"
-msgstr "Preset Curbă"
-
-
 msgid "Blur"
 msgstr "Estompare"
-
-
-msgid "Space"
-msgstr "Spațiu"
 
 
 msgid "Sequence"
@@ -2091,6 +2054,14 @@ msgid "Gain"
 msgstr "Creștere"
 
 
+msgid "Window Manager"
+msgstr "Manager Ferestre"
+
+
+msgid "Workspace"
+msgstr "Spațiu de lucru"
+
+
 msgid "Animation"
 msgstr "Animație"
 
@@ -2115,6 +2086,10 @@ msgstr "Sfârșit"
 
 msgid "Sampling"
 msgstr "Eșantionare"
+
+
+msgid "Light"
+msgstr "Lumină"
 
 
 msgid "Add Image"
@@ -2178,12 +2153,20 @@ msgid "New"
 msgstr "Nou"
 
 
+msgid "Space"
+msgstr "Spațiu"
+
+
 msgid "Overwrite"
 msgstr "Suprascriere"
 
 
 msgid "Copy"
 msgstr "Copiere"
+
+
+msgid "World"
+msgstr "Lume"
 
 
 msgid "Normalize"
@@ -2364,11 +2347,6 @@ msgstr "Lampă"
 
 msgid "Custom Properties"
 msgstr "Proprietăți Personalizate"
-
-
-msgctxt "Operator"
-msgid "Cancel File Load"
-msgstr "Anulați Încărcarea Fișierului"
 
 
 msgid "Open"
@@ -2585,10 +2563,6 @@ msgid "New Window"
 msgstr "Fereastră Nouă"
 
 
-msgid "UV Sculpting"
-msgstr "Sculptare UV"
-
-
 msgid "Motion Tracking"
 msgstr "Urmărirea mișcării"
 
@@ -2660,10 +2634,6 @@ msgid "New Window"
 msgstr "Fereastră Nouă"
 
 
-msgid "Password"
-msgstr "Parolă"
-
-
 msgid "Viewport Samples"
 msgstr "Eșantioane în fereastra de vizualizare"
 
@@ -2678,6 +2648,19 @@ msgstr "Precizia Urmei"
 
 msgid "Viewport Denoising"
 msgstr "Denoising în Fereastra de Vizualizare"
+
+
+msgctxt "MovieClip"
+msgid "View"
+msgstr "Vedere"
+
+
+msgid "Active Tool and Workspace settings"
+msgstr "Unealta Activă și Setările Spațiului de Lucru"
+
+
+msgid "Render Properties"
+msgstr "Propretățile de Render"
 
 
 msgctxt "Sequence"
@@ -2695,19 +2678,6 @@ msgid "Movie"
 msgstr "Film"
 
 
-msgctxt "MovieClip"
-msgid "View"
-msgstr "Vedere"
-
-
-msgid "Active Tool and Workspace settings"
-msgstr "Unealta Activă și Setările Spațiului de Lucru"
-
-
-msgid "Render Properties"
-msgstr "Propretățile de Render"
-
-
 msgid "Summary"
 msgstr "Rezumat"
 
@@ -2715,6 +2685,10 @@ msgstr "Rezumat"
 msgctxt "Unit"
 msgid "Nearest Marker"
 msgstr "Cel mai apropriat Marker"
+
+
+msgid "UV Sculpting"
+msgstr "Sculptare UV"
 
 
 msgid "Error Message"
@@ -3090,6 +3064,10 @@ msgid "Out"
 msgstr "Ieșire"
 
 
+msgid "Cancel"
+msgstr "Anulare"
+
+
 msgid "Cannot paint stroke"
 msgstr "Nu se poate picta cursa"
 
@@ -3203,16 +3181,16 @@ msgid "OK"
 msgstr "OK"
 
 
-msgid "Cancel"
-msgstr "Anulare"
-
-
 msgid "Movie"
 msgstr "Film"
 
 
-msgid "No Properties"
-msgstr "Fără proprietăți"
+msgid "Delete the active position"
+msgstr "Șterge poziția activă"
+
+
+msgid "Choose active color stop"
+msgstr "Alege stopul de culoare activ"
 
 
 msgid "Reset View"
@@ -3229,26 +3207,6 @@ msgstr "Extinde Extrapolat"
 
 msgid "Reset Curve"
 msgstr "Resetează Curba"
-
-
-msgid "Anim Player"
-msgstr "Anim Player"
-
-
-msgid "Display number of users of this data (click to make a single-user copy)"
-msgstr "Afișează numărul de utilizatori ai acestor date (faceți click pentru a face o copie pentru un singur utilizator)"
-
-
-msgid "Reset operator defaults"
-msgstr "Resetează valorile implicite ale operatorilor"
-
-
-msgid "Delete the active position"
-msgstr "Șterge poziția activă"
-
-
-msgid "Choose active color stop"
-msgstr "Alege stopul de culoare activ"
 
 
 msgid "Zoom in"
@@ -3271,12 +3229,8 @@ msgid "Reset Black/White point and curves"
 msgstr "Resetează punctele și curbele Negru/Alb"
 
 
-msgid "Stop this job"
-msgstr "Oprește această treabă"
-
-
-msgid "Stop animation playback"
-msgstr "Oprește playback-ul animației"
+msgid "Display number of users of this data (click to make a single-user copy)"
+msgstr "Afișează numărul de utilizatori ai acestor date (faceți click pentru a face o copie pentru un singur utilizator)"
 
 
 msgid "Browse Scene to be linked"
@@ -3484,6 +3438,26 @@ msgid "New"
 msgstr "Nou"
 
 
+msgid "No Properties"
+msgstr "Fără proprietăți"
+
+
+msgid "Reset operator defaults"
+msgstr "Resetează valorile implicite ale operatorilor"
+
+
+msgid "Anim Player"
+msgstr "Anim Player"
+
+
+msgid "Stop this job"
+msgstr "Oprește această treabă"
+
+
+msgid "Stop animation playback"
+msgstr "Oprește playback-ul animației"
+
+
 msgctxt "Mesh"
 msgid "Cube"
 msgstr "Cub"
@@ -3663,10 +3637,6 @@ msgstr "Adăugare nodul la intrare"
 
 msgid "Mask not found"
 msgstr "Masca nu a fost găsită"
-
-
-msgid "Please select all related strips"
-msgstr "Te rog selectează toate benzile aferente"
 
 
 msgid "No valid inputs to swap"

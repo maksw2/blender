@@ -9,9 +9,7 @@
  * \brief General operations for probes.
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "BLI_sys_types.h"
 
 struct LightProbe;
 struct Main;
@@ -68,7 +66,3 @@ void BKE_lightprobe_cache_free(struct Object *object);
  * This depends on the light cache type.
  */
 int64_t BKE_lightprobe_grid_cache_frame_sample_count(const struct LightProbeGridCacheFrame *cache);
-
-#ifdef __cplusplus
-}
-#endif

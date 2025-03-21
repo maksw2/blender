@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fmt/format.h>
 
 #include "MEM_guardedalloc.h"
 
@@ -20,8 +21,6 @@
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector.h"
-#include "BLI_string.h"
-#include "BLI_utildefines.h"
 
 #include "BLT_translation.hh"
 
@@ -272,27 +271,26 @@ static void stitch_preview_delete(StitchPreviewer *stitch_preview)
 /* This function updates the header of the UV editor when the stitch tool updates its settings */
 static void stitch_update_header(StitchStateContainer *ssc, bContext *C)
 {
-  const char *str = IFACE_(
-      "Mode(TAB) %s, "
-      "(S)nap %s, "
-      "(M)idpoints %s, "
-      "(L)imit %.2f (Alt Wheel adjust) %s, "
-      "Switch (I)sland, "
-      "shift select vertices");
-
-  char msg[UI_MAX_DRAW_STR];
-  ScrArea *area = CTX_wm_area(C);
-
-  if (area) {
-    SNPRINTF(msg,
-             str,
-             ssc->mode == STITCH_VERT ? IFACE_("Vertex") : IFACE_("Edge"),
-             WM_bool_as_string(ssc->snap_islands),
-             WM_bool_as_string(ssc->midpoints),
-             ssc->limit_dist,
-             WM_bool_as_string(ssc->use_limit));
-
-    ED_workspace_status_text(C, msg);
+  WorkspaceStatus status(C);
+  status.item(IFACE_("Confirm"), ICON_MOUSE_LMB);
+  status.item(IFACE_("Cancel"), ICON_EVENT_ESC);
+  status.item(fmt::format("{} {}",
+                          IFACE_("Select"),
+                          (ssc->mode == STITCH_VERT ? IFACE_("Vertices") : IFACE_("Edges"))),
+              ICON_EVENT_SHIFT,
+              ICON_MOUSE_RMB);
+  status.item(fmt::format("{} : {}",
+                          IFACE_("Mode"),
+                          (ssc->mode == STITCH_VERT ? IFACE_("Vertex") : IFACE_("Edge"))),
+              ICON_EVENT_TAB);
+  status.item(IFACE_("Switch Island"), ICON_EVENT_I);
+  status.item_bool(IFACE_("Snap"), ssc->snap_islands, ICON_EVENT_S);
+  status.item_bool(IFACE_("Midpoints"), ssc->midpoints, ICON_EVENT_M);
+  status.item_bool(IFACE_("Limit"), ssc->use_limit, ICON_EVENT_L);
+  if (ssc->use_limit) {
+    status.item(fmt::format("{} ({:.2f})", IFACE_("Limit Distance"), ssc->limit_dist),
+                ICON_EVENT_ALT,
+                ICON_MOUSE_MMB_SCROLL);
   }
 }
 
@@ -905,7 +903,7 @@ static void stitch_propagate_uv_final_position(Scene *scene,
   BMesh *bm = state->em->bm;
   StitchPreviewer *preview = state->stitch_preview;
 
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(bm);
 
   if (element->flag & STITCH_STITCHABLE) {
     UvElement *element_iter = element;
@@ -1077,7 +1075,7 @@ static int stitch_process_data(StitchStateContainer *ssc,
     /* fill the appropriate preview buffers */
     if (ssc->mode == STITCH_VERT) {
       for (i = 0; i < state->total_separate_uvs; i++) {
-        UvElement *element = (UvElement *)state->uvs[i];
+        UvElement *element = state->uvs[i];
         if (element->flag & STITCH_STITCHABLE) {
           luv = BM_ELEM_CD_GET_FLOAT_P(element->l, cd_loop_uv_offset);
           copy_v2_v2(&preview->preview_stitchable[stitchBufferIndex * 2], luv);
@@ -1849,9 +1847,9 @@ static StitchState *stitch_init(bContext *C,
   ToolSettings *ts = scene->toolsettings;
 
   BMEditMesh *em = BKE_editmesh_from_object(obedit);
-  const BMUVOffsets offsets = BM_uv_map_get_offsets(em->bm);
+  const BMUVOffsets offsets = BM_uv_map_offsets_get(em->bm);
 
-  state = MEM_cnew<StitchState>("stitch state obj");
+  state = MEM_callocN<StitchState>("stitch state obj");
 
   /* initialize state */
   state->obedit = obedit;
@@ -2207,7 +2205,7 @@ static int stitch_init_all(bContext *C, wmOperator *op)
     return 0;
   }
 
-  StitchStateContainer *ssc = MEM_cnew<StitchStateContainer>("stitch collection");
+  StitchStateContainer *ssc = MEM_callocN<StitchStateContainer>("stitch collection");
 
   op->customdata = ssc;
 
@@ -2341,7 +2339,7 @@ static int stitch_init_all(bContext *C, wmOperator *op)
   return 1;
 }
 
-static int stitch_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
+static wmOperatorStatus stitch_invoke(bContext *C, wmOperator *op, const wmEvent * /*event*/)
 {
   if (!stitch_init_all(C, op)) {
     return OPERATOR_CANCELLED;
@@ -2460,7 +2458,7 @@ static void stitch_cancel(bContext *C, wmOperator *op)
   stitch_exit(C, op, 0);
 }
 
-static int stitch_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus stitch_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
 
@@ -2530,7 +2528,7 @@ static StitchState *stitch_select(bContext *C,
   return nullptr;
 }
 
-static int stitch_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus stitch_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   StitchStateContainer *ssc;
   Scene *scene = CTX_data_scene(C);

@@ -16,6 +16,7 @@
 #include "BLI_vector_set.hh"
 
 #include "DNA_view3d_types.h"
+#include "DNA_windowmanager_enums.h"
 
 #include "ED_select_utils.hh"
 
@@ -26,6 +27,7 @@ struct ViewContext;
 struct rcti;
 struct TransVertStore;
 struct wmKeyConfig;
+struct wmOperator;
 namespace blender::bke {
 enum class AttrDomain : int8_t;
 struct GSpanAttributeWriter;
@@ -54,7 +56,7 @@ float (*point_normals_array_create(const Curves *curves_id))[3];
 Span<StringRef> get_curves_selection_attribute_names(const bke::CurvesGeometry &curves);
 
 /**
- * Get get writable positions per selection attribute for given curve.
+ * Get writable positions per selection attribute for given curve.
  */
 Vector<MutableSpan<float3>> get_curves_positions_for_write(bke::CurvesGeometry &curves);
 
@@ -81,7 +83,7 @@ void remove_selection_attributes(
 Span<float3> get_selection_attribute_positions(
     const bke::CurvesGeometry &curves,
     const bke::crazyspace::GeometryDeformation &deformation,
-    const StringRef attribute_name);
+    StringRef attribute_name);
 
 using SelectionRangeFn = FunctionRef<void(
     IndexRange range, Span<float3> positions, StringRef selection_attribute_name)>;
@@ -118,7 +120,9 @@ void ensure_surface_deformation_node_exists(bContext &C, Object &curves_ob);
  * `ED_transverts_create_from_obedit` in `view3d_snap.cc`).
  * \note The `TransVert` elements in \a tvs are expected to write to the positions of \a curves.
  */
-void transverts_from_curves_positions_create(bke::CurvesGeometry &curves, TransVertStore *tvs);
+void transverts_from_curves_positions_create(bke::CurvesGeometry &curves,
+                                             TransVertStore *tvs,
+                                             const bool skip_handles);
 
 /* -------------------------------------------------------------------- */
 /** \name Poll Functions
@@ -140,6 +144,7 @@ void CURVES_OT_attribute_set(wmOperatorType *ot);
 void CURVES_OT_draw(wmOperatorType *ot);
 void CURVES_OT_extrude(wmOperatorType *ot);
 void CURVES_OT_select_linked_pick(wmOperatorType *ot);
+void CURVES_OT_separate(wmOperatorType *ot);
 
 /** \} */
 
@@ -157,7 +162,7 @@ IndexMask curve_mask_from_points(const bke::CurvesGeometry &curves,
 
 /**
  * Return a mask of all the end points in the curves.
- * \param curves_mask (optional): The curves that should be used in the resulting point mask.
+ * \param curves_mask: (optional) The curves that should be used in the resulting point mask.
  * \param amount_start: The amount of points to mask from the front.
  * \param amount_end: The amount of points to mask from the back.
  * \param inverted: Invert the resulting mask.
@@ -174,26 +179,6 @@ IndexMask end_points(const bke::CurvesGeometry &curves,
                      bool inverted,
                      IndexMaskMemory &memory);
 
-/**
- * Return a mask of random points or curves.
- *
- * \param mask (optional): The elements that should be used in the resulting mask. This mask should
- * be in the same domain as the \a selection_domain. \param random_seed: The seed for the \a
- * RandomNumberGenerator. \param probability: Determines how likely a point/curve will be chosen.
- * If set to 0.0, nothing will be in the mask, if set to 1.0 everything will be in the mask.
- */
-IndexMask random_mask(const bke::CurvesGeometry &curves,
-                      bke::AttrDomain selection_domain,
-                      uint32_t random_seed,
-                      float probability,
-                      IndexMaskMemory &memory);
-IndexMask random_mask(const bke::CurvesGeometry &curves,
-                      const IndexMask &mask,
-                      bke::AttrDomain selection_domain,
-                      uint32_t random_seed,
-                      float probability,
-                      IndexMaskMemory &memory);
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -209,8 +194,8 @@ IndexMask random_mask(const bke::CurvesGeometry &curves,
  * helpful utilities on top of that.
  * \{ */
 
-void fill_selection_false(GMutableSpan span);
-void fill_selection_true(GMutableSpan span);
+void fill_selection_false(GMutableSpan selection);
+void fill_selection_true(GMutableSpan selection);
 void fill_selection(GMutableSpan selection, bool value);
 void fill_selection_false(GMutableSpan selection, const IndexMask &mask);
 void fill_selection_true(GMutableSpan selection, const IndexMask &mask);
@@ -249,6 +234,12 @@ IndexMask retrieve_selected_points(const bke::CurvesGeometry &curves,
 IndexMask retrieve_selected_points(const Curves &curves_id, IndexMaskMemory &memory);
 
 /**
+ * Find points that are selected (a selection factor greater than zero) or have
+ * any of their Bezier handle selected.
+ */
+IndexMask retrieve_all_selected_points(const bke::CurvesGeometry &curves, IndexMaskMemory &memory);
+
+/**
  * If the selection_id attribute doesn't exist, create it with the requested type (bool or float).
  */
 bke::GSpanAttributeWriter ensure_selection_attribute(bke::CurvesGeometry &curves,
@@ -267,7 +258,7 @@ void apply_selection_operation_at_index(GMutableSpan selection, int index, eSele
 /**
  * (De)select all the curves.
  *
- * \param mask (optional): The elements that should be affected. This mask should be in the domain
+ * \param mask: (optional) The elements that should be affected. This mask should be in the domain
  * of the \a selection_domain.
  * \param action: One of #SEL_TOGGLE, #SEL_SELECT, #SEL_DESELECT, or #SEL_INVERT.
  * See `ED_select_utils.hh`.
@@ -281,7 +272,7 @@ void select_all(bke::CurvesGeometry &curves,
 /**
  * Select the points of all curves that have at least one point selected.
  *
- * \param curves_mask (optional): The curves that should be affected.
+ * \param curves_mask: (optional) The curves that should be affected.
  */
 void select_linked(bke::CurvesGeometry &curves);
 void select_linked(bke::CurvesGeometry &curves, const IndexMask &curves_mask);
@@ -289,7 +280,7 @@ void select_linked(bke::CurvesGeometry &curves, const IndexMask &curves_mask);
 /**
  * Select alternated points in strokes with already selected points
  *
- * \param curves_mask (optional): The curves that should be affected.
+ * \param curves_mask: (optional) The curves that should be affected.
  */
 void select_alternate(bke::CurvesGeometry &curves, const bool deselect_ends);
 void select_alternate(bke::CurvesGeometry &curves,
@@ -299,7 +290,7 @@ void select_alternate(bke::CurvesGeometry &curves,
 /**
  * (De)select all the adjacent points of the current selected points.
  *
- * \param curves_mask (optional): The curves that should be affected.
+ * \param curves_mask: (optional) The curves that should be affected.
  */
 void select_adjacent(bke::CurvesGeometry &curves, bool deselect);
 void select_adjacent(bke::CurvesGeometry &curves, const IndexMask &curves_mask, bool deselect);
@@ -437,6 +428,9 @@ bool remove_selection(bke::CurvesGeometry &curves, bke::AttrDomain selection_dom
 void duplicate_points(bke::CurvesGeometry &curves, const IndexMask &mask);
 void duplicate_curves(bke::CurvesGeometry &curves, const IndexMask &mask);
 
+bke::CurvesGeometry split_points(const bke::CurvesGeometry &curves,
+                                 const IndexMask &points_to_split);
+
 /**
  * Adds new curves to \a curves.
  * \param new_sizes: The new size for each curve. Sizes must be > 0.
@@ -459,6 +453,8 @@ void resize_curves(bke::CurvesGeometry &curves,
  * reorder curves.
  */
 void reorder_curves(bke::CurvesGeometry &curves, Span<int> old_by_new_indices_map);
+
+wmOperatorStatus join_objects_exec(bContext *C, wmOperator *op);
 
 /** \} */
 

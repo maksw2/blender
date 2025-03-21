@@ -13,21 +13,22 @@
 #include <iomanip>
 #include <iostream>
 #include <regex>
-#include <sstream>
 #include <string>
 
 #include "BLI_ghash.h"
 #include "BLI_map.hh"
-#include "BLI_string.h"
 #include "BLI_string_ref.hh"
 
 #include "gpu_material_library.hh"
 #include "gpu_shader_create_info.hh"
 #include "gpu_shader_dependency_private.hh"
 
-#include "../glsl_preprocess/glsl_preprocess.hh"
+#ifdef WITH_OPENSUBDIV
+#  include "opensubdiv_capi_type.hh"
+#  include "opensubdiv_evaluator_capi.hh"
+#endif
 
-#include "GPU_context.hh"
+#include "../glsl_preprocess/glsl_preprocess.hh"
 
 extern "C" {
 #define SHADER_SOURCE(datatoc, filename, filepath) extern char datatoc[];
@@ -36,6 +37,9 @@ extern "C" {
 #include "glsl_gpu_source_list.h"
 #ifdef WITH_OCIO
 #  include "glsl_ocio_source_list.h"
+#endif
+#ifdef WITH_OPENSUBDIV
+#  include "glsl_osd_source_list.h"
 #endif
 #undef SHADER_SOURCE
 }
@@ -299,10 +303,10 @@ struct GPUSource {
     StringRef name = pop_token(line);
 
     GPUFunction *func = MEM_new<GPUFunction>(__func__);
-    name.copy(func->name, sizeof(func->name));
+    name.copy_utf8_truncated(func->name, sizeof(func->name));
     func->source = reinterpret_cast<void *>(this);
     func->totparam = 0;
-    while (1) {
+    while (true) {
       StringRef arg_qual = pop_token(line);
       StringRef arg_type = pop_token(line);
       if (arg_qual.is_empty()) {
@@ -449,7 +453,21 @@ void gpu_shader_dependency_init()
 #ifdef WITH_OCIO
 #  include "glsl_ocio_source_list.h"
 #endif
+#ifdef WITH_OPENSUBDIV
+#  include "glsl_osd_source_list.h"
+#endif
 #undef SHADER_SOURCE
+#ifdef WITH_OPENSUBDIV
+  const blender::StringRefNull patch_basis_source = openSubdiv_getGLSLPatchBasisSource();
+  static std::string osd_patch_basis_glsl =
+      "//__blender_metadata_sta\n//__blender_metadata_end\n" + patch_basis_source;
+  g_sources->add_new("osd_patch_basis.glsl",
+                     new GPUSource("osd_patch_basis.glsl",
+                                   "osd_patch_basis.glsl",
+                                   osd_patch_basis_glsl.c_str(),
+                                   g_functions,
+                                   g_formats));
+#endif
 
   int errors = 0;
   for (auto *value : g_sources->values()) {

@@ -36,7 +36,6 @@
 #include "DNA_lightprobe_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
-#include "DNA_meshdata_types.h"
 #include "DNA_meta_types.h"
 #include "DNA_movieclip_types.h"
 #include "DNA_nla_types.h"
@@ -45,21 +44,16 @@
 #include "DNA_pointcloud_types.h"
 #include "DNA_rigidbody_types.h"
 #include "DNA_scene_types.h"
-#include "DNA_screen_types.h"
-#include "DNA_sequence_types.h"
 #include "DNA_shader_fx_types.h"
-#include "DNA_space_types.h"
 #include "DNA_view3d_types.h"
-#include "DNA_world_types.h"
 
-#include "BLI_blenlib.h"
-#include "BLI_bounds.hh"
 #include "BLI_kdtree.h"
 #include "BLI_linklist.h"
 #include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector_types.hh"
+#include "BLI_string.h"
 #include "BLI_threads.h"
 #include "BLI_utildefines.h"
 
@@ -86,7 +80,6 @@
 #include "BKE_editmesh_cache.hh"
 #include "BKE_effect.h"
 #include "BKE_fcurve.hh"
-#include "BKE_fcurve_driver.h"
 #include "BKE_geometry_set.hh"
 #include "BKE_geometry_set_instances.hh"
 #include "BKE_global.hh"
@@ -103,14 +96,14 @@
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_lib_remap.hh"
+#include "BKE_library.hh"
 #include "BKE_light.h"
 #include "BKE_lightprobe.h"
 #include "BKE_linestyle.h"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mball.hh"
 #include "BKE_mesh.hh"
-#include "BKE_mesh_legacy_derived_mesh.hh"
 #include "BKE_mesh_wrapper.hh"
 #include "BKE_modifier.hh"
 #include "BKE_multires.hh"
@@ -145,15 +138,15 @@
 
 #include "ANIM_action_legacy.hh"
 
+#include "RNA_prototypes.hh"
+
 #ifdef WITH_PYTHON
 #  include "BPY_extern.hh"
 #endif
 
-#include "CCGSubSurf.h"
-#include "atomic_ops.h"
-
 using blender::Bounds;
 using blender::float3;
+using blender::float4x4;
 using blender::MutableSpan;
 using blender::Span;
 using blender::Vector;
@@ -256,7 +249,6 @@ static void object_copy_data(Main *bmain,
   BKE_object_modifier_stack_copy(ob_dst, ob_src, true, flag_subdata);
   BLI_assert(BKE_modifiers_persistent_uids_are_valid(*ob_dst));
 
-  BLI_listbase_clear((ListBase *)&ob_dst->drawdata);
   BLI_listbase_clear(&ob_dst->pc_ids);
 
   ob_dst->avs = ob_src->avs;
@@ -295,8 +287,6 @@ static void object_copy_data(Main *bmain,
 static void object_free_data(ID *id)
 {
   Object *ob = (Object *)id;
-
-  DRW_drawdata_free((ID *)ob);
 
   /* BKE_<id>_free shall never touch to ID->us. Never ever. */
   BKE_object_free_modifiers(ob, LIB_ID_CREATE_NO_USER_REFCOUNT);
@@ -350,17 +340,18 @@ static void object_free_data(ID *id)
 static void library_foreach_modifiersForeachIDLink(void *user_data,
                                                    Object * /*object*/,
                                                    ID **id_pointer,
-                                                   int cb_flag)
+                                                   const LibraryForeachIDCallbackFlag cb_flag)
 {
   LibraryForeachIDData *data = (LibraryForeachIDData *)user_data;
   BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
       data, BKE_lib_query_foreachid_process(data, id_pointer, cb_flag));
 }
 
-static void library_foreach_gpencil_modifiersForeachIDLink(void *user_data,
-                                                           Object * /*object*/,
-                                                           ID **id_pointer,
-                                                           int cb_flag)
+static void library_foreach_gpencil_modifiersForeachIDLink(
+    void *user_data,
+    Object * /*object*/,
+    ID **id_pointer,
+    const LibraryForeachIDCallbackFlag cb_flag)
 {
   LibraryForeachIDData *data = (LibraryForeachIDData *)user_data;
   BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
@@ -370,7 +361,7 @@ static void library_foreach_gpencil_modifiersForeachIDLink(void *user_data,
 static void library_foreach_shaderfxForeachIDLink(void *user_data,
                                                   Object * /*object*/,
                                                   ID **id_pointer,
-                                                  int cb_flag)
+                                                  const LibraryForeachIDCallbackFlag cb_flag)
 {
   LibraryForeachIDData *data = (LibraryForeachIDData *)user_data;
   BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
@@ -383,7 +374,7 @@ static void library_foreach_constraintObjectLooper(bConstraint * /*con*/,
                                                    void *user_data)
 {
   LibraryForeachIDData *data = (LibraryForeachIDData *)user_data;
-  const int cb_flag = is_reference ? IDWALK_CB_USER : IDWALK_CB_NOP;
+  const LibraryForeachIDCallbackFlag cb_flag = is_reference ? IDWALK_CB_USER : IDWALK_CB_NOP;
   BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
       data, BKE_lib_query_foreachid_process(data, id_pointer, cb_flag));
 }
@@ -391,7 +382,7 @@ static void library_foreach_constraintObjectLooper(bConstraint * /*con*/,
 static void library_foreach_particlesystemsObjectLooper(ParticleSystem * /*psys*/,
                                                         ID **id_pointer,
                                                         void *user_data,
-                                                        int cb_flag)
+                                                        const LibraryForeachIDCallbackFlag cb_flag)
 {
   LibraryForeachIDData *data = (LibraryForeachIDData *)user_data;
   BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
@@ -840,7 +831,7 @@ static void object_blend_read_data(BlendDataReader *reader, ID *id)
   if (ob->rigidbody_object) {
     RigidBodyOb *rbo = ob->rigidbody_object;
     /* Allocate runtime-only struct */
-    rbo->shared = (RigidBodyOb_Shared *)MEM_callocN(sizeof(*rbo->shared), "RigidBodyObShared");
+    rbo->shared = MEM_callocN<RigidBodyOb_Shared>("RigidBodyObShared");
   }
   BLO_read_struct(reader, RigidBodyCon, &ob->rigidbody_constraint);
   if (ob->rigidbody_constraint) {
@@ -952,7 +943,7 @@ static void object_blend_read_after_liblink(BlendLibReader *reader, ID *id)
   /* When the object is local and the data is library its possible
    * the material list size gets out of sync. #22663. */
   if (ob->data && ob->id.lib != static_cast<ID *>(ob->data)->lib) {
-    BKE_object_materials_test(bmain, ob, static_cast<ID *>(ob->data));
+    BKE_object_materials_sync_length(bmain, ob, static_cast<ID *>(ob->data));
   }
 
   /* Performs quite extensive rebuilding & validation of object-level Pose data from the Armature
@@ -1505,7 +1496,7 @@ static void copy_ccg_data(Mesh *mesh_destination,
     return;
   }
   const int layer_index = CustomData_get_layer_index(data_destination, layer_type);
-  CustomData_free_layer(data_destination, layer_type, num_elements, layer_index);
+  CustomData_free_layer(data_destination, layer_type, layer_index);
   BLI_assert(!CustomData_has_layer(data_destination, layer_type));
   CustomData_add_layer(
       data_destination, eCustomDataType(layer_type), CD_SET_DEFAULT, num_elements);
@@ -2325,7 +2316,7 @@ static void copy_object_pose(Object *obn, const Object *ob, const int flag)
   BKE_pose_copy_data_ex(&obn->pose, ob->pose, flag, true); /* true = copy constraints */
 
   LISTBASE_FOREACH (bPoseChannel *, chan, &obn->pose->chanbase) {
-    chan->flag &= ~(POSE_LOC | POSE_ROT | POSE_SIZE);
+    chan->flag &= ~(POSE_LOC | POSE_ROT | POSE_SCALE);
 
     /* XXX Remapping object pointing onto itself should be handled by generic
      *     BKE_library_remap stuff, but...
@@ -2386,7 +2377,7 @@ Object *BKE_object_pose_armature_get_with_wpaint_check(Object *ob)
         }
         break;
       }
-      case OB_GPENCIL_LEGACY: {
+      case OB_GREASE_PENCIL: {
         if ((ob->mode & OB_MODE_WEIGHT_GREASE_PENCIL) == 0) {
           return nullptr;
         }
@@ -3507,16 +3498,11 @@ void BKE_boundbox_init_from_minmax(BoundBox *bb, const float min[3], const float
   bb->vec[1][2] = bb->vec[2][2] = bb->vec[5][2] = bb->vec[6][2] = max[2];
 }
 
-void BKE_boundbox_minmax(const BoundBox *bb,
-                         const float obmat[4][4],
-                         float r_min[3],
-                         float r_max[3])
+void BKE_boundbox_minmax(const BoundBox &bb, const float4x4 &matrix, float3 &r_min, float3 &r_max)
 {
-  int i;
-  for (i = 0; i < 8; i++) {
-    float vec[3];
-    mul_v3_m4v3(vec, obmat, bb->vec[i]);
-    minmax_v3v3_v3(r_min, r_max, vec);
+  using namespace blender;
+  for (const int i : IndexRange(ARRAY_SIZE(bb.vec))) {
+    math::min_max(math::transform_point(matrix, float3(bb.vec[i])), r_min, r_max);
   }
 }
 
@@ -3630,31 +3616,23 @@ void BKE_object_dimensions_set(Object *ob, const float value[3], int axis_mask)
   BKE_object_dimensions_set_ex(ob, value, axis_mask, nullptr, nullptr);
 }
 
-void BKE_object_minmax(Object *ob, float r_min[3], float r_max[3])
+void BKE_object_minmax(Object *ob, float3 &r_min, float3 &r_max)
 {
   using namespace blender;
+  const float4x4 &object_to_world = ob->object_to_world();
   if (const std::optional<Bounds<float3>> bounds = BKE_object_boundbox_get(ob)) {
-    minmax_v3v3_v3(r_min, r_max, math::transform_point(ob->object_to_world(), bounds->min));
-    minmax_v3v3_v3(r_min, r_max, math::transform_point(ob->object_to_world(), bounds->max));
+    math::min_max(math::transform_point(object_to_world, bounds->min), r_min, r_max);
+    math::min_max(math::transform_point(object_to_world, bounds->max), r_min, r_max);
     return;
   }
-  float3 size = ob->scale;
 
-  copy_v3_v3(size, ob->scale);
+  float3 size = ob->scale;
   if (ob->type == OB_EMPTY) {
     size *= ob->empty_drawsize;
   }
 
-  minmax_v3v3_v3(r_min, r_max, ob->object_to_world().location());
-
-  float3 vec;
-  copy_v3_v3(vec, ob->object_to_world().location());
-  add_v3_v3(vec, size);
-  minmax_v3v3_v3(r_min, r_max, vec);
-
-  copy_v3_v3(vec, ob->object_to_world().location());
-  sub_v3_v3(vec, size);
-  minmax_v3v3_v3(r_min, r_max, vec);
+  math::min_max(object_to_world.location() + size, r_min, r_max);
+  math::min_max(object_to_world.location() - size, r_min, r_max);
 }
 
 void BKE_object_empty_draw_type_set(Object *ob, const int value)
@@ -3663,7 +3641,7 @@ void BKE_object_empty_draw_type_set(Object *ob, const int value)
 
   if (ob->type == OB_EMPTY && ob->empty_drawtype == OB_EMPTY_IMAGE) {
     if (!ob->iuser) {
-      ob->iuser = MEM_cnew<ImageUser>("image user");
+      ob->iuser = MEM_callocN<ImageUser>("image user");
       ob->iuser->flag |= IMA_ANIM_ALWAYS;
       ob->iuser->frames = 100;
       ob->iuser->sfra = 1;
@@ -3799,8 +3777,8 @@ bool BKE_object_minmax_empty_drawtype(const Object *ob, float r_min[3], float r_
 bool BKE_object_minmax_dupli(Depsgraph *depsgraph,
                              Scene *scene,
                              Object *ob,
-                             float r_min[3],
-                             float r_max[3],
+                             float3 &r_min,
+                             float3 &r_max,
                              const bool use_hidden)
 {
   using namespace blender;
@@ -3825,13 +3803,7 @@ bool BKE_object_minmax_dupli(Depsgraph *depsgraph,
       if (const std::optional<Bounds<float3>> bounds = BKE_object_boundbox_get(&temp_ob)) {
         BoundBox bb;
         BKE_boundbox_init_from_minmax(&bb, bounds->min, bounds->max);
-        int i;
-        for (i = 0; i < 8; i++) {
-          float3 vec;
-          mul_v3_m4v3(vec, dob->mat, bb.vec[i]);
-          minmax_v3v3_v3(r_min, r_max, vec);
-        }
-
+        BKE_boundbox_minmax(bb, float4x4(dob->mat), r_min, r_max);
         ok = true;
       }
     }
@@ -3855,6 +3827,28 @@ void BKE_object_foreach_display_point(Object *ob,
     for (const int i : positions.index_range()) {
       mul_v3_m4v3(co, obmat, positions[i]);
       func_cb(co, user_data);
+    }
+  }
+  else if (ob->type == OB_GREASE_PENCIL) {
+    using namespace blender::bke::greasepencil;
+    GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+    for (const Layer *layer : grease_pencil.layers()) {
+      if (!layer->is_visible()) {
+        continue;
+      }
+      const float4x4 layer_to_world = layer->to_world_space(*ob);
+      if (const Drawing *drawing = grease_pencil.get_drawing_at(*layer,
+                                                                grease_pencil.runtime->eval_frame))
+      {
+        const blender::bke::CurvesGeometry &curves = drawing->strokes();
+        const Span<float3> positions = curves.evaluated_positions();
+        blender::threading::parallel_for(
+            positions.index_range(), 4096, [&](const blender::IndexRange range) {
+              for (const int i : range) {
+                func_cb(blender::math::transform_point(layer_to_world, positions[i]), user_data);
+              }
+            });
+      }
     }
   }
   else if (ob->runtime->curve_cache && ob->runtime->curve_cache->disp.first) {
@@ -3911,7 +3905,7 @@ struct ObTfmBack {
 
 void *BKE_object_tfm_backup(Object *ob)
 {
-  ObTfmBack *obtfm = (ObTfmBack *)MEM_mallocN(sizeof(ObTfmBack), "ObTfmBack");
+  ObTfmBack *obtfm = MEM_mallocN<ObTfmBack>("ObTfmBack");
   copy_v3_v3(obtfm->loc, ob->loc);
   copy_v3_v3(obtfm->dloc, ob->dloc);
   copy_v3_v3(obtfm->scale, ob->scale);
@@ -3951,6 +3945,85 @@ void BKE_object_tfm_restore(Object *ob, void *obtfm_pt)
   copy_m4_m4(ob->parentinv, obtfm->parentinv);
   copy_m4_m4(ob->constinv, obtfm->constinv);
   copy_m4_m4(ob->runtime->world_to_object.ptr(), obtfm->imat);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Protected Transform Channel Assignment
+ * \{ */
+
+void BKE_object_protected_location_set(Object *ob, const float location[3])
+{
+  if ((ob->protectflag & OB_LOCK_LOCX) == 0) {
+    ob->loc[0] = location[0];
+  }
+  if ((ob->protectflag & OB_LOCK_LOCY) == 0) {
+    ob->loc[1] = location[1];
+  }
+  if ((ob->protectflag & OB_LOCK_LOCZ) == 0) {
+    ob->loc[2] = location[2];
+  }
+}
+
+void BKE_object_protected_scale_set(Object *ob, const float scale[3])
+{
+  if ((ob->protectflag & OB_LOCK_SCALEX) == 0) {
+    ob->scale[0] = scale[0];
+  }
+  if ((ob->protectflag & OB_LOCK_SCALEY) == 0) {
+    ob->scale[1] = scale[1];
+  }
+  if ((ob->protectflag & OB_LOCK_SCALEZ) == 0) {
+    ob->scale[2] = scale[2];
+  }
+}
+
+void BKE_object_protected_rotation_quaternion_set(Object *ob, const float quat[4])
+{
+  if ((ob->protectflag & OB_LOCK_ROTX) == 0) {
+    ob->quat[0] = quat[0];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTY) == 0) {
+    ob->quat[1] = quat[1];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTZ) == 0) {
+    ob->quat[2] = quat[2];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTW) == 0) {
+    ob->quat[3] = quat[3];
+  }
+}
+
+void BKE_object_protected_rotation_euler_set(Object *ob, const float euler[3])
+{
+  if ((ob->protectflag & OB_LOCK_ROTX) == 0) {
+    ob->rot[0] = euler[0];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTY) == 0) {
+    ob->rot[1] = euler[1];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTZ) == 0) {
+    ob->rot[2] = euler[2];
+  }
+}
+
+void BKE_object_protected_rotation_axisangle_set(Object *ob,
+                                                 const float axis[3],
+                                                 const float angle)
+{
+  if ((ob->protectflag & OB_LOCK_ROTX) == 0) {
+    ob->rotAxis[0] = axis[0];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTY) == 0) {
+    ob->rotAxis[1] = axis[1];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTZ) == 0) {
+    ob->rotAxis[2] = axis[2];
+  }
+  if ((ob->protectflag & OB_LOCK_ROTW) == 0) {
+    ob->rotAngle = angle;
+  }
 }
 
 /** \} */
@@ -4107,12 +4180,7 @@ Mesh *BKE_object_get_evaluated_mesh_unchecked(const Object *object_eval)
   if (!mesh) {
     return nullptr;
   }
-
-  if (object_eval->data && GS(((const ID *)object_eval->data)->name) == ID_ME) {
-    mesh = BKE_mesh_wrapper_ensure_subdivision(mesh);
-  }
-
-  return mesh;
+  return BKE_mesh_wrapper_ensure_subdivision(mesh);
 }
 
 Mesh *BKE_object_get_evaluated_mesh(const Object *object_eval)
@@ -4254,7 +4322,7 @@ int BKE_object_insert_ptcache(Object *ob)
     }
   }
 
-  link = MEM_cnew<LinkData>("PCLink");
+  link = MEM_callocN<LinkData>("PCLink");
   link->data = POINTER_FROM_INT(i);
   BLI_addtail(&ob->pc_ids, link);
 
@@ -4469,6 +4537,8 @@ bool BKE_object_shapekey_remove(Main *bmain, Object *ob, KeyBlock *kb)
   if (key == nullptr) {
     return false;
   }
+
+  BKE_animdata_drivers_remove_for_rna_struct(key->id, RNA_ShapeKey, kb);
 
   kb_index = BLI_findindex(&key->block, kb);
   BLI_assert(kb_index != -1);
@@ -5250,7 +5320,7 @@ Mesh *BKE_object_to_mesh(Depsgraph *depsgraph, Object *object, bool preserve_all
 {
   BKE_object_to_mesh_clear(object);
 
-  Mesh *mesh = BKE_mesh_new_from_object(depsgraph, object, preserve_all_data_layers, false);
+  Mesh *mesh = BKE_mesh_new_from_object(depsgraph, object, preserve_all_data_layers, false, true);
   object->runtime->object_as_temp_mesh = mesh;
   return mesh;
 }

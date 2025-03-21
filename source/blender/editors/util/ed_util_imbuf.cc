@@ -278,7 +278,7 @@ static void sequencer_sample_apply(bContext *C, wmOperator *op, const wmEvent *e
 {
   Scene *scene = CTX_data_scene(C);
   ARegion *region = CTX_wm_region(C);
-  ImBuf *ibuf = sequencer_ibuf_get(C, scene->r.cfra, 0, nullptr);
+  ImBuf *ibuf = blender::ed::vse::sequencer_ibuf_get(C, scene->r.cfra, 0, nullptr);
   ImageSampleInfo *info = static_cast<ImageSampleInfo *>(op->customdata);
   float fx, fy;
 
@@ -341,7 +341,7 @@ static void sequencer_sample_apply(bContext *C, wmOperator *op, const wmEvent *e
 
       /* sequencer's image buffers are in non-linear space, need to make them linear */
       copy_v4_v4(info->linearcol, info->colf);
-      SEQ_render_pixel_from_sequencer_space_v4(scene, info->linearcol);
+      blender::seq::render_pixel_from_sequencer_space_v4(scene, info->linearcol);
 
       info->color_manage = true;
     }
@@ -445,7 +445,7 @@ void ED_imbuf_sample_exit(bContext *C, wmOperator *op)
   MEM_freeN(info);
 }
 
-int ED_imbuf_sample_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+wmOperatorStatus ED_imbuf_sample_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   ARegion *region = CTX_wm_region(C);
   ScrArea *area = CTX_wm_area(C);
@@ -486,7 +486,7 @@ int ED_imbuf_sample_invoke(bContext *C, wmOperator *op, const wmEvent *event)
   return OPERATOR_RUNNING_MODAL;
 }
 
-int ED_imbuf_sample_modal(bContext *C, wmOperator *op, const wmEvent *event)
+wmOperatorStatus ED_imbuf_sample_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   switch (event->type) {
     case LEFTMOUSE:
@@ -538,7 +538,7 @@ bool ED_imbuf_sample_poll(bContext *C)
       if (sseq->mainb != SEQ_DRAW_IMG_IMBUF) {
         return false;
       }
-      if (SEQ_editing_get(CTX_data_scene(C)) == nullptr) {
+      if (blender::seq::editing_get(CTX_data_scene(C)) == nullptr) {
         return false;
       }
       ARegion *region = CTX_wm_region(C);

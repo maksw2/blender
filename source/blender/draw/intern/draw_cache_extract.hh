@@ -8,8 +8,11 @@
 
 #pragma once
 
+#include "BLI_array.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_utildefines.h"
+
+#include "DNA_view3d_enums.h"
 
 #include "GPU_shader.hh"
 
@@ -19,7 +22,11 @@ namespace blender::gpu {
 class Batch;
 class IndexBuf;
 }  // namespace blender::gpu
+struct Mesh;
+struct Object;
+struct Scene;
 struct TaskGraph;
+struct ToolSettings;
 
 namespace blender::draw {
 
@@ -49,8 +56,6 @@ enum {
   DRW_MESH_WEIGHT_STATE_AUTO_NORMALIZE = (1 << 1),
   DRW_MESH_WEIGHT_STATE_LOCK_RELATIVE = (1 << 2),
 };
-
-int mesh_render_mat_len_get(const Object &object, const Mesh &mesh);
 
 struct MeshBufferList {
   /* Every VBO below contains at least enough data for every loop in the mesh

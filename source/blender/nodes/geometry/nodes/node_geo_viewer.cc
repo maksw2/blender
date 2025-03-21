@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_listbase.h"
+
 #include "BKE_context.hh"
 
 #include "NOD_node_extra_info.hh"
@@ -35,7 +37,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
 {
-  NodeGeometryViewer *data = MEM_cnew<NodeGeometryViewer>(__func__);
+  NodeGeometryViewer *data = MEM_callocN<NodeGeometryViewer>(__func__);
   data->data_type = CD_PROP_FLOAT;
   data->domain = int8_t(AttrDomain::Auto);
   node->storage = data;
@@ -91,11 +93,11 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
       /* If the source node has a geometry socket, connect it to the new viewer node as well. */
       LISTBASE_FOREACH (bNodeSocket *, socket, &params.node.outputs) {
         if (socket->type == SOCK_GEOMETRY && socket->is_visible()) {
-          bke::node_add_link(&params.node_tree,
-                             &params.node,
-                             socket,
-                             &node,
-                             static_cast<bNodeSocket *>(node.inputs.first));
+          bke::node_add_link(params.node_tree,
+                             params.node,
+                             *socket,
+                             node,
+                             *static_cast<bNodeSocket *>(node.inputs.first));
           break;
         }
       }
@@ -136,15 +138,28 @@ static void node_rna(StructRNA *srna)
                     rna_enum_attribute_domain_with_auto_items,
                     NOD_storage_enum_accessors(domain),
                     int(AttrDomain::Point));
+
+  PropertyRNA *prop;
+  prop = RNA_def_property(srna, "ui_shortcut", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs_runtime(
+      prop, rna_Node_Viewer_shortcut_node_get, rna_Node_Viewer_shortcut_node_set, nullptr);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_IGNORE);
+  RNA_def_property_int_default(prop, NODE_VIEWER_SHORTCUT_NONE);
+  RNA_def_property_update_notifier(prop, NC_NODE | ND_DISPLAY);
 }
 
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_VIEWER, "Viewer", NODE_CLASS_OUTPUT);
+  geo_node_type_base(&ntype, "GeometryNodeViewer", GEO_NODE_VIEWER);
+  ntype.ui_name = "Viewer";
+  ntype.ui_description = "Display the input data in the Spreadsheet Editor";
+  ntype.enum_name_legacy = "VIEWER";
+  ntype.nclass = NODE_CLASS_OUTPUT;
   blender::bke::node_type_storage(
-      &ntype, "NodeGeometryViewer", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeGeometryViewer", node_free_standard_storage, node_copy_standard_storage);
   ntype.declare = node_declare;
   ntype.initfunc = node_init;
   ntype.draw_buttons = node_layout;
@@ -152,7 +167,7 @@ static void node_register()
   ntype.gather_link_search_ops = node_gather_link_searches;
   ntype.no_muting = true;
   ntype.get_extra_info = node_extra_info;
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);
 }

@@ -15,13 +15,10 @@
 #include "BLI_compiler_attrs.h"
 #include "BLI_map.hh"
 #include "BLI_ordered_edge.hh"
-#include "BLI_utildefines.h"
+
+#include "BKE_lib_query.hh" /* For LibraryForeachIDCallbackFlag. */
 
 #include "DNA_particle_types.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 struct ParticleKey;
 struct ParticleSettings;
@@ -88,7 +85,10 @@ typedef struct SPHData {
   ParticleData *pa;
   float mass;
   std::optional<blender::Map<blender::OrderedEdge, int>> eh;
-  float *gravity;
+
+  /** The gravity as a `float[3]`, may also be null when the simulation doesn't use gravity. */
+  const float *gravity;
+
   float hfac;
   /* Average distance to neighbors (other particles in the support domain),
    * for calculating the Courant number (adaptive time step). */
@@ -533,7 +533,7 @@ void particle_system_update(struct Depsgraph *depsgraph,
 typedef void (*ParticleSystemIDFunc)(struct ParticleSystem *psys,
                                      struct ID **idpoin,
                                      void *userdata,
-                                     int cb_flag);
+                                     LibraryForeachIDCallbackFlag cb_flag);
 
 void BKE_particlesystem_id_loop(struct ParticleSystem *psys,
                                 ParticleSystemIDFunc func,
@@ -708,7 +708,3 @@ void BKE_particle_system_blend_read_after_liblink(struct BlendLibReader *reader,
                                                   struct Object *ob,
                                                   struct ID *id,
                                                   struct ListBase *particles);
-
-#ifdef __cplusplus
-}
-#endif

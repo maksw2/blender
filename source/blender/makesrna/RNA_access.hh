@@ -18,6 +18,7 @@
 
 #include "BLI_compiler_attrs.h"
 #include "BLI_function_ref.hh"
+#include "BLI_string_ref.hh"
 
 struct ID;
 struct IDOverrideLibrary;
@@ -45,8 +46,49 @@ extern BlenderRNA BLENDER_RNA;
  */
 
 PointerRNA RNA_main_pointer_create(Main *main);
+/**
+ * Create a PointerRNA for an ID.
+ *
+ * \note By definition, currently these are always 'discrete' (have no ancestors). See
+ * #PointerRNA::ancestors for details.
+ */
 PointerRNA RNA_id_pointer_create(ID *id);
-PointerRNA RNA_pointer_create(ID *id, StructRNA *type, void *data);
+/**
+ * Create a 'discrete', isolated PointerRNA of some data. It won't have any ancestor information
+ * available.
+ *
+ * \param id: The owner ID, may be null, in which case the PointerRNA won't have any ownership
+ * information at all.
+ */
+PointerRNA RNA_pointer_create_discrete(ID *id, StructRNA *type, void *data);
+/**
+ * Create a PointerRNA of some data, using the given `parent` as immediate ancestor.
+ *
+ * This allows the PointerRNA to know to which data it belongs, all the way up to the root owner
+ * ID.
+ */
+PointerRNA RNA_pointer_create_with_parent(const PointerRNA &parent, StructRNA *type, void *data);
+/**
+ * Create a PointerRNA of some data, with the given `id` data-block as single ancestor.
+ *
+ * This assumes that given `data` is an immediate (RNA-wise) child of the relevant RNA ID struct,
+ * and is a shortcut for:
+ *
+ *    PointerRNA id_ptr = RNA_id_pointer_create(id);
+ *    PointerRNA ptr = RNA_pointer_create_with_parent(id_ptr, &RNA_Type, data);
+ */
+PointerRNA RNA_pointer_create_id_subdata(ID &id, StructRNA *type, void *data);
+
+/**
+ * Create a PointerRNA representing the N'th ancestor of the given PointerRNA, where `0` is the
+ * root.
+ *
+ * \note: Typically, the root ancestor should be an ID. But depending on how the PointerRNA and its
+ * ancestors have been created, only part of the ancestor chain may be available, see
+ * #PointerRNA::ancestors for details.
+ */
+PointerRNA RNA_pointer_create_from_ancestor(const PointerRNA &ptr, const int ancestor_idx);
+
 bool RNA_pointer_is_null(const PointerRNA *ptr);
 
 bool RNA_path_resolved_create(PointerRNA *ptr,
@@ -376,8 +418,16 @@ bool RNA_property_update_check(PropertyRNA *prop);
 bool RNA_property_boolean_get(PointerRNA *ptr, PropertyRNA *prop);
 void RNA_property_boolean_set(PointerRNA *ptr, PropertyRNA *prop, bool value);
 void RNA_property_boolean_get_array(PointerRNA *ptr, PropertyRNA *prop, bool *values);
+void RNA_property_boolean_get_array_at_most(PointerRNA *ptr,
+                                            PropertyRNA *prop,
+                                            bool *values,
+                                            int values_num);
 bool RNA_property_boolean_get_index(PointerRNA *ptr, PropertyRNA *prop, int index);
 void RNA_property_boolean_set_array(PointerRNA *ptr, PropertyRNA *prop, const bool *values);
+void RNA_property_boolean_set_array_at_most(PointerRNA *ptr,
+                                            PropertyRNA *prop,
+                                            const bool *values,
+                                            int values_num);
 void RNA_property_boolean_set_index(PointerRNA *ptr, PropertyRNA *prop, int index, bool value);
 bool RNA_property_boolean_get_default(PointerRNA *ptr, PropertyRNA *prop);
 void RNA_property_boolean_get_default_array(PointerRNA *ptr, PropertyRNA *prop, bool *values);
@@ -386,10 +436,18 @@ bool RNA_property_boolean_get_default_index(PointerRNA *ptr, PropertyRNA *prop, 
 int RNA_property_int_get(PointerRNA *ptr, PropertyRNA *prop);
 void RNA_property_int_set(PointerRNA *ptr, PropertyRNA *prop, int value);
 void RNA_property_int_get_array(PointerRNA *ptr, PropertyRNA *prop, int *values);
+void RNA_property_int_get_array_at_most(PointerRNA *ptr,
+                                        PropertyRNA *prop,
+                                        int *values,
+                                        int values_num);
 void RNA_property_int_get_array_range(PointerRNA *ptr, PropertyRNA *prop, int values[2]);
 int RNA_property_int_get_index(PointerRNA *ptr, PropertyRNA *prop, int index);
 void RNA_property_int_set_array(PointerRNA *ptr, PropertyRNA *prop, const int *values);
 void RNA_property_int_set_index(PointerRNA *ptr, PropertyRNA *prop, int index, int value);
+void RNA_property_int_set_array_at_most(PointerRNA *ptr,
+                                        PropertyRNA *prop,
+                                        const int *values,
+                                        int values_num);
 int RNA_property_int_get_default(PointerRNA *ptr, PropertyRNA *prop);
 bool RNA_property_int_set_default(PropertyRNA *prop, int value);
 void RNA_property_int_get_default_array(PointerRNA *ptr, PropertyRNA *prop, int *values);
@@ -398,9 +456,17 @@ int RNA_property_int_get_default_index(PointerRNA *ptr, PropertyRNA *prop, int i
 float RNA_property_float_get(PointerRNA *ptr, PropertyRNA *prop);
 void RNA_property_float_set(PointerRNA *ptr, PropertyRNA *prop, float value);
 void RNA_property_float_get_array(PointerRNA *ptr, PropertyRNA *prop, float *values);
+void RNA_property_float_get_array_at_most(PointerRNA *ptr,
+                                          PropertyRNA *prop,
+                                          float *values,
+                                          int values_num);
 void RNA_property_float_get_array_range(PointerRNA *ptr, PropertyRNA *prop, float values[2]);
 float RNA_property_float_get_index(PointerRNA *ptr, PropertyRNA *prop, int index);
 void RNA_property_float_set_array(PointerRNA *ptr, PropertyRNA *prop, const float *values);
+void RNA_property_float_set_array_at_most(PointerRNA *ptr,
+                                          PropertyRNA *prop,
+                                          const float *values,
+                                          int values_num);
 void RNA_property_float_set_index(PointerRNA *ptr, PropertyRNA *prop, int index, float value);
 float RNA_property_float_get_default(PointerRNA *ptr, PropertyRNA *prop);
 bool RNA_property_float_set_default(PropertyRNA *prop, float value);
@@ -429,6 +495,14 @@ void RNA_property_string_search(
     PropertyRNA *prop,
     const char *edit_text,
     blender::FunctionRef<void(StringPropertySearchVisitParams)> visit_fn);
+
+/**
+ * For filepath properties, get a glob pattern to filter possible files.
+ * For example: `*.csv`
+ */
+std::optional<std::string> RNA_property_string_path_filter(const bContext *C,
+                                                           PointerRNA *ptr,
+                                                           PropertyRNA *prop);
 
 /**
  * \return the length without `\0` terminator.
@@ -761,21 +835,13 @@ void RNA_parameter_dynamic_length_set_data(ParameterList *parms,
 int RNA_function_call(
     bContext *C, ReportList *reports, PointerRNA *ptr, FunctionRNA *func, ParameterList *parms);
 
-const char *RNA_translate_ui_text(
+std::optional<blender::StringRefNull> RNA_translate_ui_text(
     const char *text, const char *text_ctxt, StructRNA *type, PropertyRNA *prop, int translate);
 
 /* ID */
 
 short RNA_type_to_ID_code(const StructRNA *type);
 StructRNA *ID_code_to_RNA_type(short idcode);
-
-#define RNA_POINTER_INVALIDATE(ptr) \
-  { \
-    /* this is checked for validity */ \
-    (ptr)->type = NULL; /* should not be needed but prevent bad pointer access, just in case */ \
-    (ptr)->owner_id = NULL; \
-  } \
-  (void)0
 
 /* macro which inserts the function name */
 #if defined __GNUC__

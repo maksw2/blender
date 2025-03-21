@@ -6,7 +6,6 @@
  * \ingroup cmpnodes
  */
 
-#include "BLI_assert.h"
 #include "BLI_math_vector_types.hh"
 #include "BLI_utildefines.h"
 
@@ -14,7 +13,6 @@
 #include "UI_resources.hh"
 
 #include "GPU_shader.hh"
-#include "GPU_texture.hh"
 
 #include "COM_node_operation.hh"
 #include "COM_utilities.hh"
@@ -38,7 +36,7 @@ static void node_composit_buts_flip(uiLayout *layout, bContext * /*C*/, PointerR
   uiItemR(layout, ptr, "axis", UI_ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class FlipOperation : public NodeOperation {
  public:
@@ -46,12 +44,10 @@ class FlipOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &input = get_input("Image");
-    Result &result = get_result("Image");
-
-    /* Can't flip a single value, pass it through to the output. */
+    const Result &input = this->get_input("Image");
     if (input.is_single_value()) {
-      input.pass_through(result);
+      Result &output = this->get_result("Image");
+      output.share_data(input);
       return;
     }
 
@@ -108,7 +104,7 @@ class FlipOperation : public NodeOperation {
       if (flip_y) {
         flipped_texel.y = size.y - texel.y - 1;
       }
-      output.store_pixel(texel, input.load_pixel(flipped_texel));
+      output.store_pixel(texel, input.load_pixel<float4>(flipped_texel));
     });
   }
 
@@ -131,10 +127,14 @@ void register_node_type_cmp_flip()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_FLIP, "Flip", NODE_CLASS_DISTORT);
+  cmp_node_type_base(&ntype, "CompositorNodeFlip", CMP_NODE_FLIP);
+  ntype.ui_name = "Flip";
+  ntype.ui_description = "Flip an image along a defined axis";
+  ntype.enum_name_legacy = "FLIP";
+  ntype.nclass = NODE_CLASS_DISTORT;
   ntype.declare = file_ns::cmp_node_flip_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_flip;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

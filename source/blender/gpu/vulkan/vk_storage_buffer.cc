@@ -18,6 +18,14 @@ namespace blender::gpu {
 VKStorageBuffer::VKStorageBuffer(size_t size, GPUUsageType usage, const char *name)
     : StorageBuf(size, name), usage_(usage)
 {
+  UNUSED_VARS(usage_);
+}
+VKStorageBuffer::~VKStorageBuffer()
+{
+  if (async_read_buffer_) {
+    MEM_delete(async_read_buffer_);
+    async_read_buffer_ = nullptr;
+  }
 }
 
 void VKStorageBuffer::update(const void *data)
@@ -38,12 +46,16 @@ void VKStorageBuffer::ensure_allocated()
 
 void VKStorageBuffer::allocate()
 {
-  const bool is_host_visible = false;
   const VkBufferUsageFlags buffer_usage_flags = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  buffer_.create(size_in_bytes_, usage_, buffer_usage_flags, is_host_visible);
+  buffer_.create(size_in_bytes_,
+                 buffer_usage_flags,
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                 VkMemoryPropertyFlags(0),
+                 VmaAllocationCreateFlags(0));
+  BLI_assert(buffer_.is_allocated());
   debug::object_label(buffer_.vk_handle(), name_);
 }
 
@@ -84,21 +96,33 @@ void VKStorageBuffer::copy_sub(VertBuf *src, uint dst_offset, uint src_offset, u
   copy_buffer.region.size = copy_size;
 
   VKContext &context = *VKContext::get();
-  context.render_graph.add_node(copy_buffer);
+  context.render_graph().add_node(copy_buffer);
 }
 
 void VKStorageBuffer::async_flush_to_host()
 {
-  GPU_memory_barrier(GPU_BARRIER_BUFFER_UPDATE);
+  if (async_read_buffer_ != nullptr) {
+    return;
+  }
+  ensure_allocated();
+  VKContext &context = *VKContext::get();
+
+  async_read_buffer_ = MEM_new<VKStagingBuffer>(
+      __func__, buffer_, VKStagingBuffer::Direction::DeviceToHost);
+  async_read_buffer_->copy_from_device(context);
+  async_read_buffer_->host_buffer_get().async_flush_to_host(context);
 }
 
 void VKStorageBuffer::read(void *data)
 {
-  ensure_allocated();
+  if (async_read_buffer_ == nullptr) {
+    async_flush_to_host();
+  }
+
   VKContext &context = *VKContext::get();
-  VKStagingBuffer staging_buffer(buffer_, VKStagingBuffer::Direction::DeviceToHost);
-  staging_buffer.copy_from_device(context);
-  staging_buffer.host_buffer_get().read(context, data);
+  async_read_buffer_->host_buffer_get().read_async(context, data);
+  MEM_delete(async_read_buffer_);
+  async_read_buffer_ = nullptr;
 }
 
 }  // namespace blender::gpu

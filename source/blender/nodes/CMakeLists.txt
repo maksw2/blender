@@ -46,7 +46,7 @@ add_subdirectory(shader)
 add_subdirectory(texture)
 
 set(INC
-  .
+  PUBLIC .
   composite
   function
   geometry
@@ -55,19 +55,9 @@ set(INC
   texture
   ../animrig
   ../editors/include
-  ../blenkernel
-  ../blenloader
-  ../blentranslation
-  ../bmesh
   ../depsgraph
-  ../functions
-  ../geometry
-  ../gpu
-  ../imbuf
   ../makesrna
   ../modifiers
-  ../render
-  ../windowmanager
 
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
@@ -78,6 +68,7 @@ set(INC_SYS
 
 set(SRC
   intern/derived_node_tree.cc
+  intern/geometry_nodes_dependencies.cc
   intern/geometry_nodes_execute.cc
   intern/geometry_nodes_foreach_geometry_element_zone.cc
   intern/geometry_nodes_gizmos.cc
@@ -98,13 +89,15 @@ set(SRC
   intern/node_util.cc
   intern/partial_eval.cc
   intern/socket_search_link.cc
+  intern/socket_usage_inference.cc
   intern/value_elem.cc
 
-  NOD_common.h
+  NOD_common.hh
   NOD_composite.hh
   NOD_derived_node_tree.hh
   NOD_geometry.hh
   NOD_geometry_exec.hh
+  NOD_geometry_nodes_dependencies.hh
   NOD_geometry_nodes_execute.hh
   NOD_geometry_nodes_gizmos.hh
   NOD_geometry_nodes_lazy_function.hh
@@ -129,7 +122,7 @@ set(SRC
   NOD_socket_items_ops.hh
   NOD_socket_items_ui.hh
   NOD_socket_search_link.hh
-  NOD_static_types.h
+  NOD_socket_usage_inference.hh
   NOD_texture.h
   NOD_value_elem.hh
   NOD_value_elem_eval.hh
@@ -139,11 +132,17 @@ set(SRC
 )
 
 set(LIB
+  PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
-  bf_bmesh
+  PRIVATE bf::blenloader
+  PRIVATE bf::blentranslation
+  PRIVATE bf::bmesh
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
-  bf_functions
+  PRIVATE bf::functions
+  PRIVATE bf::geometry
+  PRIVATE bf::gpu
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   bf_nodes_composite
   bf_nodes_function
@@ -152,6 +151,8 @@ set(LIB
   bf_nodes_texture
   PRIVATE bf::extern::fmtlib
   PRIVATE bf::extern::xxhash
+  PRIVATE bf::render
+  PRIVATE bf::windowmanager
 )
 
 if(WITH_BULLET)
@@ -208,6 +209,7 @@ if(WITH_OPENVDB)
 endif()
 
 blender_add_lib(bf_nodes "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
+add_library(bf::nodes ALIAS bf_nodes)
 
 # RNA_prototypes.hh
 add_dependencies(bf_nodes bf_rna)

@@ -13,6 +13,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_listbase.h"
+#include "BLI_math_vector.h"
 #include "BLI_rect.h"
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
@@ -20,6 +21,7 @@
 #include "BLT_translation.hh"
 
 #include "BKE_context.hh"
+#include "BKE_global.hh"
 #include "BKE_image.hh"
 #include "BKE_screen.hh"
 
@@ -79,6 +81,9 @@ struct tSlider {
   /** Range of the slider without overshoot. */
   float factor_bounds[2];
 
+  /** Change if the slider range is so large/small that a 0.1 increment is meaningless. */
+  float increment_step;
+
   /* How the factor number is drawn. When drawing percent it is factor*100. */
   SliderMode slider_mode;
 
@@ -99,11 +104,11 @@ struct tSlider {
    * This is set by the artist while using the slider. */
   bool overshoot;
 
-  /** Whether keeping CTRL pressed will snap to 10% increments.
+  /** Whether keeping CTRL pressed will snap to multiples of `increment_step`.
    * Default is true. Set to false if the CTRL key is needed for other means. */
   bool allow_increments;
 
-  /** Move factor in 10% steps. */
+  /** Move factor in multiples of `increment_step`. */
   bool increments;
 
   /** Reduces factor delta from mouse movement. */
@@ -409,7 +414,7 @@ static void slider_update_factor(tSlider *slider, const wmEvent *event)
   copy_v2fl_v2i(slider->last_cursor, event->xy);
 
   if (slider->increments) {
-    slider->factor = round(slider->factor * 10) / 10;
+    slider->factor = round(slider->factor / slider->increment_step) * slider->increment_step;
   }
 
   if (!slider->overshoot) {
@@ -448,13 +453,17 @@ tSlider *ED_slider_create(bContext *C)
   slider->raw_factor = 0.5f;
   slider->factor = 0.5;
 
+  slider->increment_step = 0.1f;
+
   /* Add draw callback. Always in header. */
   if (slider->area) {
     LISTBASE_FOREACH (ARegion *, region, &slider->area->regionbase) {
       if (region->regiontype == RGN_TYPE_HEADER) {
         slider->region_header = region;
-        slider->draw_handle = ED_region_draw_cb_activate(
-            region->runtime->type, slider_draw, slider, REGION_DRAW_POST_PIXEL);
+        if (!G.background) {
+          slider->draw_handle = ED_region_draw_cb_activate(
+              region->runtime->type, slider_draw, slider, REGION_DRAW_POST_PIXEL);
+        }
       }
     }
   }
@@ -536,7 +545,7 @@ void ED_slider_status_string_get(const tSlider *slider,
       STRNCPY(increments_str, IFACE_(" | [Ctrl] - Increments active"));
     }
     else {
-      STRNCPY(increments_str, IFACE_(" | Ctrl - Hold for 10% increments"));
+      STRNCPY(increments_str, IFACE_(" | Ctrl - Hold for increments"));
     }
   }
   else {
@@ -549,6 +558,22 @@ void ED_slider_status_string_get(const tSlider *slider,
                overshoot_str,
                precision_str,
                increments_str);
+}
+
+void ED_slider_status_get(const tSlider *slider, WorkspaceStatus &status)
+{
+  if (slider->allow_overshoot_lower || slider->allow_overshoot_upper) {
+    status.item_bool(IFACE_("Overshoot"), slider->overshoot, ICON_EVENT_E);
+  }
+  else {
+    status.item(IFACE_("Overshoot Disabled"), ICON_INFO);
+  }
+
+  status.item_bool(IFACE_("Precision"), slider->precision, ICON_EVENT_SHIFT);
+
+  if (slider->allow_increments) {
+    status.item_bool(IFACE_("Snap"), slider->increments, ICON_EVENT_CTRL);
+  }
 }
 
 void ED_slider_destroy(bContext *C, tSlider *slider)
@@ -576,6 +601,16 @@ void ED_slider_factor_set(tSlider *slider, const float factor)
   if (!slider->overshoot) {
     slider->factor = clamp_f(slider->factor, slider->factor_bounds[0], slider->factor_bounds[1]);
   }
+}
+
+void ED_slider_increment_step_set(tSlider *slider, const float increment_step)
+{
+  if (increment_step == 0) {
+    /* Because this value is used as a divisor, it cannot be 0. */
+    BLI_assert_unreachable();
+    return;
+  }
+  slider->increment_step = increment_step;
 }
 
 void ED_slider_allow_overshoot_set(tSlider *slider, const bool lower, const bool upper)
@@ -905,7 +940,6 @@ void ED_region_image_metadata_draw(
     GPUVertFormat *format = immVertexFormat();
     uint pos = GPU_vertformat_attr_add(format, "pos", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
     immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
-    GPU_blend(GPU_BLEND_ALPHA);
     immUniformThemeColorAlpha(TH_METADATA_BG, 1.0f);
     immRectf(pos, rect.xmin, rect.ymin, rect.xmax, rect.ymax);
     immUnbindProgram();
@@ -917,7 +951,6 @@ void ED_region_image_metadata_draw(
     metadata_draw_imbuf(ibuf, &rect, blf_mono_font, true);
 
     BLF_disable(blf_mono_font, BLF_CLIPPING);
-    GPU_blend(GPU_BLEND_NONE);
   }
 
   /* *** lower box*** */
@@ -932,7 +965,6 @@ void ED_region_image_metadata_draw(
     GPUVertFormat *format = immVertexFormat();
     uint pos = GPU_vertformat_attr_add(format, "pos", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
     immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
-    GPU_blend(GPU_BLEND_ALPHA);
     immUniformThemeColorAlpha(TH_METADATA_BG, 1.0f);
     immRectf(pos, rect.xmin, rect.ymin, rect.xmax, rect.ymax);
     immUnbindProgram();
@@ -944,7 +976,6 @@ void ED_region_image_metadata_draw(
     metadata_draw_imbuf(ibuf, &rect, blf_mono_font, false);
 
     BLF_disable(blf_mono_font, BLF_CLIPPING);
-    GPU_blend(GPU_BLEND_NONE);
   }
 
   GPU_matrix_pop();

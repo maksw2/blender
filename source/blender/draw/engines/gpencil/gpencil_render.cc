@@ -5,34 +5,33 @@
 /** \file
  * \ingroup draw
  */
+#include "BLI_math_matrix.h"
 #include "BLI_rect.h"
 
 #include "DRW_render.hh"
 
 #include "BKE_object.hh"
 
-#include "DNA_gpencil_legacy_types.h"
-
 #include "DEG_depsgraph_query.hh"
 
+#include "RE_engine.h"
 #include "RE_pipeline.h"
 
 #include "IMB_imbuf_types.hh"
 
-#include "gpencil_engine.h"
+#include "gpencil_engine_private.hh"
 
-void GPENCIL_render_init(GPENCIL_Data *vedata,
-                         RenderEngine *engine,
-                         RenderLayer *render_layer,
-                         const Depsgraph *depsgraph,
-                         const rcti *rect)
+namespace blender::draw::gpencil {
+
+static void render_init(const DRWContext *draw_ctx,
+                        Instance &inst,
+                        RenderEngine *engine,
+                        RenderLayer *render_layer,
+                        const Depsgraph *depsgraph,
+                        const rcti *rect)
 {
-  GPENCIL_FramebufferList *fbl = vedata->fbl;
-  GPENCIL_TextureList *txl = vedata->txl;
-
   Scene *scene = DEG_get_evaluated_scene(depsgraph);
-  const float *viewport_size = DRW_viewport_size_get();
-  const int size[2] = {int(viewport_size[0]), int(viewport_size[1])};
+  const int2 size = int2(draw_ctx->viewport_size_get());
 
   /* Set the perspective & view matrix. */
   float winmat[4][4], viewmat[4][4], viewinv[4][4];
@@ -43,9 +42,8 @@ void GPENCIL_render_init(GPENCIL_Data *vedata,
 
   invert_m4_m4(viewmat, viewinv);
 
-  DRWView *view = DRW_view_create(viewmat, winmat, nullptr, nullptr);
-  DRW_view_default_set(view);
-  DRW_view_set_active(view);
+  blender::draw::View::default_set(float4x4(viewmat), float4x4(winmat));
+  blender::draw::View &view = blender::draw::View::default_get();
 
   /* Create depth texture & color texture from render result. */
   const char *viewname = RE_GetActiveRenderView(engine->re);
@@ -66,7 +64,7 @@ void GPENCIL_render_init(GPENCIL_Data *vedata,
 
     int pix_num = rpass_z_src->rectx * rpass_z_src->recty;
 
-    if (DRW_view_is_persp_get(view)) {
+    if (view.is_persp()) {
       for (int i = 0; i < pix_num; i++) {
         pix_z[i] = (-winmat[3][2] / -pix_z[i]) - winmat[2][2];
         pix_z[i] = clamp_f(pix_z[i] * 0.5f + 0.5f, 0.0f, 1.0f);
@@ -74,8 +72,8 @@ void GPENCIL_render_init(GPENCIL_Data *vedata,
     }
     else {
       /* Keep in mind, near and far distance are negatives. */
-      float near = DRW_view_near_distance_get(view);
-      float far = DRW_view_far_distance_get(view);
+      float near = view.near_clip();
+      float far = view.far_clip();
       float range_inv = 1.0f / fabsf(far - near);
       for (int i = 0; i < pix_num; i++) {
         pix_z[i] = (pix_z[i] + near) * range_inv;
@@ -91,36 +89,36 @@ void GPENCIL_render_init(GPENCIL_Data *vedata,
   /* FIXME(fclem): we have a precision loss in the depth buffer because of this re-upload.
    * Find where it comes from! */
   /* In multi view render the textures can be reused. */
-  if (txl->render_depth_tx && !do_clear_z) {
-    GPU_texture_update(txl->render_depth_tx, GPU_DATA_FLOAT, pix_z);
+  if (inst.render_depth_tx.is_valid() && !do_clear_z) {
+    GPU_texture_update(inst.render_depth_tx, GPU_DATA_FLOAT, pix_z);
   }
   else {
-    txl->render_depth_tx = DRW_texture_create_2d(
-        size[0], size[1], GPU_DEPTH_COMPONENT24, DRWTextureFlag(0), do_region ? nullptr : pix_z);
+    eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT |
+                             GPU_TEXTURE_USAGE_HOST_READ;
+    inst.render_depth_tx.ensure_2d(
+        GPU_DEPTH_COMPONENT24, int2(size), usage, do_region ? nullptr : pix_z);
   }
-  if (txl->render_color_tx && !do_clear_col) {
-    GPU_texture_update(txl->render_color_tx, GPU_DATA_FLOAT, pix_col);
+  if (inst.render_color_tx.is_valid() && !do_clear_col) {
+    GPU_texture_update(inst.render_color_tx, GPU_DATA_FLOAT, pix_col);
   }
   else {
-    txl->render_color_tx = DRW_texture_create_2d(
-        size[0], size[1], GPU_RGBA16F, DRWTextureFlag(0), do_region ? nullptr : pix_col);
+    eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT |
+                             GPU_TEXTURE_USAGE_HOST_READ;
+    inst.render_color_tx.ensure_2d(GPU_RGBA16F, int2(size), usage, do_region ? nullptr : pix_col);
   }
 
-  GPU_framebuffer_ensure_config(&fbl->render_fb,
-                                {
-                                    GPU_ATTACHMENT_TEXTURE(txl->render_depth_tx),
-                                    GPU_ATTACHMENT_TEXTURE(txl->render_color_tx),
-                                });
+  inst.render_fb.ensure(GPU_ATTACHMENT_TEXTURE(inst.render_depth_tx),
+                        GPU_ATTACHMENT_TEXTURE(inst.render_color_tx));
 
   if (do_clear_z || do_clear_col) {
     /* To avoid unpredictable result, clear buffers that have not be initialized. */
-    GPU_framebuffer_bind(fbl->render_fb);
+    GPU_framebuffer_bind(inst.render_fb);
     if (do_clear_col) {
       const float clear_col[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-      GPU_framebuffer_clear_color(fbl->render_fb, clear_col);
+      GPU_framebuffer_clear_color(inst.render_fb, clear_col);
     }
     if (do_clear_z) {
-      GPU_framebuffer_clear_depth(fbl->render_fb, 1.0f);
+      GPU_framebuffer_clear_depth(inst.render_fb, 1.0f);
     }
   }
 
@@ -130,35 +128,22 @@ void GPENCIL_render_init(GPENCIL_Data *vedata,
     int w = BLI_rcti_size_x(rect);
     int h = BLI_rcti_size_y(rect);
     if (pix_col) {
-      GPU_texture_update_sub(txl->render_color_tx, GPU_DATA_FLOAT, pix_col, x, y, 0, w, h, 0);
+      GPU_texture_update_sub(inst.render_color_tx, GPU_DATA_FLOAT, pix_col, x, y, 0, w, h, 0);
     }
     if (pix_z) {
-      GPU_texture_update_sub(txl->render_depth_tx, GPU_DATA_FLOAT, pix_z, x, y, 0, w, h, 0);
+      GPU_texture_update_sub(inst.render_depth_tx, GPU_DATA_FLOAT, pix_z, x, y, 0, w, h, 0);
     }
   }
 
   MEM_SAFE_FREE(pix_z);
 }
 
-/* render all objects and select only grease pencil */
-static void GPENCIL_render_cache(void *vedata,
-                                 Object *ob,
-                                 RenderEngine * /*engine*/,
-                                 Depsgraph * /*depsgraph*/)
+static void render_result_z(const DRWContext *draw_ctx,
+                            RenderLayer *rl,
+                            const char *viewname,
+                            Instance &instance,
+                            const rcti *rect)
 {
-  if (ob && ELEM(ob->type, OB_GREASE_PENCIL, OB_LAMP)) {
-    if (DRW_object_visibility_in_active_context(ob) & OB_VISIBLE_SELF) {
-      GPENCIL_cache_populate(vedata, ob);
-    }
-  }
-}
-
-static void GPENCIL_render_result_z(RenderLayer *rl,
-                                    const char *viewname,
-                                    GPENCIL_Data *vedata,
-                                    const rcti *rect)
-{
-  const DRWContextState *draw_ctx = DRW_context_state_get();
   ViewLayer *view_layer = draw_ctx->view_layer;
   if ((view_layer->passflag & SCE_PASS_Z) == 0) {
     return;
@@ -170,7 +155,7 @@ static void GPENCIL_render_result_z(RenderLayer *rl,
 
   float *ro_buffer_data = rp->ibuf->float_buffer.data;
 
-  GPU_framebuffer_read_depth(vedata->fbl->render_fb,
+  GPU_framebuffer_read_depth(instance.render_fb,
                              rect->xmin,
                              rect->ymin,
                              BLI_rcti_size_x(rect),
@@ -178,13 +163,12 @@ static void GPENCIL_render_result_z(RenderLayer *rl,
                              GPU_DATA_FLOAT,
                              ro_buffer_data);
 
-  float winmat[4][4];
-  DRW_view_winmat_get(nullptr, winmat, false);
+  float4x4 winmat = blender::draw::View::default_get().winmat();
 
   int pix_num = BLI_rcti_size_x(rect) * BLI_rcti_size_y(rect);
 
   /* Convert GPU depth [0..1] to view Z [near..far] */
-  if (DRW_view_is_persp_get(nullptr)) {
+  if (blender::draw::View::default_get().is_persp()) {
     for (int i = 0; i < pix_num; i++) {
       if (ro_buffer_data[i] == 1.0f) {
         ro_buffer_data[i] = 1e10f; /* Background */
@@ -197,8 +181,8 @@ static void GPENCIL_render_result_z(RenderLayer *rl,
   }
   else {
     /* Keep in mind, near and far distance are negatives. */
-    float near = DRW_view_near_distance_get(nullptr);
-    float far = DRW_view_far_distance_get(nullptr);
+    float near = blender::draw::View::default_get().near_clip();
+    float far = blender::draw::View::default_get().far_clip();
     float range = fabsf(far - near);
 
     for (int i = 0; i < pix_num; i++) {
@@ -212,16 +196,15 @@ static void GPENCIL_render_result_z(RenderLayer *rl,
   }
 }
 
-static void GPENCIL_render_result_combined(RenderLayer *rl,
-                                           const char *viewname,
-                                           GPENCIL_Data *vedata,
-                                           const rcti *rect)
+static void render_result_combined(RenderLayer *rl,
+                                   const char *viewname,
+                                   Instance &instance,
+                                   const rcti *rect)
 {
   RenderPass *rp = RE_pass_find_by_name(rl, RE_PASSNAME_COMBINED, viewname);
-  GPENCIL_FramebufferList *fbl = ((GPENCIL_Data *)vedata)->fbl;
 
-  GPU_framebuffer_bind(fbl->render_fb);
-  GPU_framebuffer_read_color(vedata->fbl->render_fb,
+  GPU_framebuffer_bind(instance.render_fb);
+  GPU_framebuffer_read_color(instance.render_fb,
                              rect->xmin,
                              rect->ymin,
                              BLI_rcti_size_x(rect),
@@ -232,35 +215,45 @@ static void GPENCIL_render_result_combined(RenderLayer *rl,
                              rp->ibuf->float_buffer.data);
 }
 
-void GPENCIL_render_to_image(void *ved,
-                             RenderEngine *engine,
-                             RenderLayer *render_layer,
-                             const rcti *rect)
+void Engine::render_to_image(RenderEngine *engine, RenderLayer *render_layer, const rcti rect)
 {
-  GPENCIL_Data *vedata = (GPENCIL_Data *)ved;
   const char *viewname = RE_GetActiveRenderView(engine->re);
-  const DRWContextState *draw_ctx = DRW_context_state_get();
+
+  const DRWContext *draw_ctx = DRW_context_get();
   Depsgraph *depsgraph = draw_ctx->depsgraph;
 
-  DRW_manager_get()->begin_sync();
+  blender::draw::gpencil::Instance inst;
 
-  GPENCIL_render_init(vedata, engine, render_layer, depsgraph, rect);
-  GPENCIL_engine_init(vedata);
+  Manager &manager = *DRW_manager_get();
 
-  vedata->stl->pd->camera = DEG_get_evaluated_object(depsgraph, RE_GetCamera(engine->re));
+  render_init(draw_ctx, inst, engine, render_layer, depsgraph, &rect);
+  inst.init();
+
+  inst.camera = DEG_get_evaluated_object(depsgraph, RE_GetCamera(engine->re));
+
+  manager.begin_sync();
 
   /* Loop over all objects and create draw structure. */
-  GPENCIL_cache_init(vedata);
-  DRW_render_object_iter(vedata, engine, depsgraph, GPENCIL_render_cache);
-  GPENCIL_cache_finish(vedata);
+  inst.begin_sync();
+  DRW_render_object_iter(
+      engine, depsgraph, [&](blender::draw::ObjectRef &ob_ref, RenderEngine *, Depsgraph *) {
+        if (!ELEM(ob_ref.object->type, OB_GREASE_PENCIL, OB_LAMP)) {
+          return;
+        }
+        if (!(DRW_object_visibility_in_active_context(ob_ref.object) & OB_VISIBLE_SELF)) {
+          return;
+        }
+        inst.object_sync(ob_ref, manager);
+      });
+  inst.end_sync();
 
-  DRW_render_instance_buffer_finish();
-
-  DRW_manager_get()->end_sync();
+  manager.end_sync();
 
   /* Render the gpencil object and merge the result to the underlying render. */
-  GPENCIL_draw_scene(vedata);
+  inst.draw(manager);
 
-  GPENCIL_render_result_combined(render_layer, viewname, vedata, rect);
-  GPENCIL_render_result_z(render_layer, viewname, vedata, rect);
+  render_result_combined(render_layer, viewname, inst, &rect);
+  render_result_z(draw_ctx, render_layer, viewname, inst, &rect);
 }
+
+}  // namespace blender::draw::gpencil

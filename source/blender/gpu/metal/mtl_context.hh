@@ -7,12 +7,9 @@
  */
 #pragma once
 
-#include "MEM_guardedalloc.h"
-
 #include "gpu_context_private.hh"
 
 #include "GPU_common_types.hh"
-#include "GPU_context.hh"
 
 /* Don't generate OpenGL deprecation warning. This is a known thing, and is not something easily
  * solvable in a short term. */
@@ -635,7 +632,7 @@ class MTLCommandBufferManager {
 
   /* Encoder and Pass management. */
   /* End currently active MTLCommandEncoder. */
-  bool end_active_command_encoder();
+  bool end_active_command_encoder(bool retain_framebuffers = false);
   id<MTLRenderCommandEncoder> ensure_begin_render_command_encoder(MTLFrameBuffer *ctx_framebuffer,
                                                                   bool force_begin,
                                                                   bool *r_new_pass);
@@ -850,7 +847,7 @@ class MTLContext : public Context {
    * to every draw call, to ensure that all state is applied and up
    * to date. We handle:
    *
-   * - Buffer bindings (Vertex buffers, Uniforms, UBOs, transform feedback)
+   * - Buffer bindings (Vertex buffers, Uniforms, UBOs)
    * - Texture bindings
    * - Sampler bindings (+ argument buffer bindings)
    * - Dynamic Render pipeline state (on encoder)

@@ -6,11 +6,8 @@
  * \ingroup gpu
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "BLI_math_matrix.h"
 #include "BLI_string.h"
-#include "BLI_string_utils.hh"
 
 #include "GPU_capabilities.hh"
 #include "GPU_debug.hh"
@@ -124,9 +121,6 @@ GPUShader *GPU_shader_create_ex(const std::optional<StringRefNull> vertcode,
                                 const std::optional<StringRefNull> computecode,
                                 const std::optional<StringRefNull> libcode,
                                 const std::optional<StringRefNull> defines,
-                                const eGPUShaderTFBType tf_type,
-                                const char **tf_names,
-                                const int tf_count,
                                 const StringRefNull shname)
 {
   /* At least a vertex shader and a fragment shader are required, or only a compute shader. */
@@ -198,11 +192,6 @@ GPUShader *GPU_shader_create_ex(const std::optional<StringRefNull> vertcode,
     shader->compute_shader_from_glsl(sources);
   }
 
-  if (tf_names != nullptr && tf_count > 0) {
-    BLI_assert(tf_type != GPU_SHADER_TFB_NONE);
-    shader->transform_feedback_names_set(Span<const char *>(tf_names, tf_count), tf_type);
-  }
-
   if (!shader->finalize()) {
     delete shader;
     return nullptr;
@@ -229,16 +218,8 @@ GPUShader *GPU_shader_create(const std::optional<StringRefNull> vertcode,
                              const std::optional<StringRefNull> defines,
                              const StringRefNull shname)
 {
-  return GPU_shader_create_ex(vertcode,
-                              fragcode,
-                              geomcode,
-                              std::nullopt,
-                              libcode,
-                              defines,
-                              GPU_SHADER_TFB_NONE,
-                              nullptr,
-                              0,
-                              shname);
+  return GPU_shader_create_ex(
+      vertcode, fragcode, geomcode, std::nullopt, libcode, defines, shname);
 }
 
 GPUShader *GPU_shader_create_compute(const std::optional<StringRefNull> computecode,
@@ -246,27 +227,13 @@ GPUShader *GPU_shader_create_compute(const std::optional<StringRefNull> computec
                                      const std::optional<StringRefNull> defines,
                                      const StringRefNull shname)
 {
-  return GPU_shader_create_ex(std::nullopt,
-                              std::nullopt,
-                              std::nullopt,
-                              computecode,
-                              libcode,
-                              defines,
-                              GPU_SHADER_TFB_NONE,
-                              nullptr,
-                              0,
-                              shname);
+  return GPU_shader_create_ex(
+      std::nullopt, std::nullopt, std::nullopt, computecode, libcode, defines, shname);
 }
 
 const GPUShaderCreateInfo *GPU_shader_create_info_get(const char *info_name)
 {
   return gpu_shader_create_info_get(info_name);
-}
-
-void GPU_shader_create_info_get_unfinalized_copy(const char *info_name,
-                                                 GPUShaderCreateInfo &r_info)
-{
-  gpu_shader_create_info_get_unfinalized_copy(info_name, r_info);
 }
 
 bool GPU_shader_create_info_check_error(const GPUShaderCreateInfo *_info, char r_error[128])
@@ -303,6 +270,9 @@ GPUShader *GPU_shader_create_from_info(const GPUShaderCreateInfo *_info)
 
 static std::string preprocess_source(StringRefNull original)
 {
+  if (original.is_empty()) {
+    return original;
+  }
   gpu::shader::Preprocessor processor;
   return processor.process(original);
 };
@@ -337,9 +307,18 @@ GPUShader *GPU_shader_create_from_python(std::optional<StringRefNull> vertcode,
                                          std::optional<StringRefNull> fragcode,
                                          std::optional<StringRefNull> geomcode,
                                          std::optional<StringRefNull> libcode,
-                                         const std::optional<StringRefNull> defines,
+                                         std::optional<StringRefNull> defines,
                                          const std::optional<StringRefNull> name)
 {
+  std::string defines_cat = "#define GPU_RAW_PYTHON_SHADER\n";
+  if (defines) {
+    defines_cat += defines.value();
+    defines = defines_cat;
+  }
+  else {
+    defines = defines_cat;
+  }
+
   std::string libcodecat;
 
   if (!libcode) {
@@ -375,16 +354,8 @@ GPUShader *GPU_shader_create_from_python(std::optional<StringRefNull> vertcode,
   /* Use pyGPUShader as default name for shader. */
   blender::StringRefNull shname = name.value_or("pyGPUShader");
 
-  GPUShader *sh = GPU_shader_create_ex(vertcode,
-                                       fragcode,
-                                       geomcode,
-                                       std::nullopt,
-                                       libcode,
-                                       defines,
-                                       GPU_SHADER_TFB_NONE,
-                                       nullptr,
-                                       0,
-                                       shname);
+  GPUShader *sh = GPU_shader_create_ex(
+      vertcode, fragcode, geomcode, std::nullopt, libcode, defines, shname);
 
   return sh;
 }
@@ -508,24 +479,6 @@ void GPU_shader_set_parent(GPUShader *shader, GPUShader *parent)
 void GPU_shader_warm_cache(GPUShader *shader, int limit)
 {
   unwrap(shader)->warm_cache(limit);
-}
-
-/** \} */
-
-/* -------------------------------------------------------------------- */
-/** \name Transform feedback
- *
- * TODO(fclem): Should be replaced by compute shaders.
- * \{ */
-
-bool GPU_shader_transform_feedback_enable(GPUShader *shader, blender::gpu::VertBuf *vertbuf)
-{
-  return unwrap(shader)->transform_feedback_enable(vertbuf);
-}
-
-void GPU_shader_transform_feedback_disable(GPUShader *shader)
-{
-  unwrap(shader)->transform_feedback_disable();
 }
 
 /** \} */
@@ -664,6 +617,12 @@ uint GPU_shader_get_attribute_len(const GPUShader *shader)
   return interface->attr_len_;
 }
 
+uint GPU_shader_get_ssbo_input_len(const GPUShader *shader)
+{
+  const ShaderInterface *interface = unwrap(shader)->interface;
+  return interface->ssbo_len_;
+}
+
 int GPU_shader_get_attribute(const GPUShader *shader, const char *name)
 {
   const ShaderInterface *interface = unwrap(shader)->interface;
@@ -688,6 +647,19 @@ bool GPU_shader_get_attribute_info(const GPUShader *shader,
   return true;
 }
 
+bool GPU_shader_get_ssbo_input_info(const GPUShader *shader, int ssbo_location, char r_name[256])
+{
+  const ShaderInterface *interface = unwrap(shader)->interface;
+
+  const ShaderInput *ssbo_input = interface->ssbo_get(ssbo_location);
+  if (!ssbo_input) {
+    return false;
+  }
+
+  BLI_strncpy(r_name, interface->input_name_get(ssbo_input), 256);
+  return true;
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -697,16 +669,6 @@ bool GPU_shader_get_attribute_info(const GPUShader *shader,
 int GPU_shader_get_program(GPUShader *shader)
 {
   return unwrap(shader)->program_handle_get();
-}
-
-int GPU_shader_get_ssbo_vertex_fetch_num_verts_per_prim(GPUShader *shader)
-{
-  return unwrap(shader)->get_ssbo_vertex_fetch_output_num_verts();
-}
-
-bool GPU_shader_uses_ssbo_vertex_fetch(GPUShader *shader)
-{
-  return unwrap(shader)->get_uses_ssbo_vertex_fetch();
 }
 
 /** \} */
@@ -886,6 +848,11 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &info, bool is_ba
   shader->init(info, is_batch_compilation);
   shader->specialization_constants_init(info);
 
+  shader->fragment_output_bits = 0;
+  for (const shader::ShaderCreateInfo::FragOut &frag_out : info.fragment_outputs_) {
+    shader->fragment_output_bits |= 1u << frag_out.index;
+  }
+
   std::string defines = shader->defines_declare(info);
   std::string resources = shader->resources_declare(info);
 
@@ -983,10 +950,6 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &info, bool is_ba
     shader->compute_shader_from_glsl(sources);
   }
 
-  if (info.tf_type_ != GPU_SHADER_TFB_NONE && info.tf_names_.size() > 0) {
-    shader->transform_feedback_names_set(info.tf_names_.as_span(), info.tf_type_);
-  }
-
   if (!shader->finalize(&info)) {
     delete shader;
     GPU_debug_group_end();
@@ -1011,6 +974,8 @@ ShaderCompilerGeneric::~ShaderCompilerGeneric()
 
 BatchHandle ShaderCompilerGeneric::batch_compile(Span<const shader::ShaderCreateInfo *> &infos)
 {
+  std::lock_guard lock(mutex_);
+
   BatchHandle handle = next_batch_handle++;
   batches.add(handle, {{}, infos, true});
   Batch &batch = batches.lookup(handle);
@@ -1023,12 +988,16 @@ BatchHandle ShaderCompilerGeneric::batch_compile(Span<const shader::ShaderCreate
 
 bool ShaderCompilerGeneric::batch_is_ready(BatchHandle handle)
 {
+  std::lock_guard lock(mutex_);
+
   bool is_ready = batches.lookup(handle).is_ready;
   return is_ready;
 }
 
 Vector<Shader *> ShaderCompilerGeneric::batch_finalize(BatchHandle &handle)
 {
+  std::lock_guard lock(mutex_);
+
   Vector<Shader *> shaders = batches.pop(handle).shaders;
   handle = 0;
   return shaders;

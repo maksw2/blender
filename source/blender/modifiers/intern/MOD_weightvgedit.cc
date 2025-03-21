@@ -23,6 +23,7 @@
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
+#include "DNA_texture_types.h"
 
 #include "BKE_colortools.hh" /* CurveMapping. */
 #include "BKE_customdata.hh"
@@ -113,7 +114,7 @@ static void foreach_ID_link(ModifierData *md, Object *ob, IDWalkFunc walk, void 
 
 static void foreach_tex_link(ModifierData *md, Object *ob, TexWalkFunc walk, void *user_data)
 {
-  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_Modifier, md);
+  PointerRNA ptr = RNA_pointer_create_discrete(&ob->id, &RNA_Modifier, md);
   PropertyRNA *prop = RNA_struct_find_property(&ptr, "mask_texture");
   walk(user_data, ob, md, &ptr, prop);
 }
@@ -201,10 +202,9 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh 
   }
 
   /* Get org weights, assuming 0.0 for vertices not in given vgroup. */
-  org_w = static_cast<float *>(MEM_malloc_arrayN(verts_num, sizeof(float), __func__));
-  new_w = static_cast<float *>(MEM_malloc_arrayN(verts_num, sizeof(float), __func__));
-  dw = static_cast<MDeformWeight **>(
-      MEM_malloc_arrayN(verts_num, sizeof(MDeformWeight *), __func__));
+  org_w = MEM_malloc_arrayN<float>(size_t(verts_num), __func__);
+  new_w = MEM_malloc_arrayN<float>(size_t(verts_num), __func__);
+  dw = MEM_malloc_arrayN<MDeformWeight *>(size_t(verts_num), __func__);
   for (i = 0; i < verts_num; i++) {
     dw[i] = BKE_defvert_find_index(&dvert[i], defgrp_index);
     if (dw[i]) {
@@ -294,9 +294,10 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
   uiLayoutSetPropSep(layout, true);
 
   col = uiLayoutColumn(layout, true);
-  uiItemPointerR(col, ptr, "vertex_group", &ob_ptr, "vertex_groups", nullptr, ICON_GROUP_VERTEX);
+  uiItemPointerR(
+      col, ptr, "vertex_group", &ob_ptr, "vertex_groups", std::nullopt, ICON_GROUP_VERTEX);
 
-  uiItemR(layout, ptr, "default_weight", UI_ITEM_R_SLIDER, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "default_weight", UI_ITEM_R_SLIDER, std::nullopt, ICON_NONE);
 
   col = uiLayoutColumnWithHeading(layout, false, IFACE_("Group Add"));
   row = uiLayoutRow(col, true);
@@ -320,7 +321,7 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
   uiItemR(sub, ptr, "remove_threshold", UI_ITEM_R_SLIDER, IFACE_("Threshold"), ICON_NONE);
   uiItemDecoratorR(row, ptr, "remove_threshold", 0);
 
-  uiItemR(layout, ptr, "normalize", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "normalize", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   modifier_panel_end(layout, ptr);
 }

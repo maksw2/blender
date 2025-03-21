@@ -11,8 +11,6 @@
 #include "DNA_mesh_types.h"
 #include "DNA_modifier_types.h"
 
-#include "BLI_utildefines.h"
-
 #include "BKE_subdiv_modifier.hh"
 
 #include "MEM_guardedalloc.h"
@@ -116,7 +114,7 @@ Subdiv *new_from_converter(const Settings *settings, OpenSubdiv_Converter *conve
      * The thing here is: OpenSubdiv can only deal with faces, but our
      * side of subdiv also deals with loose vertices and edges. */
   }
-  Subdiv *subdiv = MEM_cnew<Subdiv>(__func__);
+  Subdiv *subdiv = MEM_callocN<Subdiv>(__func__);
   subdiv->settings = *settings;
   subdiv->topology_refiner = osd_topology_refiner;
   subdiv->evaluator = nullptr;
@@ -227,8 +225,7 @@ int *face_ptex_offset_get(Subdiv *subdiv)
     return nullptr;
   }
   const int num_coarse_faces = topology_refiner->base_level().GetNumFaces();
-  subdiv->cache_.face_ptex_offset = static_cast<int *>(
-      MEM_malloc_arrayN(num_coarse_faces + 1, sizeof(int), __func__));
+  subdiv->cache_.face_ptex_offset = MEM_malloc_arrayN<int>(size_t(num_coarse_faces) + 1, __func__);
   int ptex_offset = 0;
   for (int face_index = 0; face_index < num_coarse_faces; face_index++) {
     const int face_size = topology_refiner->base_level().GetFaceVertices(face_index).size();

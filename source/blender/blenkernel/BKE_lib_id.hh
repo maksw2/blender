@@ -59,7 +59,7 @@ size_t BKE_libblock_get_alloc_info(short type, const char **r_name);
  * Allocates and returns memory of the right size for the specified block type,
  * initialized to zero.
  */
-void *BKE_libblock_alloc_notest(short type) ATTR_WARN_UNUSED_RESULT;
+ID *BKE_libblock_alloc_notest(short type) ATTR_WARN_UNUSED_RESULT;
 /**
  * Allocates and returns an ID block of the specified type, with the specified name
  * (adjusted as necessary to ensure uniqueness), and appended to the specified list.
@@ -231,12 +231,12 @@ void BKE_libblock_copy_ex(Main *bmain, const ID *id, ID **new_id_p, int orig_fla
  * not use any library (i.e. become a local ID). Use #std::nullopt for default behavior (i.e.
  * behavior of the #BKE_libblock_copy_ex function).
  * \param new_owner_id: When copying an embedded ID, the owner ID of the new copy. Should be
- * `nullptr` for regular ID copying, or in case the owner ID is not (yet) known.
+ * `nullopt` for regular ID copying, or in case the owner ID is not (yet) known.
  */
 void BKE_libblock_copy_in_lib(Main *bmain,
                               std::optional<Library *> owner_library,
                               const ID *id,
-                              const ID *new_owner_id,
+                              std::optional<const ID *> new_owner_id,
                               ID **new_id_p,
                               int orig_flag);
 
@@ -340,6 +340,7 @@ ID *BKE_libblock_find_name(Main *bmain,
                            const std::optional<Library *> lib = std::nullopt)
     ATTR_WARN_UNUSED_RESULT ATTR_NONNULL();
 ID *BKE_libblock_find_session_uid(Main *bmain, short type, uint32_t session_uid);
+ID *BKE_libblock_find_session_uid(Main *bmain, uint32_t session_uid);
 ID *BKE_libblock_find_name_and_library(Main *bmain,
                                        short type,
                                        const char *name,
@@ -395,8 +396,15 @@ enum {
   LIB_ID_FREE_NO_NAMEMAP_REMOVE = 1 << 10,
 };
 
+/**
+ * Low-level ID freeing functions.
+ *
+ * \note These functions do NOT cover embedded IDs. Those are managed by the
+ * owning ID, and are typically allocated/freed from the IDType callbacks.
+ */
 void BKE_libblock_free_datablock(ID *id, int flag) ATTR_NONNULL();
 void BKE_libblock_free_data(ID *id, bool do_id_user) ATTR_NONNULL();
+void BKE_libblock_free_runtime_data(ID *id) ATTR_NONNULL();
 
 /**
  * In most cases #BKE_id_free_ex handles this, when lower level functions are called directly
@@ -605,12 +613,12 @@ ID *BKE_id_copy_ex(Main *bmain, const ID *id, ID **new_id_p, int flag);
  * not use any library (i.e. become a local ID). Use #std::nullopt for default behavior (i.e.
  * behavior of the #BKE_id_copy_ex function).
  * \param new_owner_id: When copying an embedded ID, the owner ID of the new copy. Should be
- * `nullptr` for regular ID copying, or in case the owner ID is not (yet) known.
+ * `nullopt` for regular ID copying, or in case the owner ID is not (yet) known.
  */
 struct ID *BKE_id_copy_in_lib(Main *bmain,
                               std::optional<Library *> owner_library,
                               const ID *id,
-                              const ID *new_owner_id,
+                              std::optional<const ID *> new_owner_id,
                               ID **new_id_p,
                               int flag);
 /**

@@ -7,16 +7,20 @@
  */
 
 #include "DNA_space_types.h"
+#include "DNA_userdef_types.h"
 
 #include "MEM_guardedalloc.h"
 
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
 #include "BLI_rect.h"
 
 #include "BKE_context.hh"
+#include "BKE_main_invariants.hh"
 #include "BKE_node.hh"
+#include "BKE_node_runtime.hh"
 
 #include "ED_node.hh"
 
@@ -49,9 +53,7 @@ static void create_transform_data_for_node(TransData &td,
                                            const float dpi_fac)
 {
   /* Account for parents (nested nodes). */
-  const float2 node_offset = {node.offsetx, node.offsety};
-  float2 loc = bke::node_to_view(&node, math::round(node_offset));
-  loc *= dpi_fac;
+  float2 loc = float2(node.location) * dpi_fac;
 
   /* Use top-left corner as the transform origin for nodes. */
   /* Weirdo - but the node system is a mix of free 2d elements and DPI sensitive UI. */
@@ -101,7 +103,7 @@ static void createTransNodeData(bContext * /*C*/, TransInfo *t)
   }
 
   /* Custom data to enable edge panning during the node transform. */
-  TransCustomDataNode *customdata = MEM_cnew<TransCustomDataNode>(__func__);
+  TransCustomDataNode *customdata = MEM_callocN<TransCustomDataNode>(__func__);
   UI_view2d_edge_pan_init(t->context,
                           &customdata->edgepan_data,
                           NODE_EDGE_PAN_INSIDE_PAD,
@@ -131,8 +133,8 @@ static void createTransNodeData(bContext * /*C*/, TransInfo *t)
   }
 
   tc->data_len = nodes.size();
-  tc->data = MEM_cnew_array<TransData>(tc->data_len, __func__);
-  tc->data_2d = MEM_cnew_array<TransData2D>(tc->data_len, __func__);
+  tc->data = MEM_calloc_arrayN<TransData>(tc->data_len, __func__);
+  tc->data_2d = MEM_calloc_arrayN<TransData2D>(tc->data_len, __func__);
 
   for (const int i : nodes.index_range()) {
     create_transform_data_for_node(tc->data[i], tc->data_2d[i], *nodes[i], UI_SCALE_FAC);
@@ -186,6 +188,17 @@ static void node_snap_grid_apply(TransInfo *t)
   }
 }
 
+static void move_child_nodes(bNode &node, const float2 &delta)
+{
+  for (bNode *child : node.direct_children_in_frame()) {
+    child->location[0] += delta.x;
+    child->location[1] += delta.y;
+    if (child->is_frame()) {
+      move_child_nodes(*child, delta);
+    }
+  }
+}
+
 static void flushTransNodes(TransInfo *t)
 {
   const float dpi_fac = UI_SCALE_FAC;
@@ -226,18 +239,18 @@ static void flushTransNodes(TransInfo *t)
       TransData2D *td2d = &tc->data_2d[i];
       bNode *node = static_cast<bNode *>(td->extra);
 
-      float2 loc;
-      add_v2_v2v2(loc, td2d->loc, offset);
+      float2 loc = float2(td2d->loc) + offset;
 
       /* Weirdo - but the node system is a mix of free 2d elements and DPI sensitive UI. */
       loc /= dpi_fac;
 
-      /* Account for parents (nested nodes). */
-      const float2 node_offset = {node->offsetx, node->offsety};
-      const float2 new_node_location = loc - math::round(node_offset);
-      const float2 location = bke::node_from_view(node->parent, new_node_location);
-      node->locx = location.x;
-      node->locy = location.y;
+      if (node->is_frame()) {
+        const float2 delta = loc - float2(node->location);
+        move_child_nodes(*node, delta);
+      }
+
+      node->location[0] = loc.x;
+      node->location[1] = loc.y;
     }
 
     /* Handle intersection with noodles. */
@@ -267,10 +280,10 @@ static void special_aftertrans_update__node(bContext *C, TransInfo *t)
     if (ntree) {
       LISTBASE_FOREACH_MUTABLE (bNode *, node, &ntree->nodes) {
         if (node->flag & NODE_SELECT) {
-          bke::node_remove_node(bmain, ntree, node, true);
+          bke::node_remove_node(bmain, *ntree, *node, true);
         }
       }
-      ED_node_tree_propagate_change(C, bmain, ntree);
+      BKE_main_ensure_invariants(*bmain, ntree->id);
     }
   }
 
@@ -294,11 +307,11 @@ static void special_aftertrans_update__node(bContext *C, TransInfo *t)
 
 /** \} */
 
-}  // namespace blender::ed::transform
-
 TransConvertTypeInfo TransConvertType_Node = {
     /*flags*/ (T_POINTS | T_2D_EDIT),
-    /*create_trans_data*/ blender::ed::transform::createTransNodeData,
-    /*recalc_data*/ blender::ed::transform::flushTransNodes,
-    /*special_aftertrans_update*/ blender::ed::transform::special_aftertrans_update__node,
+    /*create_trans_data*/ createTransNodeData,
+    /*recalc_data*/ flushTransNodes,
+    /*special_aftertrans_update*/ special_aftertrans_update__node,
 };
+
+}  // namespace blender::ed::transform

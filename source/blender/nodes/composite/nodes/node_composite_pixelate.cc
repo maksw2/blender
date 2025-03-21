@@ -36,10 +36,10 @@ static void node_composit_init_pixelate(bNodeTree * /*ntree*/, bNode *node)
 
 static void node_composit_buts_pixelate(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  uiItemR(layout, ptr, "pixel_size", UI_ITEM_R_SPLIT_EMPTY_NAME, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "pixel_size", UI_ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
-using namespace blender::realtime_compositor;
+using namespace blender::compositor;
 
 class PixelateOperation : public NodeOperation {
  public:
@@ -47,11 +47,11 @@ class PixelateOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &input_image = get_input("Color");
-    Result &output_image = get_result("Color");
-    const int pixel_size = get_pixel_size();
+    const Result &input_image = this->get_input("Color");
+    const int pixel_size = this->get_pixel_size();
     if (input_image.is_single_value() || pixel_size == 1) {
-      input_image.pass_through(output_image);
+      Result &output_image = this->get_result("Color");
+      output_image.share_data(input_image);
       return;
     }
 
@@ -103,7 +103,7 @@ class PixelateOperation : public NodeOperation {
       float4 accumulated_color = float4(0.0f);
       for (int y = start.y; y < end.y; y++) {
         for (int x = start.x; x < end.x; x++) {
-          accumulated_color += input.load_pixel(int2(x, y));
+          accumulated_color += input.load_pixel<float4>(int2(x, y));
         }
       }
 
@@ -132,11 +132,17 @@ void register_node_type_cmp_pixelate()
 
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, CMP_NODE_PIXELATE, "Pixelate", NODE_CLASS_OP_FILTER);
+  cmp_node_type_base(&ntype, "CompositorNodePixelate", CMP_NODE_PIXELATE);
+  ntype.ui_name = "Pixelate";
+  ntype.ui_description =
+      "Reduce detail in an image by making individual pixels more prominent, for a blocky or "
+      "mosaic-like appearance";
+  ntype.enum_name_legacy = "PIXELATE";
+  ntype.nclass = NODE_CLASS_OP_FILTER;
   ntype.declare = file_ns::cmp_node_pixelate_declare;
   ntype.draw_buttons = file_ns::node_composit_buts_pixelate;
   ntype.initfunc = file_ns::node_composit_init_pixelate;
   ntype.get_compositor_operation = file_ns::get_compositor_operation;
 
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_register_type(ntype);
 }

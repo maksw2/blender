@@ -8,10 +8,13 @@
 
 #pragma once
 
+#include "BKE_context.hh"
 #include "BKE_movieclip.h"
 #include "BKE_object.hh"
 
 #include "BLI_function_ref.hh"
+
+#include "DNA_world_types.h"
 
 #include "GPU_matrix.hh"
 
@@ -20,6 +23,7 @@
 #include "UI_resources.hh"
 #include "draw_manager.hh"
 #include "draw_pass.hh"
+#include "draw_view_data.hh"
 #include "gpu_shader_create_info.hh"
 
 #include "../select/select_instance.hh"
@@ -53,8 +57,10 @@ struct BoneInstanceData {
 
   BoneInstanceData() = default;
 
-  /* Constructor used by metaball overlays and expected to be used for drawing
-   * metaball edit circles with armature wire shader that produces wide-lines. */
+  /**
+   * Constructor used by meta-ball overlays and expected to be used for drawing
+   * meta-ball edit circles with armature wire shader that produces wide-lines.
+   */
   BoneInstanceData(const float4x4 &ob_mat,
                    const float3 &pos,
                    const float radius,
@@ -64,7 +70,7 @@ struct BoneInstanceData {
     mat44[0] = ob_mat[0] * radius;
     mat44[1] = ob_mat[1] * radius;
     mat44[2] = ob_mat[2] * radius;
-    mat44[3] = float4(blender::math::transform_point(ob_mat, pos));
+    mat44[3] = float4(blender::math::transform_point(ob_mat, pos), 0.0f);
     set_color(color);
   }
 
@@ -112,86 +118,89 @@ using blender::draw::TextureFromPool;
 using blender::draw::TextureRef;
 
 struct State {
-  Depsgraph *depsgraph;
-  const ViewLayer *view_layer;
-  const Scene *scene;
-  const View3D *v3d;
-  const SpaceLink *space_data;
-  const ARegion *region;
-  const RegionView3D *rv3d;
-  DRWTextStore *dt;
-  View3DOverlay overlay;
-  float pixelsize;
-  eSpace_Type space_type;
-  eContextObjectMode ctx_mode;
-  eObjectMode object_mode;
-  const Object *object_active;
-  bool clear_in_front;
-  bool use_in_front;
-  bool is_wireframe_mode;
+  Depsgraph *depsgraph = nullptr;
+  const ViewLayer *view_layer = nullptr;
+  const Scene *scene = nullptr;
+  const View3D *v3d = nullptr;
+  const SpaceLink *space_data = nullptr;
+  const ARegion *region = nullptr;
+  const RegionView3D *rv3d = nullptr;
+  DRWTextStore *dt = nullptr;
+  View3DOverlay overlay = {};
+  eSpace_Type space_type = SPACE_EMPTY;
+  eContextObjectMode ctx_mode = CTX_MODE_EDIT_MESH;
+  eObjectMode object_mode = OB_MODE_OBJECT;
+  const Object *object_active = nullptr;
+  bool clear_in_front = false;
+  bool use_in_front = false;
+  bool is_wireframe_mode = false;
   /** Whether we are rendering for an image (viewport render). */
-  bool is_viewport_image_render;
+  bool is_viewport_image_render = false;
   /** Whether we are rendering for an image. */
-  bool is_image_render;
+  bool is_image_render = false;
   /** True if rendering only to query the depth. Can be for auto-depth rotation. */
-  bool is_depth_only_drawing;
+  bool is_depth_only_drawing = false;
   /** When drag-dropping material onto objects to assignment. */
-  bool is_material_select;
+  bool is_material_select = false;
   /** Whether we should render the background or leave it transparent. */
-  bool draw_background;
+  bool draw_background = false;
+  /** True if the render engine outputs satisfactory depth information to the depth buffer. */
+  bool is_render_depth_available = false;
   /** Should text draw in this mode? */
-  bool show_text;
-  bool hide_overlays;
-  bool xray_enabled;
-  bool xray_enabled_and_not_wire;
-  /* Brings the active pose armature in front of all objects. */
-  bool do_pose_xray;
-  /* Add a veil on top of all surfaces to make the active pose armature pop out. */
-  bool do_pose_fade_geom;
-  float xray_opacity;
-  short v3d_flag;     /* TODO: move to #View3DOverlay. */
-  short v3d_gridflag; /* TODO: move to #View3DOverlay. */
-  int cfra;
-  float3 camera_position;
-  float3 camera_forward;
-  int clipping_plane_count;
+  bool show_text = false;
+  bool hide_overlays = false;
+  bool xray_enabled = false;
+  bool xray_enabled_and_not_wire = false;
+  /** Can be true even if X-ray Alpha is 1.0. */
+  bool xray_flag_enabled = false;
+  /** Brings the active pose armature in front of all objects. */
+  bool do_pose_xray = false;
+  /** Add a veil on top of all surfaces to make the active pose armature pop out. */
+  bool do_pose_fade_geom = false;
+  float xray_opacity = 0.0f;
+  short v3d_flag = 0;     /* TODO: move to #View3DOverlay. */
+  short v3d_gridflag = 0; /* TODO: move to #View3DOverlay. */
+  int cfra = 0;
+  float3 camera_position = float3(0.0f);
+  float3 camera_forward = float3(0.0f);
+  int clipping_plane_count = 0;
 
-  /* Active Image properties. Only valid image space only. */
-  int2 image_size;
-  float2 image_uv_aspect;
-  float2 image_aspect;
+  /** Active Image properties. Only valid image space only. */
+  bool is_image_valid = false;
+  int2 image_size = int2(0);
+  float2 image_uv_aspect = float2(0.0f);
+  float2 image_aspect = float2(0.0f);
 
-  /* Data to save per overlay to not rely on rv3d for rendering.
-   * TODO(fclem): Compute offset directly from the view. */
-  struct ViewOffsetData {
-    /* Copy of rv3d->dist. */
-    float dist;
-    /* Copy of rv3d->persp. */
-    char persp;
-    /* Copy of rv3d->is_persp. */
-    bool is_persp;
-  };
-
-  ViewOffsetData offset_data_get() const
+  View::OffsetData offset_data_get() const
   {
     if (rv3d == nullptr) {
-      return {0.0f, 0, false};
+      return View::OffsetData();
     }
-    return {rv3d->dist, rv3d->persp, rv3d->is_persp != 0};
+    return View::OffsetData(*rv3d);
   }
 
-  static float view_dist_get(const ViewOffsetData &offset_data, const float4x4 &winmat)
-  {
-    float view_dist = offset_data.dist;
-    /* Special exception for orthographic camera:
-     * `view_dist` isn't used as the depth range isn't the same. */
-    if (offset_data.persp == RV3D_CAMOB && offset_data.is_persp == false) {
-      view_dist = 1.0f / max_ff(fabsf(winmat[0][0]), fabsf(winmat[1][1]));
-    }
-    return view_dist;
-  }
+  /* Factor to use for wireframe offset.
+   * Result of GPU_polygon_offset_calc for the current view.
+   * Only valid at draw time, so use push constant reference instead of copy. */
+  float ndc_offset_factor = 0.0f;
 
   /** Convenience functions. */
+
+  /** Scene geometry is solid. Occlude overlays behind scene geometry. */
+  bool is_solid() const
+  {
+    return xray_opacity == 1.0f;
+  }
+  /** Scene geometry is semi-transparent. Fade overlays behind scene geometry (see #XrayFade). */
+  bool is_xray() const
+  {
+    return (xray_opacity < 1.0f) && (xray_opacity > 0.0f);
+  }
+  /** Scene geometry is fully transparent. Scene geometry does not occlude overlays. */
+  bool is_wire() const
+  {
+    return xray_opacity == 0.0f;
+  }
 
   bool is_space_v3d() const
   {
@@ -264,11 +273,29 @@ struct State {
   }
 };
 
-static inline float4x4 winmat_polygon_offset(float4x4 winmat, float view_dist, float offset)
-{
-  winmat[3][2] -= GPU_polygon_offset_calc(winmat.ptr(), view_dist, offset);
-  return winmat;
-}
+/* Matches Vertex Format. */
+struct Vertex {
+  float3 pos;
+  int vclass;
+};
+
+struct VertexWithColor {
+  float3 pos;
+  float3 color;
+};
+
+struct VertShaded {
+  float3 pos;
+  int v_class;
+  float3 nor;
+};
+
+/* TODO(fclem): Might be good to remove for simplicity. */
+struct VertexTriple {
+  float2 pos0;
+  float2 pos1;
+  float2 pos2;
+};
 
 /**
  * Contains all overlay generic geometry batches.
@@ -298,6 +325,10 @@ class ShapeCache {
   BatchPtr bone_degrees_of_freedom_wire;
 
   BatchPtr grid;
+  BatchPtr cube_solid;
+
+  BatchPtr cursor_circle;
+  BatchPtr cursor_lines;
 
   BatchPtr quad_wire;
   BatchPtr quad_solid;
@@ -353,23 +384,88 @@ class ShapeCache {
   BatchPtr lightprobe_grid;
 
   ShapeCache();
+
+ private:
+  GPUVertFormat format_vert = {0};
+  GPUVertFormat format_vert_with_color = {0};
+  GPUVertFormat format_vert_shaded = {0};
+  GPUVertFormat format_vert_triple = {0};
+
+  const GPUVertFormat &get_format(Vertex /*unused*/)
+  {
+    GPUVertFormat &format = format_vert;
+    if (format.attr_len != 0) {
+      return format;
+    }
+    GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
+    GPU_vertformat_attr_add(&format, "vclass", GPU_COMP_I32, 1, GPU_FETCH_INT);
+    return format;
+  }
+
+  const GPUVertFormat &get_format(VertexWithColor /*unused*/)
+  {
+    GPUVertFormat &format = format_vert_with_color;
+    if (format.attr_len != 0) {
+      return format;
+    }
+    GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
+    GPU_vertformat_attr_add(&format, "color", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
+    return format;
+  }
+
+  const GPUVertFormat &get_format(VertShaded /*unused*/)
+  {
+    GPUVertFormat &format = format_vert_shaded;
+    if (format.attr_len != 0) {
+      return format;
+    }
+    GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
+    GPU_vertformat_attr_add(&format, "vclass", GPU_COMP_I32, 1, GPU_FETCH_INT);
+    GPU_vertformat_attr_add(&format, "nor", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
+    return format;
+  }
+
+  const GPUVertFormat &get_format(VertexTriple /*unused*/)
+  {
+    GPUVertFormat &format = format_vert_triple;
+    if (format.attr_len != 0) {
+      return format;
+    }
+    GPU_vertformat_attr_add(&format, "pos0", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+    GPU_vertformat_attr_add(&format, "pos1", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+    GPU_vertformat_attr_add(&format, "pos2", GPU_COMP_F32, 2, GPU_FETCH_FLOAT);
+    return format;
+  }
+
+  /* Caller gets ownership of the #gpu::VertBuf. */
+  template<typename T> gpu::VertBuf *vbo_from_vector(const Vector<T> &vector)
+  {
+    gpu::VertBuf *vbo = GPU_vertbuf_create_with_format(get_format(T()));
+    GPU_vertbuf_data_alloc(*vbo, vector.size());
+    vbo->data<T>().copy_from(vector);
+    return vbo;
+  }
 };
+
+using StaticShader = gpu::StaticShader;
 
 /**
  * Shader module. Shared between instances.
  */
 class ShaderModule {
  private:
-  struct ShaderDeleter {
-    void operator()(GPUShader *shader)
-    {
-      DRW_SHADER_FREE_SAFE(shader);
-    }
-  };
-  using ShaderPtr = std::unique_ptr<GPUShader, ShaderDeleter>;
+  /* Allow StaticShaderCache access to the constructor. */
+  friend gpu::StaticShaderCache<ShaderModule>;
 
-  /** Shared shader module across all engine instances. */
-  static ShaderModule *g_shader_modules[2 /* Selection Instance. */][2 /* Clipping Enabled. */];
+  using StaticCache =
+      gpu::StaticShaderCache<ShaderModule>[2 /* Selection Instance. */][2 /* Clipping Enabled. */];
+
+  static StaticCache &get_static_cache()
+  {
+    /** Shared shader module across all engine instances. */
+    static StaticCache static_cache;
+    return static_cache;
+  }
 
   const SelectionType selection_type_;
   /** TODO: Support clipping. This global state should be set by the overlay::Instance and switch
@@ -378,111 +474,119 @@ class ShaderModule {
 
  public:
   /** Shaders */
-  ShaderPtr attribute_viewer_mesh;
-  ShaderPtr attribute_viewer_pointcloud;
-  ShaderPtr attribute_viewer_curve;
-  ShaderPtr attribute_viewer_curves;
-
-  ShaderPtr anti_aliasing = shader("overlay_antialiasing");
-  ShaderPtr armature_degrees_of_freedom;
-  ShaderPtr background_fill = shader("overlay_background");
-  ShaderPtr background_clip_bound = shader("overlay_clipbound");
-  ShaderPtr curve_edit_points;
-  ShaderPtr curve_edit_line;
-  ShaderPtr curve_edit_handles = shader("overlay_edit_curves_handle_next");
-  ShaderPtr extra_point;
-  ShaderPtr facing;
-  ShaderPtr grid = shader("overlay_grid_next");
-  ShaderPtr grid_background;
-  ShaderPtr grid_grease_pencil = shader("overlay_gpencil_canvas");
-  ShaderPtr grid_image;
-  ShaderPtr legacy_curve_edit_wires;
-  ShaderPtr legacy_curve_edit_normals = shader("overlay_edit_curve_normals");
-  ShaderPtr legacy_curve_edit_handles = shader("overlay_edit_curve_handle_next");
-  ShaderPtr legacy_curve_edit_points;
-  ShaderPtr motion_path_line = shader("overlay_motion_path_line_next");
-  ShaderPtr motion_path_vert = shader("overlay_motion_path_point");
-  ShaderPtr mesh_analysis;
-  ShaderPtr mesh_edit_depth;
-  ShaderPtr mesh_edit_edge = shader("overlay_edit_mesh_edge_next");
-  ShaderPtr mesh_edit_face = shader("overlay_edit_mesh_face_next");
-  ShaderPtr mesh_edit_vert = shader("overlay_edit_mesh_vert_next");
-  ShaderPtr mesh_edit_facedot = shader("overlay_edit_mesh_facedot_next");
-  ShaderPtr mesh_edit_skin_root;
-  ShaderPtr mesh_face_normal, mesh_face_normal_subdiv;
-  ShaderPtr mesh_loop_normal, mesh_loop_normal_subdiv;
-  ShaderPtr mesh_vert_normal;
-  ShaderPtr outline_prepass_mesh;
-  ShaderPtr outline_prepass_wire = shader("overlay_outline_prepass_wire_next");
-  ShaderPtr outline_prepass_curves;
-  ShaderPtr outline_prepass_pointcloud;
-  ShaderPtr outline_prepass_gpencil;
-  ShaderPtr outline_detect = shader("overlay_outline_detect");
-  ShaderPtr particle_edit_vert;
-  ShaderPtr particle_edit_edge;
-  ShaderPtr paint_region_edge;
-  ShaderPtr paint_region_face;
-  ShaderPtr paint_region_vert;
-  ShaderPtr paint_texture;
-  ShaderPtr paint_weight;
-  ShaderPtr paint_weight_fake_shading; /* TODO(fclem): Specialization constant. */
-  ShaderPtr sculpt_mesh;
-  ShaderPtr sculpt_curves;
-  ShaderPtr sculpt_curves_cage;
-  ShaderPtr uniform_color;
-  ShaderPtr uniform_color_batch;
-  ShaderPtr uv_analysis_stretch_angle;
-  ShaderPtr uv_analysis_stretch_area;
-  ShaderPtr uv_brush_stencil;
-  ShaderPtr uv_edit_edge = shader("overlay_edit_uv_edges_next");
-  ShaderPtr uv_edit_face;
-  ShaderPtr uv_edit_facedot;
-  ShaderPtr uv_edit_vert;
-  ShaderPtr uv_image_borders;
-  ShaderPtr uv_paint_mask;
-  ShaderPtr uv_wireframe = shader("overlay_wireframe_uv");
-  ShaderPtr xray_fade;
+  StaticShader anti_aliasing = {"overlay_antialiasing"};
+  StaticShader armature_degrees_of_freedom = shader_clippable("overlay_armature_dof");
+  StaticShader attribute_viewer_mesh = shader_clippable("overlay_viewer_attribute_mesh");
+  StaticShader attribute_viewer_pointcloud = shader_clippable(
+      "overlay_viewer_attribute_pointcloud");
+  StaticShader attribute_viewer_curve = shader_clippable("overlay_viewer_attribute_curve");
+  StaticShader attribute_viewer_curves = shader_clippable("overlay_viewer_attribute_curves");
+  StaticShader background_fill = {"overlay_background"};
+  StaticShader background_clip_bound = {"overlay_clipbound"};
+  StaticShader curve_edit_points = shader_clippable("overlay_edit_curves_point");
+  StaticShader curve_edit_line = shader_clippable("overlay_edit_particle_strand");
+  StaticShader curve_edit_handles = shader_clippable("overlay_edit_curves_handle");
+  StaticShader facing = shader_clippable("overlay_facing");
+  StaticShader grid = {"overlay_grid_next"};
+  StaticShader grid_background = {"overlay_grid_background"};
+  StaticShader grid_grease_pencil = shader_clippable("overlay_gpencil_canvas");
+  StaticShader grid_image = {"overlay_grid_image"};
+  StaticShader lattice_points = shader_clippable("overlay_edit_lattice_point");
+  StaticShader lattice_wire = shader_clippable("overlay_edit_lattice_wire");
+  StaticShader legacy_curve_edit_handles = shader_clippable("overlay_edit_curve_handle");
+  StaticShader legacy_curve_edit_normals = shader_clippable("overlay_edit_curve_normals");
+  StaticShader legacy_curve_edit_points = shader_clippable("overlay_edit_curve_point");
+  StaticShader legacy_curve_edit_wires = shader_clippable("overlay_edit_curve_wire");
+  StaticShader light_spot_cone = shader_clippable("overlay_extra_spot_cone");
+  StaticShader mesh_analysis = shader_clippable("overlay_edit_mesh_analysis");
+  StaticShader mesh_edit_depth = shader_clippable("overlay_edit_mesh_depth");
+  StaticShader mesh_edit_edge = shader_clippable("overlay_edit_mesh_edge");
+  StaticShader mesh_edit_face = shader_clippable("overlay_edit_mesh_face");
+  StaticShader mesh_edit_facedot = shader_clippable("overlay_edit_mesh_facedot");
+  StaticShader mesh_edit_vert = shader_clippable("overlay_edit_mesh_vert");
+  StaticShader mesh_edit_skin_root = shader_clippable("overlay_edit_mesh_skin_root");
+  StaticShader mesh_face_normal = shader_clippable("overlay_mesh_face_normal");
+  StaticShader mesh_face_normal_subdiv = shader_clippable("overlay_mesh_face_normal_subdiv");
+  StaticShader mesh_loop_normal = shader_clippable("overlay_mesh_loop_normal");
+  StaticShader mesh_loop_normal_subdiv = shader_clippable("overlay_mesh_loop_normal_subdiv");
+  StaticShader mesh_vert_normal = shader_clippable("overlay_mesh_vert_normal");
+  StaticShader mesh_vert_normal_subdiv = shader_clippable("overlay_mesh_vert_normal_subdiv");
+  StaticShader motion_path_line = shader_clippable("overlay_motion_path_line");
+  StaticShader motion_path_vert = shader_clippable("overlay_motion_path_point");
+  StaticShader outline_detect = {"overlay_outline_detect"};
+  StaticShader outline_prepass_curves = shader_clippable("overlay_outline_prepass_curves");
+  StaticShader outline_prepass_gpencil = shader_clippable("overlay_outline_prepass_gpencil");
+  StaticShader outline_prepass_mesh = shader_clippable("overlay_outline_prepass_mesh");
+  StaticShader outline_prepass_pointcloud = shader_clippable("overlay_outline_prepass_pointcloud");
+  StaticShader outline_prepass_wire = shader_clippable("overlay_outline_prepass_wire");
+  StaticShader paint_region_edge = shader_clippable("overlay_paint_wire");
+  StaticShader paint_region_face = shader_clippable("overlay_paint_face");
+  StaticShader paint_region_vert = shader_clippable("overlay_paint_point");
+  StaticShader paint_texture = shader_clippable("overlay_paint_texture");
+  StaticShader paint_weight = shader_clippable("overlay_paint_weight");
+  /* TODO(fclem): Specialization constant. */
+  StaticShader paint_weight_fake_shading = shader_clippable("overlay_paint_weight_fake_shading");
+  StaticShader particle_edit_vert = shader_clippable("overlay_edit_particle_point");
+  StaticShader particle_edit_edge = shader_clippable("overlay_edit_particle_strand");
+  StaticShader pointcloud_points = shader_clippable("overlay_edit_pointcloud");
+  StaticShader sculpt_curves = shader_clippable("overlay_sculpt_curves_selection");
+  StaticShader sculpt_curves_cage = shader_clippable("overlay_sculpt_curves_cage");
+  StaticShader sculpt_mesh = shader_clippable("overlay_sculpt_mask");
+  StaticShader uniform_color = shader_clippable("overlay_uniform_color");
+  StaticShader uv_analysis_stretch_angle = {"overlay_edit_uv_stretching_angle"};
+  StaticShader uv_analysis_stretch_area = {"overlay_edit_uv_stretching_area"};
+  StaticShader uv_brush_stencil = {"overlay_edit_uv_stencil_image"};
+  StaticShader uv_edit_edge = {"overlay_edit_uv_edges"};
+  StaticShader uv_edit_face = {"overlay_edit_uv_faces"};
+  StaticShader uv_edit_facedot = {"overlay_edit_uv_face_dots"};
+  StaticShader uv_edit_vert = {"overlay_edit_uv_verts"};
+  StaticShader uv_image_borders = {"overlay_edit_uv_tiled_image_borders"};
+  StaticShader uv_paint_mask = {"overlay_edit_uv_mask_image"};
+  StaticShader uv_wireframe = {"overlay_wireframe_uv"};
+  StaticShader xray_fade = {"overlay_xray_fade"};
 
   /** Selectable Shaders */
-  ShaderPtr armature_envelope_fill;
-  ShaderPtr armature_envelope_outline;
-  ShaderPtr armature_shape_outline;
-  ShaderPtr armature_shape_fill;
-  ShaderPtr armature_shape_wire;
-  ShaderPtr armature_sphere_outline;
-  ShaderPtr armature_sphere_fill;
-  ShaderPtr armature_stick;
-  ShaderPtr armature_wire;
-  ShaderPtr depth_curves = selectable_shader("overlay_depth_curves");
-  ShaderPtr depth_grease_pencil = selectable_shader("overlay_depth_gpencil");
-  ShaderPtr depth_mesh = selectable_shader("overlay_depth_mesh");
-  ShaderPtr depth_mesh_conservative = selectable_shader("overlay_depth_mesh_conservative");
-  ShaderPtr depth_point_cloud = selectable_shader("overlay_depth_pointcloud");
-  ShaderPtr extra_grid;
-  ShaderPtr extra_shape;
-  ShaderPtr extra_wire_object;
-  ShaderPtr extra_wire;
-  ShaderPtr extra_loose_points;
-  ShaderPtr extra_ground_line;
-  ShaderPtr fluid_grid_lines_flags;
-  ShaderPtr fluid_grid_lines_flat;
-  ShaderPtr fluid_grid_lines_range;
-  ShaderPtr fluid_velocity_streamline;
-  ShaderPtr fluid_velocity_mac;
-  ShaderPtr fluid_velocity_needle;
-  ShaderPtr image_plane;
-  ShaderPtr image_plane_depth_bias;
-  ShaderPtr lattice_points;
-  ShaderPtr lattice_wire;
-  ShaderPtr light_spot_cone;
-  ShaderPtr particle_dot;
-  ShaderPtr particle_shape;
-  ShaderPtr particle_hair;
-  ShaderPtr wireframe_mesh;
-  ShaderPtr wireframe_curve;
-  ShaderPtr wireframe_points; /* Draw objects without edges for the wireframe overlay. */
+  StaticShader armature_envelope_fill = shader_selectable("overlay_armature_envelope_solid");
+  StaticShader armature_envelope_outline = shader_selectable("overlay_armature_envelope_outline");
+  StaticShader armature_shape_outline = shader_selectable("overlay_armature_shape_outline");
+  StaticShader armature_shape_fill = shader_selectable("overlay_armature_shape_solid");
+  StaticShader armature_shape_wire = shader_selectable("overlay_armature_shape_wire");
+  StaticShader armature_shape_wire_strip = shader_selectable("overlay_armature_shape_wire_strip");
+  StaticShader armature_sphere_outline = shader_selectable("overlay_armature_sphere_outline");
+  StaticShader armature_sphere_fill = shader_selectable("overlay_armature_sphere_solid");
+  StaticShader armature_stick = shader_selectable("overlay_armature_stick");
+  StaticShader armature_wire = shader_selectable("overlay_armature_wire");
+  StaticShader depth_curves = shader_selectable("overlay_depth_curves");
+  StaticShader depth_grease_pencil = shader_selectable("overlay_depth_gpencil");
+  StaticShader depth_mesh = shader_selectable("overlay_depth_mesh");
+  StaticShader depth_mesh_conservative = shader_selectable("overlay_depth_mesh_conservative");
+  StaticShader depth_pointcloud = shader_selectable("overlay_depth_pointcloud");
+  StaticShader extra_shape = shader_selectable("overlay_extra");
+  StaticShader extra_point = shader_selectable("overlay_extra_point");
+  StaticShader extra_wire = shader_selectable("overlay_extra_wire");
+  StaticShader extra_wire_object = shader_selectable("overlay_extra_wire_object");
+  StaticShader extra_loose_points = shader_selectable("overlay_extra_loose_point");
+  StaticShader extra_grid = shader_selectable("overlay_extra_grid");
+  StaticShader extra_ground_line = shader_selectable("overlay_extra_groundline");
+  StaticShader image_plane = shader_selectable("overlay_image");
+  StaticShader image_plane_depth_bias = shader_selectable("overlay_image_depth_bias");
+  StaticShader particle_dot = shader_selectable("overlay_particle_dot");
+  StaticShader particle_shape = shader_selectable("overlay_particle_shape");
+  StaticShader particle_hair = shader_selectable("overlay_particle_hair");
+  StaticShader wireframe_mesh = shader_selectable("overlay_wireframe");
+  /* Draw objects without edges for the wireframe overlay. */
+  StaticShader wireframe_points = shader_selectable("overlay_wireframe_points");
+  StaticShader wireframe_curve = shader_selectable("overlay_wireframe_curve");
 
-  ShaderModule(const SelectionType selection_type, const bool clipping_enabled);
+  StaticShader fluid_grid_lines_flags = shader_selectable_no_clip(
+      "overlay_volume_gridlines_flags");
+  StaticShader fluid_grid_lines_flat = shader_selectable_no_clip("overlay_volume_gridlines_flat");
+  StaticShader fluid_grid_lines_range = shader_selectable_no_clip(
+      "overlay_volume_gridlines_range");
+  StaticShader fluid_velocity_streamline = shader_selectable_no_clip(
+      "overlay_volume_velocity_streamline");
+  StaticShader fluid_velocity_mac = shader_selectable_no_clip("overlay_volume_velocity_mac");
+  StaticShader fluid_velocity_needle = shader_selectable_no_clip("overlay_volume_velocity_needle");
 
   /** Module */
   /** Only to be used by Instance constructor. */
@@ -490,15 +594,12 @@ class ShaderModule {
   static void module_free();
 
  private:
-  ShaderPtr shader(const char *create_info_name)
-  {
-    return ShaderPtr(GPU_shader_create_from_info_name(create_info_name));
-  }
-  ShaderPtr shader(const char *create_info_name,
-                   FunctionRef<void(gpu::shader::ShaderCreateInfo &info)> patch);
-  ShaderPtr selectable_shader(const char *create_info_name);
-  ShaderPtr selectable_shader(const char *create_info_name,
-                              FunctionRef<void(gpu::shader::ShaderCreateInfo &info)> patch);
+  ShaderModule(const SelectionType selection_type, const bool clipping_enabled)
+      : selection_type_(selection_type), clipping_enabled_(clipping_enabled){};
+
+  StaticShader shader_clippable(const char *create_info_name);
+  StaticShader shader_selectable(const char *create_info_name);
+  StaticShader shader_selectable_no_clip(const char *create_info_name);
 };
 
 struct GreasePencilDepthPlane {
@@ -512,7 +613,7 @@ struct GreasePencilDepthPlane {
 };
 
 struct Resources : public select::SelectMap {
-  ShaderModule &shaders;
+  ShaderModule *shaders = nullptr;
 
   /* Overlay Color. */
   Framebuffer overlay_color_only_fb = {"overlay_color_only_fb"};
@@ -528,6 +629,8 @@ struct Resources : public select::SelectMap {
   Framebuffer overlay_line_in_front_fb = {"overlay_line_in_front_fb"};
 
   /* Output Color. */
+  Framebuffer overlay_output_color_only_fb = {"overlay_output_color_only_fb"};
+  /* Depth, Output Color. */
   Framebuffer overlay_output_fb = {"overlay_output_fb"};
 
   /* Render Frame-buffers. Only used for multiplicative blending on top of the render. */
@@ -561,12 +664,9 @@ struct Resources : public select::SelectMap {
   detail::SubPassVector<GreasePencilDepthPlane, 16> depth_planes;
   int64_t depth_planes_count = 0;
 
-  /** TODO(fclem): Copy of G_data.block that should become theme colors only and managed by the
-   * engine. */
-  GlobalsUboStorage theme_settings;
-  /* References, not owned. */
-  GPUUniformBuf *globals_buf;
-  TextureRef weight_ramp_tx;
+  draw::UniformBuffer<GlobalsUboStorage> globals_buf;
+  GlobalsUboStorage &theme_settings = globals_buf;
+  draw::UniformArrayBuffer<float4, 6> clip_planes_buf;
   /* Wrappers around #DefaultTextureList members. */
   TextureRef depth_in_front_tx;
   TextureRef color_overlay_tx;
@@ -587,18 +687,30 @@ struct Resources : public select::SelectMap {
   TextureRef depth_target_tx;
   TextureRef depth_target_in_front_tx;
 
+  /** Copy of the settings the current texture was generated with. Used to detect updates. */
+  bool weight_ramp_custom = false;
+  ColorBand weight_ramp_copy = {};
+  /** Baked color ramp texture from theme and user settings. Maps weight [0..1] to color. */
+  Texture weight_ramp_tx = {"weight_ramp"};
+
   Vector<MovieClip *> bg_movie_clips;
 
   const ShapeCache &shapes;
 
-  Resources(const SelectionType selection_type_,
-            ShaderModule &shader_module,
-            const ShapeCache &shapes_)
-      : select::SelectMap(selection_type_), shaders(shader_module), shapes(shapes_){};
+  Resources(const SelectionType selection_type_, const ShapeCache &shapes_)
+      : select::SelectMap(selection_type_), shapes(shapes_){};
 
   ~Resources()
   {
     free_movieclips_textures();
+  }
+
+  void update_theme_settings(const DRWContext *ctx, const State &state);
+  void update_clip_planes(const State &state);
+
+  void init(bool clipping_enabled)
+  {
+    shaders = &overlay::ShaderModule::module_get(selection_type, clipping_enabled);
   }
 
   void begin_sync()
@@ -607,15 +719,17 @@ struct Resources : public select::SelectMap {
     free_movieclips_textures();
   }
 
-  void acquire(const State &state, DefaultTextureList &viewport_textures)
+  void acquire(const DRWContext *draw_ctx, const State &state)
   {
+    DefaultTextureList &viewport_textures = *draw_ctx->viewport_texture_list_get();
+    DefaultFramebufferList &viewport_framebuffers = *draw_ctx->viewport_framebuffer_list_get();
     this->depth_tx.wrap(viewport_textures.depth);
     this->depth_in_front_tx.wrap(viewport_textures.depth_in_front);
     this->color_overlay_tx.wrap(viewport_textures.color_overlay);
     this->color_render_tx.wrap(viewport_textures.color);
 
-    this->render_fb = DRW_viewport_framebuffer_list_get()->default_fb;
-    this->render_in_front_fb = DRW_viewport_framebuffer_list_get()->in_front_fb;
+    this->render_fb = viewport_framebuffers.default_fb;
+    this->render_in_front_fb = viewport_framebuffers.in_front_fb;
 
     int2 render_size = int2(this->depth_tx.size());
 
@@ -677,10 +791,10 @@ struct Resources : public select::SelectMap {
                                       GPU_ATTACHMENT_TEXTURE(this->line_tx));
     this->overlay_color_only_fb.ensure(GPU_ATTACHMENT_NONE,
                                        GPU_ATTACHMENT_TEXTURE(this->overlay_tx));
-    /* The v2d path writes to the overlay output directly, but it needs a depth attachment. */
-    this->overlay_output_fb.ensure(state.is_space_image() ?
-                                       GPUAttachment GPU_ATTACHMENT_TEXTURE(this->depth_tx) :
-                                       GPUAttachment GPU_ATTACHMENT_NONE,
+
+    this->overlay_output_color_only_fb.ensure(GPU_ATTACHMENT_NONE,
+                                              GPU_ATTACHMENT_TEXTURE(this->color_overlay_tx));
+    this->overlay_output_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_tx),
                                    GPU_ATTACHMENT_TEXTURE(this->color_overlay_tx));
   }
 
@@ -783,7 +897,7 @@ struct Resources : public select::SelectMap {
   {
     if (state.v3d->shading.background_type == V3D_SHADING_BACKGROUND_WORLD) {
       if (state.scene->world) {
-        return float4(float3(&state.scene->world->horr));
+        return float4(float3(&state.scene->world->horr), 0.0f);
       }
     }
     else if (state.v3d->shading.background_type == V3D_SHADING_BACKGROUND_VIEWPORT) {
@@ -800,6 +914,12 @@ struct Resources : public select::SelectMap {
     for (MovieClip *clip : bg_movie_clips) {
       BKE_movieclip_free_gputexture(clip);
     }
+  }
+
+  static float vertex_size_get()
+  {
+    /* M_SQRT2 to be at least the same size of the old square */
+    return U.pixelsize * max_ff(1.0f, UI_GetThemeValuef(TH_VERTEX_SIZE) * float(M_SQRT2) / 2.0f);
   }
 
   /** Convenience functions. */

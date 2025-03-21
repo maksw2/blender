@@ -29,7 +29,7 @@
 #  pragma GCC diagnostic error "-Wsign-conversion"
 #endif
 
-#include "BLI_strict_flags.h" /* Keep last. */
+#include "BLI_strict_flags.h" /* IWYU pragma: keep. Keep last. */
 
 /* -------------------------------------------------------------------- */
 /** \name UTF8 Character Decoding (Skip & Mask Lookup)
@@ -300,7 +300,7 @@ int BLI_str_utf8_invalid_strip(char *str, size_t length)
       break;
     }
     /* strip, keep looking */
-    memmove(str, str + 1, length + 1); /* +1 for NULL char! */
+    memmove(str, str + 1, length + 1); /* +1 for nullptr char! */
     tot++;
   }
 
@@ -312,15 +312,20 @@ int BLI_str_utf8_invalid_strip(char *str, size_t length)
  *
  * Compatible with #BLI_strncpy, but ensure no partial UTF8 chars.
  *
+ * \param dst_maxncpy: The maximum number of bytes to copy. This does not include the null
+ *   terminator.
+ *
  * \note currently we don't attempt to deal with invalid utf8 chars.
  * See #BLI_str_utf8_invalid_strip for if that is needed.
+ *
+ * \note the caller is responsible for null terminating the string.
  */
 BLI_INLINE char *str_utf8_copy_max_bytes_impl(char *dst, const char *src, size_t dst_maxncpy)
 {
   /* Cast to `uint8_t` is a no-op, quiets array subscript of type `char` warning.
    * No need to check `src` points to a nil byte as this will return from the switch statement. */
   size_t utf8_size;
-  while ((utf8_size = size_t(utf8_char_compute_skip(*src))) < dst_maxncpy) {
+  while ((utf8_size = size_t(utf8_char_compute_skip(*src))) <= dst_maxncpy) {
     dst_maxncpy -= utf8_size;
     /* Prefer more compact block. */
     /* NOLINTBEGIN: bugprone-assignment-in-if-condition */
@@ -336,7 +341,6 @@ BLI_INLINE char *str_utf8_copy_max_bytes_impl(char *dst, const char *src, size_t
     /* clang-format on */
     /* NOLINTEND: bugprone-assignment-in-if-condition */
   }
-  *dst = '\0';
   return dst;
 }
 
@@ -345,13 +349,27 @@ char *BLI_strncpy_utf8(char *__restrict dst, const char *__restrict src, size_t 
   BLI_assert(dst_maxncpy != 0);
   BLI_string_debug_size(dst, dst_maxncpy);
 
-  str_utf8_copy_max_bytes_impl(dst, src, dst_maxncpy);
+  char *dst_end = str_utf8_copy_max_bytes_impl(dst, src, dst_maxncpy - 1);
+  *dst_end = '\0';
   return dst;
 }
 
 size_t BLI_strncpy_utf8_rlen(char *__restrict dst, const char *__restrict src, size_t dst_maxncpy)
 {
   BLI_assert(dst_maxncpy != 0);
+  BLI_string_debug_size(dst, dst_maxncpy);
+
+  char *r_dst = dst;
+  dst = str_utf8_copy_max_bytes_impl(dst, src, dst_maxncpy - 1);
+  *dst = '\0';
+
+  return size_t(dst - r_dst);
+}
+
+size_t BLI_strncpy_utf8_rlen_unterminated(char *__restrict dst,
+                                          const char *__restrict src,
+                                          size_t dst_maxncpy)
+{
   BLI_string_debug_size(dst, dst_maxncpy);
 
   char *r_dst = dst;
@@ -745,6 +763,76 @@ char32_t BLI_str_utf32_char_to_lower(const char32_t wc)
   return wc;
 }
 
+/* -------------------------------------------------------------------- */
+/** \name UTF32 Text Boundary Analysis
+ *
+ * Helper functions to help locating linguistic boundaries, like word,
+ * sentence, and paragraph boundaries.
+ * \{ */
+
+bool BLI_str_utf32_char_is_breaking_space(char32_t codepoint)
+{
+  /* Invisible (and so can be removed at end of wrapped line) spacing characters
+   * according to the Unicode Line Breaking Algorithm (Standard Annex #14). Note
+   * to always ignore U+200B (zero-width space) and U+2060 (word joiner). */
+  return ELEM(codepoint,
+              ' ',     /* Space. */
+              0x1680,  /* Ogham space mark. */
+              0x2000,  /* En quad. */
+              0x2001,  /* Em quad. */
+              0x2002,  /* En space. */
+              0x2003,  /* Em space. */
+              0x2004,  /* Three-per-em space. */
+              0x2005,  /* Four-per-em space. */
+              0x2006,  /* Six-per-em space. */
+              0x2008,  /* Punctuation space. */
+              0x2009,  /* Thin space. */
+              0x200A,  /* Hair space. */
+              0x205F,  /* Medium mathematical space. */
+              0x3000); /* Ideographic space. */
+}
+
+bool BLI_str_utf32_char_is_optional_break(char32_t codepoint, char32_t codepoint_prev)
+{
+  /* Subset of the characters that are line breaking opportunities
+   * according to the Unicode Line Breaking Algorithm (Standard Annex #14).
+   * Can be expanded but please no rules that differ by language. */
+
+  /* Punctuation. Backslash can be used as path separator */
+  if (ELEM(codepoint, '\\', '_')) {
+    return true;
+  }
+
+  /* Do not break on solidus if previous is a number. */
+  if (codepoint == '/' && !(codepoint_prev >= '0' && codepoint_prev <= '9')) {
+    return true;
+  }
+
+  /* Do not break on dash, hyphen, em dash if previous is space */
+  if (ELEM(codepoint, '-', 0x2010, 0x2014) &&
+      !BLI_str_utf32_char_is_breaking_space(codepoint_prev))
+  {
+    return true;
+  }
+
+  if ((codepoint >= 0x2E80 && codepoint <= 0x2FFF) || /* CJK, Kangxi Radicals. */
+      (codepoint >= 0x3040 && codepoint <= 0x309F) || /* Hiragana (except small characters). */
+      (codepoint >= 0x30A2 && codepoint <= 0x30FA) || /* Katakana (except small characters). */
+      (codepoint >= 0x3400 && codepoint <= 0x4DBF) || /* CJK Unified Ideographs Extension A. */
+      (codepoint >= 0x4E00 && codepoint <= 0x9FFF) || /* CJK Unified Ideographs. */
+      (codepoint >= 0x3040 && codepoint <= 0x309F) || /* CJK Unified Ideographs. */
+      (codepoint >= 0x3130 && codepoint <= 0x318F))   /* Hangul Compatibility Jamo. */
+  {
+    return true;
+  }
+
+  if (ELEM(codepoint, 0x0F0D, 0x0F0B)) {
+    return true; /* Tibetan shad mark and intersyllabic tsheg. */
+  }
+
+  return false;
+}
+
 /** \} */ /* -------------------------------------------------------------------- */
 
 int BLI_str_utf8_size_or_error(const char *p)
@@ -870,7 +958,7 @@ size_t BLI_str_utf8_from_unicode(uint c, char *dst, const size_t dst_maxncpy)
   UTF8_VARS_FROM_CHAR32(c, first, len);
 
   if (UNLIKELY(dst_maxncpy < len)) {
-    /* NULL terminate instead of writing a partial byte. */
+    /* nullptr terminate instead of writing a partial byte. */
     memset(dst, 0x0, dst_maxncpy);
     return dst_maxncpy;
   }

@@ -10,6 +10,7 @@
 #include "IO_ply.hh"
 #include "ply_data.hh"
 
+#include "BKE_anonymous_attribute_id.hh"
 #include "BKE_attribute.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_mesh.hh"
@@ -424,7 +425,7 @@ void load_plydata(PlyData &plyData, Depsgraph *depsgraph, const PLYExportParams 
     }
 
     /* Colors */
-    if (export_params.vertex_colors != PLY_VERTEX_COLOR_NONE) {
+    if (export_params.vertex_colors != ePLYVertexColorMode::None) {
       const StringRef name = mesh->active_color_attribute;
       if (!name.is_empty()) {
         const bke::AttributeAccessor attributes = mesh->attributes();
@@ -438,7 +439,7 @@ void load_plydata(PlyData &plyData, Depsgraph *depsgraph, const PLYExportParams 
           plyData.vertex_colors.reserve(vertex_offset + ply_to_vertex.size());
           for (int vertex_index : ply_to_vertex) {
             float4 color = float4(color_attribute[vertex_index]);
-            if (export_params.vertex_colors == PLY_VERTEX_COLOR_SRGB) {
+            if (export_params.vertex_colors == ePLYVertexColorMode::sRGB) {
               linearrgb_to_srgb_v4(color, color);
             }
             plyData.vertex_colors.append(color);

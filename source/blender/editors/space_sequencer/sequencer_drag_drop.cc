@@ -11,7 +11,8 @@
 #include "DNA_scene_types.h"
 #include "DNA_sound_types.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_path_utils.hh"
+#include "BLI_string.h"
 #include "BLI_string_ref.hh"
 #include "BLI_string_utils.hh"
 
@@ -29,12 +30,14 @@
 #include "UI_view2d.hh"
 
 #include "GPU_matrix.hh"
+#include "GPU_state.hh"
 
 #include "ED_screen.hh"
 #include "ED_transform.hh"
 
-#include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
+
+#include "MOV_read.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -49,6 +52,8 @@
 /* Own include. */
 #include "sequencer_intern.hh"
 #include "sequencer_strips_batch.hh"
+
+namespace blender::ed::vse {
 
 struct SeqDropCoords {
   float start_frame, channel;
@@ -168,7 +173,6 @@ static float update_overlay_strip_position_data(bContext *C, const int mval[2])
   SeqDropCoords *coords = &g_drop_coords;
   ARegion *region = CTX_wm_region(C);
   Scene *scene = CTX_data_scene(C);
-  eSeqHandle hand;
   View2D *v2d = &region->v2d;
 
   /* Update the position were we would place the strip if we complete the drag and drop action.
@@ -199,7 +203,7 @@ static float update_overlay_strip_position_data(bContext *C, const int mval[2])
     float snap_frame;
     bool valid_snap;
 
-    valid_snap = ED_transform_snap_sequencer_to_closest_strip_calc(
+    valid_snap = blender::ed::transform::snap_sequencer_to_closest_strip_calc(
         scene, region, start_frame, end_frame, &snap_delta, &snap_frame);
 
     if (valid_snap) {
@@ -215,26 +219,20 @@ static float update_overlay_strip_position_data(bContext *C, const int mval[2])
     }
   }
 
-  if (strip_len < 1) {
-    /* Only check if there is a strip already under the mouse cursor. */
-    coords->is_intersecting = find_nearest_seq(scene, &region->v2d, mval, &hand);
-  }
-  else {
-    /* Check if there is a strip that would intersect with the new strip(s). */
-    coords->is_intersecting = false;
-    Sequence dummy_seq{};
-    dummy_seq.machine = coords->channel;
-    dummy_seq.start = coords->start_frame;
-    dummy_seq.len = coords->strip_len;
-    dummy_seq.speed_factor = 1.0f;
-    dummy_seq.media_playback_rate = coords->playback_rate;
-    dummy_seq.flag = SEQ_AUTO_PLAYBACK_RATE;
-    Editing *ed = SEQ_editing_ensure(scene);
+  /* Check if there is a strip that would intersect with the new strip(s). */
+  coords->is_intersecting = false;
+  Strip dummy_seq{};
+  seq::strip_channel_set(&dummy_seq, coords->channel);
+  dummy_seq.start = coords->start_frame;
+  dummy_seq.len = coords->strip_len;
+  dummy_seq.speed_factor = 1.0f;
+  dummy_seq.media_playback_rate = coords->playback_rate;
+  dummy_seq.flag = SEQ_AUTO_PLAYBACK_RATE;
+  Editing *ed = seq::editing_ensure(scene);
 
-    for (int i = 0; i < coords->channel_len && !coords->is_intersecting; i++) {
-      coords->is_intersecting = SEQ_transform_test_overlap(scene, ed->seqbasep, &dummy_seq);
-      dummy_seq.machine++;
-    }
+  for (int i = 0; i < coords->channel_len && !coords->is_intersecting; i++) {
+    coords->is_intersecting = seq::transform_test_overlap(scene, ed->seqbasep, &dummy_seq);
+    seq::strip_channel_set(&dummy_seq, dummy_seq.machine + 1);
   }
 
   return strip_len;
@@ -267,18 +265,18 @@ static void sequencer_drop_copy(bContext *C, wmDrag *drag, wmDropBox *drop)
     /* We are dropped inside the preview region. Put the strip on top of the
      * current displayed frame. */
     Scene *scene = CTX_data_scene(C);
-    Editing *ed = SEQ_editing_ensure(scene);
-    ListBase *seqbase = SEQ_active_seqbase_get(ed);
-    ListBase *channels = SEQ_channels_displayed_get(ed);
+    Editing *ed = seq::editing_ensure(scene);
+    ListBase *seqbase = seq::active_seqbase_get(ed);
+    ListBase *channels = seq::channels_displayed_get(ed);
     SpaceSeq *sseq = CTX_wm_space_seq(C);
 
-    blender::VectorSet strips = SEQ_query_rendered_strips(
+    blender::VectorSet strips = seq::query_rendered_strips(
         scene, channels, seqbase, scene->r.cfra, sseq->chanshown);
 
     /* Get the top most strip channel that is in view. */
     int max_channel = -1;
-    for (Sequence *seq : strips) {
-      max_channel = max_ii(seq->machine, max_channel);
+    for (Strip *strip : strips) {
+      max_channel = max_ii(strip->machine, max_channel);
     }
 
     if (max_channel != -1) {
@@ -362,7 +360,6 @@ static void get_drag_path(const bContext *C, wmDrag *drag, char r_path[FILE_MAX]
 
 static void draw_seq_in_view(bContext *C, wmWindow * /*win*/, wmDrag *drag, const int xy[2])
 {
-  using namespace blender::ed::seq;
   SeqDropCoords *coords = &g_drop_coords;
   if (!coords->in_use) {
     return;
@@ -386,7 +383,7 @@ static void draw_seq_in_view(bContext *C, wmWindow * /*win*/, wmDrag *drag, cons
   UI_SetTheme(SPACE_SEQ, RGN_TYPE_WINDOW);
 
   if (coords->use_snapping) {
-    ED_draw_sequencer_snap_point(region, coords->snap_point_x);
+    blender::ed::transform::sequencer_snap_point(region, coords->snap_point_x);
   }
 
   /* Init GPU drawing. */
@@ -404,8 +401,8 @@ static void draw_seq_in_view(bContext *C, wmWindow * /*win*/, wmDrag *drag, cons
   StripsDrawBatch batch(&region->v2d);
 
   for (int i = 0; i < coords->channel_len; i++) {
-    float y1 = floorf(coords->channel) + i + SEQ_STRIP_OFSBOTTOM;
-    float y2 = floorf(coords->channel) + i + SEQ_STRIP_OFSTOP;
+    float y1 = floorf(coords->channel) + i + STRIP_OFSBOTTOM;
+    float y2 = floorf(coords->channel) + i + STRIP_OFSTOP;
 
     if (coords->type == TH_SEQ_MOVIE && i == 0 && coords->channel_len > 1) {
       /* Assume only video strips occupies two channels.
@@ -551,19 +548,12 @@ static void prefetch_data_fn(void *custom_data, wmJobWorkerStatus * /*worker_sta
   }
 
   char colorspace[64] = "\0"; /* 64 == MAX_COLORSPACE_NAME length. */
-  ImBufAnim *anim = openanim(job_data->path, IB_rect, 0, colorspace);
+  MovieReader *anim = openanim(job_data->path, IB_byte_data, 0, colorspace);
 
   if (anim != nullptr) {
-    g_drop_coords.strip_len = IMB_anim_get_duration(anim, IMB_TC_NONE);
-    short frs_sec;
-    float frs_sec_base;
-    if (IMB_anim_get_fps(anim, true, &frs_sec, &frs_sec_base)) {
-      g_drop_coords.playback_rate = float(frs_sec) / frs_sec_base;
-    }
-    else {
-      g_drop_coords.playback_rate = 0;
-    }
-    IMB_free_anim(anim);
+    g_drop_coords.strip_len = MOV_get_duration_frames(anim, IMB_TC_NONE);
+    g_drop_coords.playback_rate = MOV_get_fps(anim);
+    MOV_close(anim);
 #ifdef WITH_AUDASPACE
     /* Try to load sound and see if the video has a sound channel. */
     AUD_Sound *sound = AUD_Sound_file(job_data->path);
@@ -767,3 +757,5 @@ void sequencer_dropboxes()
   lb = WM_dropboxmap_find("Sequencer", SPACE_SEQ, RGN_TYPE_PREVIEW);
   sequencer_preview_dropboxes_add_to_lb(lb);
 }
+
+}  // namespace blender::ed::vse

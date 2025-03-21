@@ -7,7 +7,6 @@
 #include "node_geometry_util.hh"
 
 #include "UI_interface.hh"
-#include "UI_resources.hh"
 
 namespace blender::nodes::node_geo_image_cc {
 
@@ -30,12 +29,16 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, GEO_NODE_IMAGE, "Image", NODE_CLASS_INPUT);
+  geo_node_type_base(&ntype, "GeometryNodeInputImage", GEO_NODE_IMAGE);
+  ntype.ui_name = "Image";
+  ntype.ui_description = "Input an image data-block";
+  ntype.enum_name_legacy = "IMAGE";
+  ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.draw_buttons = node_layout;
   ntype.declare = node_declare;
-  blender::bke::node_type_size_preset(&ntype, blender::bke::eNodeSizePreset::Large);
-  blender::bke::node_register_type(&ntype);
+  blender::bke::node_type_size_preset(ntype, blender::bke::eNodeSizePreset::Large);
+  blender::bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)
 

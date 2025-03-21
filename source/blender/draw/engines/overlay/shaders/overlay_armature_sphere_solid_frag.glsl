@@ -2,14 +2,18 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "common_view_lib.glsl"
+#include "infos/overlay_armature_info.hh"
+
+FRAGMENT_SHADER_CREATE_INFO(overlay_armature_sphere_solid)
+
+#include "draw_view_lib.glsl"
 #include "select_lib.glsl"
 
 void main()
 {
   const float sphere_radius = 0.05;
 
-  bool is_perp = (drw_view.winmat[3][3] == 0.0);
+  bool is_perp = (drw_view().winmat[3][3] == 0.0);
   vec3 ray_ori_view = (is_perp) ? vec3(0.0) : viewPosition.xyz;
   vec3 ray_dir_view = (is_perp) ? viewPosition : vec3(0.0, 0.0, -1.0);
 
@@ -54,7 +58,7 @@ void main()
   t /= ray_len;
 
 #ifndef SELECT_ENABLE
-  gl_FragDepth = get_depth_from_view_z(ray_dir_view.z * t + ray_ori_view.z);
+  gl_FragDepth = drw_depth_view_to_screen(ray_dir_view.z * t + ray_ori_view.z);
 #endif
   select_id_output(select_id);
 }

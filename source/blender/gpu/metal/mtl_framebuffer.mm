@@ -476,11 +476,10 @@ void MTLFrameBuffer::clear_attachment(GPUAttachmentType type,
 void MTLFrameBuffer::subpass_transition_impl(const GPUAttachmentState /*depth_attachment_state*/,
                                              Span<GPUAttachmentState> color_attachment_states)
 {
-  const bool is_tile_based_arch = (GPU_platform_architecture() == GPU_ARCHITECTURE_TBDR);
-  if (!is_tile_based_arch) {
+  if (!MTLBackend::capabilities.supports_native_tile_inputs) {
     /* Break render-pass if tile memory is unsupported to ensure current frame-buffer results are
      * stored. */
-    context_->main_command_buffer.end_active_command_encoder();
+    context_->main_command_buffer.end_active_command_encoder(true);
 
     /* Bind frame-buffer attachments as textures.
      * NOTE: Follows behavior of gl_framebuffer. However, shaders utilizing subpass_in will
@@ -842,6 +841,7 @@ bool MTLFrameBuffer::add_color_attachment(gpu::MTLTexture *texture,
 {
   BLI_assert(this);
   BLI_assert(slot >= 0 && slot < this->get_attachment_limit());
+  set_color_attachment_bit(GPU_FB_COLOR_ATTACHMENT0 + int(slot), true);
 
   if (texture) {
     if (miplevel < 0 || miplevel >= MTL_MAX_MIPMAP_COUNT) {
@@ -1203,6 +1203,7 @@ bool MTLFrameBuffer::remove_color_attachment(uint slot)
 {
   BLI_assert(this);
   BLI_assert(slot >= 0 && slot < this->get_attachment_limit());
+  set_color_attachment_bit(GPU_FB_COLOR_ATTACHMENT0 + int(slot), false);
 
   if (this->has_attachment_at_slot(slot)) {
     colour_attachment_count_ -= (mtl_color_attachments_[slot].used) ? 1 : 0;
@@ -1548,7 +1549,7 @@ MTLRenderPassDescriptor *MTLFrameBuffer::bake_render_pass_descriptor(bool load_c
 
   /* If Frame-buffer has been modified, regenerate descriptor. */
   if (is_dirty_) {
-    /* Clear all configs. */
+    /* Clear all configurations. */
     for (int config = 0; config < 3; config++) {
       descriptor_dirty_[config] = true;
     }

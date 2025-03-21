@@ -7,17 +7,14 @@
  */
 
 #include <cfloat>
-#include <cmath>
-#include <cstdio>
 #include <cstring>
 
 #include "DNA_anim_types.h"
 
-#include "BLI_utildefines.h"
-
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
+#include "BLI_string.h"
 
 #include "BLT_translation.hh"
 
@@ -97,16 +94,16 @@ bool nla_panel_context(const bContext *C,
         /* found it, now set the pointers */
         if (adt_ptr) {
           /* AnimData pointer */
-          *adt_ptr = RNA_pointer_create(ale->id, &RNA_AnimData, adt);
+          *adt_ptr = RNA_pointer_create_discrete(ale->id, &RNA_AnimData, adt);
         }
         if (nlt_ptr) {
           /* NLA-Track pointer */
-          *nlt_ptr = RNA_pointer_create(ale->id, &RNA_NlaTrack, nlt);
+          *nlt_ptr = RNA_pointer_create_discrete(ale->id, &RNA_NlaTrack, nlt);
         }
         if (strip_ptr) {
           /* NLA-Strip pointer */
           NlaStrip *strip = BKE_nlastrip_find_active(nlt);
-          *strip_ptr = RNA_pointer_create(ale->id, &RNA_NlaStrip, strip);
+          *strip_ptr = RNA_pointer_create_discrete(ale->id, &RNA_NlaStrip, strip);
         }
 
         found = 1;
@@ -151,7 +148,7 @@ bool nla_panel_context(const bContext *C,
 
           /* AnimData pointer */
           if (adt_ptr) {
-            *adt_ptr = RNA_pointer_create(id, &RNA_AnimData, ale->adt);
+            *adt_ptr = RNA_pointer_create_discrete(id, &RNA_AnimData, ale->adt);
           }
 
           /* set found status to -1, since setting to 1 would break the loop
@@ -181,7 +178,6 @@ bool nla_panel_context(const bContext *C,
       case ANIMTYPE_FILLDRIVERS:
       case ANIMTYPE_DSMCLIP:
       case ANIMTYPE_SHAPEKEY:
-      case ANIMTYPE_GPDATABLOCK:
       case ANIMTYPE_GPLAYER:
       case ANIMTYPE_GREASE_PENCIL_DATABLOCK:
       case ANIMTYPE_GREASE_PENCIL_LAYER_GROUP:
@@ -438,8 +434,8 @@ static void nla_panel_properties(const bContext *C, Panel *panel)
   if (showEvalProps) {
     /* extrapolation */
     column = uiLayoutColumn(layout, false);
-    uiItemR(column, &strip_ptr, "extrapolation", UI_ITEM_NONE, nullptr, ICON_NONE);
-    uiItemR(column, &strip_ptr, "blend_type", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(column, &strip_ptr, "extrapolation", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+    uiItemR(column, &strip_ptr, "blend_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
     /* Blend in/out + auto-blending:
      * - blend in/out can only be set when auto-blending is off.
@@ -454,8 +450,12 @@ static void nla_panel_properties(const bContext *C, Panel *panel)
 
     row = uiLayoutRow(column, true);
     uiLayoutSetActive(row, RNA_boolean_get(&strip_ptr, "use_animated_influence") == false);
-    uiItemR(
-        row, &strip_ptr, "use_auto_blend", UI_ITEM_NONE, nullptr, ICON_NONE); /* XXX as toggle? */
+    uiItemR(row,
+            &strip_ptr,
+            "use_auto_blend",
+            UI_ITEM_NONE,
+            std::nullopt,
+            ICON_NONE); /* XXX as toggle? */
 
     /* settings */
     column = uiLayoutColumnWithHeading(layout, true, IFACE_("Playback"));
@@ -463,9 +463,9 @@ static void nla_panel_properties(const bContext *C, Panel *panel)
     uiLayoutSetActive(row,
                       !(RNA_boolean_get(&strip_ptr, "use_animated_influence") ||
                         RNA_boolean_get(&strip_ptr, "use_animated_time")));
-    uiItemR(row, &strip_ptr, "use_reverse", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(row, &strip_ptr, "use_reverse", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
-    uiItemR(column, &strip_ptr, "use_animated_time_cyclic", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(column, &strip_ptr, "use_animated_time_cyclic", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 }
 
@@ -490,7 +490,7 @@ static void nla_panel_actclip(const bContext *C, Panel *panel)
   /* Strip Properties ------------------------------------- */
   /* action pointer */
   column = uiLayoutColumn(layout, true);
-  uiItemR(column, &strip_ptr, "action", UI_ITEM_NONE, nullptr, ICON_ACTION);
+  uiItemR(column, &strip_ptr, "action", UI_ITEM_NONE, std::nullopt, ICON_ACTION);
 
   NlaStrip *strip = static_cast<NlaStrip *>(strip_ptr.data);
   if (strip->act) {
@@ -528,7 +528,7 @@ static void nla_panel_actclip(const bContext *C, Panel *panel)
   column = uiLayoutColumn(layout, true);
   uiLayoutSetActive(column, RNA_boolean_get(&strip_ptr, "use_animated_time") == false);
   uiItemR(column, &strip_ptr, "scale", UI_ITEM_NONE, IFACE_("Playback Scale"), ICON_NONE);
-  uiItemR(column, &strip_ptr, "repeat", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(column, &strip_ptr, "repeat", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 /* evaluation settings for active NLA-Strip */
@@ -568,7 +568,7 @@ static void nla_panel_evaluation(const bContext *C, Panel *panel)
   uiLayoutSetPropSep(layout, true);
 
   uiLayoutSetEnabled(layout, RNA_boolean_get(&strip_ptr, "use_animated_influence"));
-  uiItemR(layout, &strip_ptr, "influence", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, &strip_ptr, "influence", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 static void nla_panel_animated_strip_time_header(const bContext *C, Panel *panel)
@@ -606,7 +606,7 @@ static void nla_panel_animated_strip_time(const bContext *C, Panel *panel)
   uiLayoutSetPropSep(layout, true);
 
   uiLayoutSetEnabled(layout, RNA_boolean_get(&strip_ptr, "use_animated_time"));
-  uiItemR(layout, &strip_ptr, "strip_time", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, &strip_ptr, "strip_time", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 #define NLA_FMODIFIER_PANEL_PREFIX "NLA"
@@ -659,7 +659,7 @@ void nla_buttons_register(ARegionType *art)
 {
   PanelType *pt;
 
-  pt = MEM_cnew<PanelType>("spacetype nla panel animdata");
+  pt = MEM_callocN<PanelType>("spacetype nla panel animdata");
   STRNCPY(pt->idname, "NLA_PT_animdata");
   STRNCPY(pt->label, N_("Animation Data"));
   STRNCPY(pt->category, "Edited Action");
@@ -669,7 +669,7 @@ void nla_buttons_register(ARegionType *art)
   pt->poll = nla_animdata_panel_poll;
   BLI_addtail(&art->paneltypes, pt);
 
-  pt = MEM_cnew<PanelType>("spacetype nla panel properties");
+  pt = MEM_callocN<PanelType>("spacetype nla panel properties");
   STRNCPY(pt->idname, "NLA_PT_stripname");
   STRNCPY(pt->label, N_("Active Strip Name"));
   STRNCPY(pt->category, "Strip");
@@ -679,7 +679,7 @@ void nla_buttons_register(ARegionType *art)
   pt->poll = nla_strip_panel_poll;
   BLI_addtail(&art->paneltypes, pt);
 
-  PanelType *pt_properties = pt = MEM_cnew<PanelType>("spacetype nla panel properties");
+  PanelType *pt_properties = pt = MEM_callocN<PanelType>("spacetype nla panel properties");
   STRNCPY(pt->idname, "NLA_PT_properties");
   STRNCPY(pt->label, N_("Active Strip"));
   STRNCPY(pt->category, "Strip");
@@ -688,7 +688,7 @@ void nla_buttons_register(ARegionType *art)
   pt->poll = nla_strip_panel_poll;
   BLI_addtail(&art->paneltypes, pt);
 
-  pt = MEM_cnew<PanelType>("spacetype nla panel properties");
+  pt = MEM_callocN<PanelType>("spacetype nla panel properties");
   STRNCPY(pt->idname, "NLA_PT_actionclip");
   STRNCPY(pt->label, N_("Action Clip"));
   STRNCPY(pt->category, "Strip");
@@ -698,7 +698,7 @@ void nla_buttons_register(ARegionType *art)
   pt->poll = nla_strip_actclip_panel_poll;
   BLI_addtail(&art->paneltypes, pt);
 
-  pt = MEM_cnew<PanelType>("spacetype nla panel evaluation");
+  pt = MEM_callocN<PanelType>("spacetype nla panel evaluation");
   STRNCPY(pt->idname, "NLA_PT_evaluation");
   STRNCPY(pt->parent_id, "NLA_PT_properties");
   STRNCPY(pt->label, N_("Animated Influence"));
@@ -712,7 +712,7 @@ void nla_buttons_register(ARegionType *art)
   BLI_addtail(&pt_properties->children, BLI_genericNodeN(pt));
   BLI_addtail(&art->paneltypes, pt);
 
-  pt = MEM_cnew<PanelType>("spacetype nla panel animated strip time");
+  pt = MEM_callocN<PanelType>("spacetype nla panel animated strip time");
   STRNCPY(pt->idname, "NLA_PT_animated_strip_time");
   STRNCPY(pt->parent_id, "NLA_PT_properties");
   STRNCPY(pt->label, N_("Animated Strip Time"));
@@ -726,7 +726,7 @@ void nla_buttons_register(ARegionType *art)
   BLI_addtail(&pt_properties->children, BLI_genericNodeN(pt));
   BLI_addtail(&art->paneltypes, pt);
 
-  pt = MEM_cnew<PanelType>("spacetype nla panel modifiers");
+  pt = MEM_callocN<PanelType>("spacetype nla panel modifiers");
   STRNCPY(pt->idname, "NLA_PT_modifiers");
   STRNCPY(pt->label, N_("Modifiers"));
   STRNCPY(pt->category, "Modifiers");

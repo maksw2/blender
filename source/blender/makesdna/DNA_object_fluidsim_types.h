@@ -60,15 +60,17 @@ typedef struct FluidsimSettings {
   /* gravity strength */
   float iniVelx, iniVely, iniVelz;
 
-  /* store output path, and file prefix for baked fluid surface */
-  /* strlens; 256= FILE_MAXFILE, 768= FILE_MAXDIR */
+  /**
+   * Store output path, and file prefix for baked fluid surface.
+   * String length; 256= #FILE_MAXFILE, 768= #FILE_MAXDIR.
+   */
   char surfdataPath[1024];
 
   /* store start coords of axis aligned bounding box together with size */
   /* values are initialized during derived mesh display. */
   float bbStart[3], bbSize[3];
 
-  /* animated params */
+  /** Animated parameters. */
   struct Ipo *ipo;
 
   /* additional flags depending on the type, lower short contains flags
@@ -116,7 +118,7 @@ typedef struct FluidsimSettings {
 
   int lastgoodframe;
 
-  /** Simulation/flow rate control (i.e. old "Fac-Time"). */
+  /** Simulation/flow rate control. */
   float animRate;
 } FluidsimSettings;
 

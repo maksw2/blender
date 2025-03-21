@@ -10,8 +10,6 @@
 
 #include "DNA_vec_types.h"
 
-#include "ED_numinput.hh"
-
 #define DEPTH_INVALID 1.0f
 
 /* internal exports only */
@@ -21,7 +19,6 @@ struct bGPDstroke;
 struct bGPdata;
 struct tGPspoint;
 
-struct GHash;
 struct RNG;
 
 struct ARegion;
@@ -34,6 +31,10 @@ struct wmOperatorType;
 struct wmWindow;
 
 struct Depsgraph;
+struct Object;
+struct ScrArea;
+struct ListBase;
+struct bGPDlayer;
 
 struct EnumPropertyItem;
 struct PointerRNA;
@@ -121,9 +122,3 @@ enum eGPencil_PaintModes {
 
 /* chunk size for gp-session buffer (the total size is a multiple of this number) */
 #define GP_STROKE_BUFFER_CHUNK 2048
-
-/* undo stack ---------- */
-
-void gpencil_undo_init(bGPdata *gpd);
-void gpencil_undo_push(bGPdata *gpd);
-void gpencil_undo_finish();

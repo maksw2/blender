@@ -10,14 +10,14 @@
 
 #include "intern/builder/deg_builder_nodes.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_span.hh"
-#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "DNA_action_types.h"
@@ -29,8 +29,6 @@
 #include "DNA_constraint_types.h"
 #include "DNA_curve_types.h"
 #include "DNA_curves_types.h"
-#include "DNA_effect_types.h"
-#include "DNA_gpencil_legacy_types.h"
 #include "DNA_key_types.h"
 #include "DNA_light_types.h"
 #include "DNA_lightprobe_types.h"
@@ -38,7 +36,6 @@
 #include "DNA_mask_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
-#include "DNA_meta_types.h"
 #include "DNA_movieclip_types.h"
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
@@ -76,11 +73,12 @@
 #include "BKE_lib_query.hh"
 #include "BKE_light.h"
 #include "BKE_mask.h"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mball.hh"
 #include "BKE_mesh.hh"
 #include "BKE_modifier.hh"
 #include "BKE_movieclip.h"
+#include "BKE_nla.hh"
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_object.hh"
@@ -139,12 +137,12 @@ DepsgraphNodeBuilder::DepsgraphNodeBuilder(Main *bmain,
 
 DepsgraphNodeBuilder::~DepsgraphNodeBuilder()
 {
-  for (IDInfo *id_info : id_info_hash_.values()) {
-    if (id_info->id_cow != nullptr) {
-      deg_free_eval_copy_datablock(id_info->id_cow);
-      MEM_freeN(id_info->id_cow);
+  /* Cannot be in an IDInfo destructor, as these COW IDs do not belong to the IDInfo data. */
+  for (IDInfo &id_info : id_info_hash_.values()) {
+    if (id_info.id_cow != nullptr) {
+      deg_free_eval_copy_datablock(id_info.id_cow);
+      MEM_freeN(id_info.id_cow);
     }
-    MEM_freeN(id_info);
   }
 }
 
@@ -158,7 +156,7 @@ IDNode *DepsgraphNodeBuilder::add_id_node(ID *id)
   IDComponentsMask previously_visible_components_mask = 0;
   uint32_t previous_eval_flags = 0;
   DEGCustomDataMeshMasks previous_customdata_masks;
-  IDInfo *id_info = id_info_hash_.lookup_default(id->session_uid, nullptr);
+  IDInfo *id_info = id_info_hash_.lookup_ptr(id->session_uid);
   if (id_info != nullptr) {
     id_cow = id_info->id_cow;
     previously_visible_components_mask = id_info->previously_visible_components_mask;
@@ -385,20 +383,20 @@ void DepsgraphNodeBuilder::begin_build()
      * for whether id_cow is expanded to access freed memory. In order to deal with this we
      * check whether an evaluated copy is needed based on a scalar value which does not lead to
      * access of possibly deleted memory. */
-    IDInfo *id_info = (IDInfo *)MEM_mallocN(sizeof(IDInfo), "depsgraph id info");
+    IDInfo id_info{};
     if (deg_eval_copy_is_needed(id_node->id_type) && deg_eval_copy_is_expanded(id_node->id_cow) &&
         id_node->id_orig != id_node->id_cow)
     {
-      id_info->id_cow = id_node->id_cow;
+      id_info.id_cow = id_node->id_cow;
     }
     else {
-      id_info->id_cow = nullptr;
+      id_info.id_cow = nullptr;
     }
-    id_info->previously_visible_components_mask = id_node->visible_components_mask;
-    id_info->previous_eval_flags = id_node->eval_flags;
-    id_info->previous_customdata_masks = id_node->customdata_masks;
+    id_info.previously_visible_components_mask = id_node->visible_components_mask;
+    id_info.previous_eval_flags = id_node->eval_flags;
+    id_info.previous_customdata_masks = id_node->customdata_masks;
     BLI_assert(!id_info_hash_.contains(id_node->id_orig_session_uid));
-    id_info_hash_.add_new(id_node->id_orig_session_uid, id_info);
+    id_info_hash_.add_new(id_node->id_orig_session_uid, std::move(id_info));
     id_node->id_cow = nullptr;
   }
 
@@ -418,8 +416,8 @@ void DepsgraphNodeBuilder::begin_build()
   graph_->entry_tags.clear();
 }
 
-/* Util callbacks for `BKE_library_foreach_ID_link`, used to detect when an evaluated ID is using
- * ID pointers that are either:
+/* Utility callbacks for `BKE_library_foreach_ID_link`, used to detect when an evaluated ID is
+ * using ID pointers that are either:
  *  - evaluated ID pointers that do not exist anymore in current depsgraph.
  *  - Orig ID pointers that do have now an evaluated version in current depsgraph.
  * In both cases, it means the evaluated ID user needs to be flushed, to ensure its pointers are
@@ -765,7 +763,7 @@ void DepsgraphNodeBuilder::build_object(int base_index,
     if (id_node->linked_state == DEG_ID_LINKED_INDIRECTLY) {
       build_object_flags(base_index, object, linked_state);
     }
-    id_node->linked_state = max(id_node->linked_state, linked_state);
+    id_node->linked_state = std::max(id_node->linked_state, linked_state);
     id_node->is_visible_on_build |= is_visible;
     id_node->has_base |= (base_index != -1);
 
@@ -1257,6 +1255,9 @@ void DepsgraphNodeBuilder::build_animdata(ID *id)
   }
   /* NLA strips contain actions. */
   LISTBASE_FOREACH (NlaTrack *, nlt, &adt->nla_tracks) {
+    if (!BKE_nlatrack_is_enabled(*adt, *nlt)) {
+      continue;
+    }
     build_animdata_nlastrip_targets(&nlt->strips);
   }
   /* Drivers. */
@@ -1406,7 +1407,7 @@ void DepsgraphNodeBuilder::build_driver_id_property(const PointerRNA &target_pro
   if (ptr.owner_id) {
     build_id(ptr.owner_id);
   }
-  const char *prop_identifier = RNA_property_identifier((PropertyRNA *)prop);
+  const char *prop_identifier = RNA_property_identifier(prop);
   /* Custom properties of bones are placed in their components to improve granularity. */
   if (RNA_struct_is_a(ptr.type, &RNA_PoseBone)) {
     const bPoseChannel *pchan = static_cast<const bPoseChannel *>(ptr.data);
@@ -1720,7 +1721,7 @@ void DepsgraphNodeBuilder::build_object_data_geometry_datablock(ID *obdata)
   }
   OperationNode *op_node;
   /* Make sure we've got an ID node before requesting evaluated pointer. */
-  (void)add_id_node((ID *)obdata);
+  (void)add_id_node(obdata);
   ID *obdata_cow = get_cow_id(obdata);
   build_idproperties(obdata->properties);
   /* Animation. */
@@ -1808,7 +1809,13 @@ void DepsgraphNodeBuilder::build_object_data_geometry_datablock(ID *obdata)
       break;
     }
     case ID_GP: {
-      op_node = add_operation_node(obdata, NodeType::GEOMETRY, OperationCode::GEOMETRY_EVAL);
+      op_node = add_operation_node(obdata,
+                                   NodeType::GEOMETRY,
+                                   OperationCode::GEOMETRY_EVAL,
+                                   [obdata_cow](::Depsgraph *depsgraph) {
+                                     BKE_grease_pencil_eval_geometry(
+                                         depsgraph, reinterpret_cast<GreasePencil *>(obdata_cow));
+                                   });
       op_node->set_as_entry();
       break;
     }
@@ -2001,7 +2008,7 @@ void DepsgraphNodeBuilder::build_nodetree(bNodeTree *ntree)
     else if (id_type == ID_VF) {
       build_vfont((VFont *)id);
     }
-    else if (ELEM(bnode->type, NODE_GROUP, NODE_CUSTOM_GROUP)) {
+    else if (bnode->is_group()) {
       bNodeTree *group_ntree = (bNodeTree *)id;
       build_nodetree(group_ntree);
     }
@@ -2063,6 +2070,7 @@ void DepsgraphNodeBuilder::build_texture(Tex *texture)
   }
   /* Texture itself. */
   add_id_node(&texture->id);
+  Tex *texture_cow = get_cow_datablock(texture);
   build_idproperties(texture->id.properties);
   build_animdata(&texture->id);
   build_parameters(&texture->id);
@@ -2074,8 +2082,12 @@ void DepsgraphNodeBuilder::build_texture(Tex *texture)
       build_image(texture->ima);
     }
   }
-  add_operation_node(
-      &texture->id, NodeType::GENERIC_DATABLOCK, OperationCode::GENERIC_DATABLOCK_UPDATE);
+  add_operation_node(&texture->id,
+                     NodeType::GENERIC_DATABLOCK,
+                     OperationCode::GENERIC_DATABLOCK_UPDATE,
+                     [texture_cow](::Depsgraph *depsgraph) {
+                       texture_cow->runtime.last_update = DEG_get_update_count(depsgraph);
+                     });
 }
 
 void DepsgraphNodeBuilder::build_image(Image *image)
@@ -2236,22 +2248,22 @@ void DepsgraphNodeBuilder::build_vfont(VFont *vfont)
       &vfont->id, NodeType::GENERIC_DATABLOCK, OperationCode::GENERIC_DATABLOCK_UPDATE);
 }
 
-static bool seq_node_build_cb(Sequence *seq, void *user_data)
+static bool strip_node_build_cb(Strip *strip, void *user_data)
 {
   DepsgraphNodeBuilder *nb = (DepsgraphNodeBuilder *)user_data;
-  nb->build_idproperties(seq->prop);
-  if (seq->sound != nullptr) {
-    nb->build_sound(seq->sound);
+  nb->build_idproperties(strip->prop);
+  if (strip->sound != nullptr) {
+    nb->build_sound(strip->sound);
   }
-  if (seq->scene != nullptr) {
-    nb->build_scene_parameters(seq->scene);
+  if (strip->scene != nullptr) {
+    nb->build_scene_parameters(strip->scene);
   }
-  if (seq->type == SEQ_TYPE_SCENE && seq->scene != nullptr) {
-    if (seq->flag & SEQ_SCENE_STRIPS) {
-      nb->build_scene_sequencer(seq->scene);
+  if (strip->type == STRIP_TYPE_SCENE && strip->scene != nullptr) {
+    if (strip->flag & SEQ_SCENE_STRIPS) {
+      nb->build_scene_sequencer(strip->scene);
     }
-    ViewLayer *sequence_view_layer = BKE_view_layer_default_render(seq->scene);
-    nb->build_scene_speakers(seq->scene, sequence_view_layer);
+    ViewLayer *sequence_view_layer = BKE_view_layer_default_render(strip->scene);
+    nb->build_scene_speakers(strip->scene, sequence_view_layer);
   }
   /* TODO(sergey): Movie clip, scene, camera, mask. */
   return true;
@@ -2271,10 +2283,10 @@ void DepsgraphNodeBuilder::build_scene_sequencer(Scene *scene)
                      NodeType::SEQUENCER,
                      OperationCode::SEQUENCES_EVAL,
                      [scene_cow](::Depsgraph *depsgraph) {
-                       SEQ_eval_sequences(depsgraph, scene_cow, &scene_cow->ed->seqbase);
+                       seq::eval_sequences(depsgraph, scene_cow, &scene_cow->ed->seqbase);
                      });
   /* Make sure data for sequences is in the graph. */
-  SEQ_for_each_callback(&scene->ed->seqbase, seq_node_build_cb, this);
+  seq::for_each_callback(&scene->ed->seqbase, strip_node_build_cb, this);
 }
 
 void DepsgraphNodeBuilder::build_scene_audio(Scene *scene)
@@ -2316,7 +2328,7 @@ void DepsgraphNodeBuilder::build_scene_speakers(Scene *scene, ViewLayer *view_la
 void DepsgraphNodeBuilder::modifier_walk(void *user_data,
                                          Object * /*object*/,
                                          ID **idpoin,
-                                         int /*cb_flag*/)
+                                         LibraryForeachIDCallbackFlag /*cb_flag*/)
 {
   BuilderWalkUserData *data = (BuilderWalkUserData *)user_data;
   ID *id = *idpoin;

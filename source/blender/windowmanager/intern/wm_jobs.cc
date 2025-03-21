@@ -14,7 +14,8 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
+#include "BLI_string.h"
 #include "BLI_threads.h"
 #include "BLI_time.h"
 #include "BLI_utildefines.h"
@@ -196,7 +197,7 @@ wmJob *WM_jobs_get(wmWindowManager *wm,
   wmJob *wm_job = wm_job_find(wm, owner, job_type);
 
   if (wm_job == nullptr) {
-    wm_job = static_cast<wmJob *>(MEM_callocN(sizeof(wmJob), "new job"));
+    wm_job = MEM_callocN<wmJob>("new job");
 
     BLI_addtail(&wm->jobs, wm_job);
     wm_job->win = win;
@@ -208,7 +209,7 @@ wmJob *WM_jobs_get(wmWindowManager *wm,
     wm_job->main_thread_mutex = BLI_ticket_mutex_alloc();
     WM_job_main_thread_lock_acquire(wm_job);
 
-    wm_job->worker_status.reports = MEM_cnew<ReportList>(__func__);
+    wm_job->worker_status.reports = MEM_callocN<ReportList>(__func__);
     BKE_reports_init(wm_job->worker_status.reports, RPT_STORE | RPT_PRINT);
     BKE_report_print_level_set(wm_job->worker_status.reports, RPT_WARNING);
   }
@@ -268,7 +269,7 @@ static void wm_jobs_update_progress_bars(wmWindowManager *wm)
 
   /* If there are running jobs, set the global progress indicator. */
   if (jobs_progress > 0) {
-    float progress = total_progress / float(jobs_progress);
+    float progress = total_progress / jobs_progress;
 
     LISTBASE_FOREACH (wmWindow *, win, &wm->windows) {
       WM_progress_set(win, progress);
@@ -582,7 +583,7 @@ void WM_jobs_kill_all(wmWindowManager *wm)
   }
 
   /* This job will be automatically restarted. */
-  SEQ_prefetch_stop_all();
+  blender::seq::prefetch_stop_all();
 }
 
 void WM_jobs_kill_all_except(wmWindowManager *wm, const void *owner)

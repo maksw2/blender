@@ -91,6 +91,14 @@ VKPipelinePool::VKPipelinePool()
       VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
   vk_pipeline_rasterization_state_create_info_.lineWidth = 1.0f;
   vk_pipeline_rasterization_state_create_info_.frontFace = VK_FRONT_FACE_CLOCKWISE;
+  vk_pipeline_rasterization_state_create_info_.pNext =
+      &vk_pipeline_rasterization_provoking_vertex_state_info_;
+
+  vk_pipeline_rasterization_provoking_vertex_state_info_ = {};
+  vk_pipeline_rasterization_provoking_vertex_state_info_.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT;
+  vk_pipeline_rasterization_provoking_vertex_state_info_.provokingVertexMode =
+      VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
 
   vk_pipeline_viewport_state_create_info_ = {};
   vk_pipeline_viewport_state_create_info_.sType =
@@ -274,6 +282,10 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   vk_pipeline_rasterization_state_create_info_.frontFace = graphics_info.state.invert_facing ?
                                                                VK_FRONT_FACE_COUNTER_CLOCKWISE :
                                                                VK_FRONT_FACE_CLOCKWISE;
+  vk_pipeline_rasterization_provoking_vertex_state_info_.provokingVertexMode =
+      graphics_info.state.provoking_vert == GPU_VERTEX_LAST ?
+          VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT :
+          VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
 
   /* Viewport state */
   vk_pipeline_viewport_state_create_info_.pViewports =
@@ -286,7 +298,7 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
       graphics_info.fragment_shader.scissors.size();
 
   /* Color blending */
-  const VKWorkarounds &workarounds = VKBackend::get().device.workarounds_get();
+  const VKExtensions &extensions = VKBackend::get().device.extensions_get();
   {
     VkPipelineColorBlendStateCreateInfo &cb = vk_pipeline_color_blend_state_create_info_;
     VkPipelineColorBlendAttachmentState &att_state =
@@ -361,7 +373,7 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
         att_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
         att_state.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         att_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        att_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        att_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         break;
 
       case GPU_BLEND_ALPHA_UNDER_PREMUL:
@@ -410,7 +422,7 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
     }
 
     /* Logic ops. */
-    if (graphics_info.state.logic_op_xor && !workarounds.logic_ops) {
+    if (graphics_info.state.logic_op_xor && extensions.logic_ops) {
       cb.logicOpEnable = VK_TRUE;
       cb.logicOp = VK_LOGIC_OP_XOR;
     }
@@ -532,13 +544,7 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   }
 
   /* VK_KHR_dynamic_rendering */
-  if (workarounds.dynamic_rendering) {
-    BLI_assert(ELEM(
-        vk_graphics_pipeline_create_info_.pNext, &vk_pipeline_rendering_create_info_, nullptr));
-    vk_graphics_pipeline_create_info_.pNext = nullptr;
-    vk_graphics_pipeline_create_info_.renderPass = graphics_info.fragment_out.vk_render_pass;
-  }
-  else {
+  if (extensions.dynamic_rendering) {
     vk_pipeline_rendering_create_info_.depthAttachmentFormat =
         graphics_info.fragment_out.depth_attachment_format;
     vk_pipeline_rendering_create_info_.stencilAttachmentFormat =
@@ -547,6 +553,12 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
         graphics_info.fragment_out.color_attachment_formats.size();
     vk_pipeline_rendering_create_info_.pColorAttachmentFormats =
         graphics_info.fragment_out.color_attachment_formats.data();
+  }
+  else {
+    BLI_assert(ELEM(
+        vk_graphics_pipeline_create_info_.pNext, &vk_pipeline_rendering_create_info_, nullptr));
+    vk_graphics_pipeline_create_info_.pNext = nullptr;
+    vk_graphics_pipeline_create_info_.renderPass = graphics_info.fragment_out.vk_render_pass;
   }
 
   /* Common values */
@@ -593,6 +605,8 @@ VkPipeline VKPipelinePool::get_or_create_graphics_pipeline(VKGraphicsInfo &graph
   vk_pipeline_rasterization_state_create_info_.depthBiasConstantFactor = 0.0f;
   vk_pipeline_rasterization_state_create_info_.depthBiasClamp = 0.0f;
   vk_pipeline_rasterization_state_create_info_.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  vk_pipeline_rasterization_provoking_vertex_state_info_.provokingVertexMode =
+      VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
   vk_pipeline_viewport_state_create_info_.pScissors = nullptr;
   vk_pipeline_viewport_state_create_info_.scissorCount = 0;
   vk_pipeline_viewport_state_create_info_.pViewports = nullptr;
@@ -669,7 +683,7 @@ struct VKPipelineCachePrefixHeader {
   /* 'B'lender 'C'ache + 2 bytes for file versioning. */
   uint32_t magic = 0xBC00;
   uint32_t blender_version = BLENDER_VERSION;
-  uint32_t blender_subversion = BLENDER_VERSION_PATCH;
+  uint32_t blender_version_patch = BLENDER_VERSION_PATCH;
   char commit_hash[8];
   uint32_t data_size;
   uint32_t vendor_id;

@@ -6,13 +6,12 @@
  * \ingroup edundo
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "CLG_log.h"
 
 #include "DNA_ID.h"
 
 #include "BKE_lib_id.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 
 #include "WM_api.hh"
@@ -51,10 +50,10 @@ bool ED_id_rename(Main &bmain, ID &id, blender::StringRefNull name)
                 "collision with another ID",
                 id.name + 2,
                 name.c_str());
-      WM_reportf(RPT_INFO,
-                 "Data-block renamed to '%s', try again to force renaming it to '%s'",
-                 id.name + 2,
-                 name.c_str());
+      WM_global_reportf(RPT_INFO,
+                        "Data-block renamed to '%s', try again to force renaming it to '%s'",
+                        id.name + 2,
+                        name.c_str());
       WM_main_add_notifier(NC_ID | NA_RENAME, &id);
       return true;
     case IDNewNameResult::Action::RENAMED_COLLISION_FORCED:
@@ -63,9 +62,9 @@ bool ED_id_rename(Main &bmain, ID &id, blender::StringRefNull name)
           4,
           "ID '%s' forcefully renamed, another ID had to also be renamed to avoid name collision",
           id.name + 2);
-      WM_reportf(RPT_INFO,
-                 "Name in use. The other data-block was renamed to ‘%s’",
-                 result.other_id->name + 2);
+      WM_global_reportf(RPT_INFO,
+                        "Name in use. The other data-block was renamed to ‘%s’",
+                        result.other_id->name + 2);
       WM_main_add_notifier(NC_ID | NA_RENAME, &id);
       WM_main_add_notifier(NC_ID | NA_RENAME, result.other_id);
       return true;

@@ -25,6 +25,7 @@
 
 #include "DNA_scene_types.h"
 
+#include "BLI_math_base.h"
 #include "BLI_rect.h"
 #include "BLI_string.h"
 #include "BLI_timecode.h"
@@ -222,7 +223,7 @@ void ED_time_scrub_channel_search_draw(const bContext *C, ARegion *region, bDope
   immRectf(pos, rect.xmin, rect.ymin, rect.xmax, rect.ymax);
   immUnbindProgram();
 
-  PointerRNA ptr = RNA_pointer_create(&CTX_wm_screen(C)->id, &RNA_DopeSheet, dopesheet);
+  PointerRNA ptr = RNA_pointer_create_discrete(&CTX_wm_screen(C)->id, &RNA_DopeSheet, dopesheet);
 
   const uiStyle *style = UI_style_get_dpi();
   const float padding_x = 2 * UI_SCALE_FAC;

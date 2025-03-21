@@ -11,7 +11,6 @@
 #include "CLG_log.h"
 
 #include "BLI_array.hh"
-#include "BLI_linklist.h"
 #include "BLI_utildefines.h"
 
 #include "DNA_collection_types.h"
@@ -25,7 +24,7 @@
 #include "BKE_lib_query.hh"
 #include "BKE_lib_remap.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_mball.hh"
 #include "BKE_modifier.hh"
 #include "BKE_multires.hh"
@@ -173,7 +172,7 @@ static void foreach_libblock_remap_callback_apply(ID *id_owner,
 
 static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
 {
-  const int cb_flag = cb_data->cb_flag;
+  const LibraryForeachIDCallbackFlag cb_flag = cb_data->cb_flag;
 
   /* NOTE: Support remapping of `IDWALK_CB_EMBEDDED_NON_OWNING` pointers, this is necessary in some
    * complex low-level ID manipulation cases (e.g. in ID swapping, see #BKE_lib_id_swap & co).
@@ -419,7 +418,7 @@ static void libblock_remap_data_postprocess_obdata_relink(Main *bmain, Object *o
         break;
     }
     BKE_modifiers_test_object(ob);
-    BKE_object_materials_test(bmain, ob, new_id);
+    BKE_object_materials_sync_length(bmain, ob, new_id);
   }
 }
 
@@ -496,17 +495,16 @@ static void libblock_remap_data(
   };
 
   const bool include_ui = (remap_flags & ID_REMAP_FORCE_UI_POINTERS) != 0;
-  const int foreach_id_flags = (((remap_flags & ID_REMAP_FORCE_INTERNAL_RUNTIME_POINTERS) != 0 ?
-                                     IDWALK_DO_INTERNAL_RUNTIME_POINTERS :
-                                     IDWALK_NOP) |
-                                (include_ui ? IDWALK_INCLUDE_UI : IDWALK_NOP) |
+  const LibraryForeachIDFlag foreach_id_flags =
+      (((remap_flags & ID_REMAP_FORCE_INTERNAL_RUNTIME_POINTERS) != 0 ?
+            IDWALK_DO_INTERNAL_RUNTIME_POINTERS :
+            IDWALK_NOP) |
+       (include_ui ? IDWALK_INCLUDE_UI : IDWALK_NOP) |
 
-                                ((remap_flags & ID_REMAP_NO_ORIG_POINTERS_ACCESS) != 0 ?
-                                     IDWALK_NO_ORIG_POINTERS_ACCESS :
-                                     IDWALK_NOP) |
-                                ((remap_flags & ID_REMAP_DO_LIBRARY_POINTERS) != 0 ?
-                                     IDWALK_DO_LIBRARY_POINTER :
-                                     IDWALK_NOP));
+       ((remap_flags & ID_REMAP_NO_ORIG_POINTERS_ACCESS) != 0 ? IDWALK_NO_ORIG_POINTERS_ACCESS :
+                                                                IDWALK_NOP) |
+       ((remap_flags & ID_REMAP_DO_LIBRARY_POINTERS) != 0 ? IDWALK_DO_LIBRARY_POINTER :
+                                                            IDWALK_NOP));
 
   id_remapper.iter(libblock_remap_reset_remapping_status_fn);
 
@@ -881,7 +879,7 @@ static void libblock_relink_to_newid_prepare_data(Main *bmain,
                                                   RelinkToNewIDData *relink_data);
 static int id_relink_to_newid_looper(LibraryIDLinkCallbackData *cb_data)
 {
-  const int cb_flag = cb_data->cb_flag;
+  const LibraryForeachIDCallbackFlag cb_flag = cb_data->cb_flag;
   /* NOTE: For now, support remapping `IDWALK_CB_EMBEDDED_NON_OWNING` pointers. */
   if (cb_flag & (IDWALK_CB_EMBEDDED | IDWALK_CB_OVERRIDE_LIBRARY_REFERENCE)) {
     return IDWALK_RET_NOP;
@@ -915,7 +913,7 @@ static void libblock_relink_to_newid_prepare_data(Main *bmain,
 
   id->tag &= ~ID_TAG_NEW;
   relink_data->ids.append(id);
-  BKE_library_foreach_ID_link(bmain, id, id_relink_to_newid_looper, relink_data, 0);
+  BKE_library_foreach_ID_link(bmain, id, id_relink_to_newid_looper, relink_data, IDWALK_NOP);
 }
 
 void BKE_libblock_relink_to_newid(Main *bmain, ID *id, const int remap_flag)

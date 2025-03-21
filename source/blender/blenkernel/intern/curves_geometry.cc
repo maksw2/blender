@@ -6,7 +6,6 @@
  * \ingroup bke
  */
 
-#include <mutex>
 #include <utility>
 
 #include "MEM_guardedalloc.h"
@@ -15,10 +14,10 @@
 #include "BLI_bounds.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_length_parameterize.hh"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_rotation_legacy.hh"
 #include "BLI_memory_counter.hh"
-#include "BLI_multi_value_map.hh"
 #include "BLI_task.hh"
 
 #include "BLO_read_write.hh"
@@ -71,8 +70,7 @@ CurvesGeometry::CurvesGeometry(const int point_num, const int curve_num)
       "position", AttrDomain::Point, AttributeInitConstruct());
 
   if (curve_num > 0) {
-    this->curve_offsets = static_cast<int *>(
-        MEM_malloc_arrayN(this->curve_num + 1, sizeof(int), __func__));
+    this->curve_offsets = MEM_malloc_arrayN<int>(size_t(this->curve_num) + 1, __func__);
     this->runtime->curve_offsets_sharing_info = implicit_sharing::info_for_mem_free(
         this->curve_offsets);
 #ifndef NDEBUG
@@ -116,9 +114,11 @@ CurvesGeometry::CurvesGeometry(const CurvesGeometry &other)
                             other.runtime->nurbs_basis_cache,
                             other.runtime->evaluated_position_cache,
                             other.runtime->bounds_cache,
+                            other.runtime->bounds_with_radius_cache,
                             other.runtime->evaluated_length_cache,
                             other.runtime->evaluated_tangent_cache,
                             other.runtime->evaluated_normal_cache,
+                            other.runtime->max_material_index_cache,
                             {},
                             true});
 
@@ -180,8 +180,8 @@ CurvesGeometry &CurvesGeometry::operator=(CurvesGeometry &&other)
 
 CurvesGeometry::~CurvesGeometry()
 {
-  CustomData_free(&this->point_data, this->point_num);
-  CustomData_free(&this->curve_data, this->curve_num);
+  CustomData_free(&this->point_data);
+  CustomData_free(&this->curve_data);
   BLI_freelistN(&this->vertex_group_names);
   if (this->runtime) {
     implicit_sharing::free_shared_data(&this->curve_offsets,
@@ -357,6 +357,15 @@ Span<float3> CurvesGeometry::positions() const
 MutableSpan<float3> CurvesGeometry::positions_for_write()
 {
   return get_mutable_attribute<float3>(*this, AttrDomain::Point, ATTR_POSITION);
+}
+
+VArray<float> CurvesGeometry::radius() const
+{
+  return get_varray_attribute<float>(*this, AttrDomain::Point, ATTR_RADIUS, 0.01f);
+}
+MutableSpan<float> CurvesGeometry::radius_for_write()
+{
+  return get_mutable_attribute<float>(*this, AttrDomain::Point, ATTR_RADIUS, 0.01f);
 }
 
 Span<int> CurvesGeometry::offsets() const
@@ -1069,19 +1078,28 @@ void CurvesGeometry::tag_positions_changed()
   this->runtime->evaluated_normal_cache.tag_dirty();
   this->runtime->evaluated_length_cache.tag_dirty();
   this->runtime->bounds_cache.tag_dirty();
+  this->runtime->bounds_with_radius_cache.tag_dirty();
 }
 void CurvesGeometry::tag_topology_changed()
 {
   this->tag_positions_changed();
   this->runtime->evaluated_offsets_cache.tag_dirty();
   this->runtime->nurbs_basis_cache.tag_dirty();
+  this->runtime->max_material_index_cache.tag_dirty();
   this->runtime->check_type_counts = true;
 }
 void CurvesGeometry::tag_normals_changed()
 {
   this->runtime->evaluated_normal_cache.tag_dirty();
 }
-void CurvesGeometry::tag_radii_changed() {}
+void CurvesGeometry::tag_radii_changed()
+{
+  this->runtime->bounds_with_radius_cache.tag_dirty();
+}
+void CurvesGeometry::tag_material_index_changed()
+{
+  this->runtime->max_material_index_cache.tag_dirty();
+}
 
 static void translate_positions(MutableSpan<float3> positions, const float3 &translation)
 {
@@ -1187,14 +1205,48 @@ void CurvesGeometry::transform(const float4x4 &matrix)
   this->tag_positions_changed();
 }
 
-std::optional<Bounds<float3>> CurvesGeometry::bounds_min_max() const
+std::optional<Bounds<float3>> CurvesGeometry::bounds_min_max(const bool use_radius) const
 {
   if (this->is_empty()) {
     return std::nullopt;
   }
-  this->runtime->bounds_cache.ensure(
-      [&](Bounds<float3> &r_bounds) { r_bounds = *bounds::min_max(this->evaluated_positions()); });
-  return this->runtime->bounds_cache.data();
+  if (use_radius) {
+    this->runtime->bounds_with_radius_cache.ensure([&](Bounds<float3> &r_bounds) {
+      const VArray<float> radius = this->radius();
+      if (const std::optional radius_single = radius.get_if_single()) {
+        r_bounds = *this->bounds_min_max(false);
+        r_bounds.pad(*radius_single);
+        return;
+      }
+      const Span radius_span = radius.get_internal_span();
+      if (this->is_single_type(CURVE_TYPE_POLY)) {
+        r_bounds = *bounds::min_max_with_radii(this->positions(), radius_span);
+        return;
+      }
+      Array<float> radii_eval(this->evaluated_points_num());
+      this->ensure_can_interpolate_to_evaluated();
+      this->interpolate_to_evaluated(radius_span, radii_eval.as_mutable_span());
+      r_bounds = *bounds::min_max_with_radii(this->evaluated_positions(), radii_eval.as_span());
+    });
+  }
+  else {
+    this->runtime->bounds_cache.ensure([&](Bounds<float3> &r_bounds) {
+      r_bounds = *bounds::min_max(this->evaluated_positions());
+    });
+  }
+  return use_radius ? this->runtime->bounds_with_radius_cache.data() :
+                      this->runtime->bounds_cache.data();
+}
+
+std::optional<int> CurvesGeometry::material_index_max() const
+{
+  this->runtime->max_material_index_cache.ensure([&](std::optional<int> &r_max_material_index) {
+    r_max_material_index = blender::bounds::max<int>(
+        this->attributes()
+            .lookup_or_default<int>("material_index", blender::bke::AttrDomain::Curve, 0)
+            .varray);
+  });
+  return this->runtime->max_material_index_cache.data();
 }
 
 void CurvesGeometry::count_memory(MemoryCounter &memory) const
@@ -1434,7 +1486,7 @@ CurvesGeometry curves_new_no_attributes(int point_num, int curve_num)
 {
   CurvesGeometry curves(0, curve_num);
   curves.point_num = point_num;
-  CustomData_free_layer_named(&curves.point_data, "position", 0);
+  CustomData_free_layer_named(&curves.point_data, "position");
   return curves;
 }
 

@@ -2,11 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_listbase.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_virtual_array.hh"
 
 #include "BKE_attribute.hh"
-#include "BKE_compute_contexts.hh"
 #include "BKE_context.hh"
 #include "BKE_curves.hh"
 #include "BKE_editmesh.hh"
@@ -20,23 +20,18 @@
 #include "BKE_mesh.hh"
 #include "BKE_mesh_wrapper.hh"
 #include "BKE_modifier.hh"
-#include "BKE_node_socket_value.hh"
 #include "BKE_object_types.hh"
 #include "BKE_volume.hh"
 #include "BKE_volume_grid.hh"
 
-#include "DNA_ID.h"
 #include "DNA_pointcloud_types.h"
 #include "DNA_space_types.h"
-#include "DNA_userdef_types.h"
 
 #include "DEG_depsgraph_query.hh"
 
 #include "ED_curves.hh"
 #include "ED_outliner.hh"
-#include "ED_spreadsheet.hh"
 
-#include "NOD_geometry_nodes_lazy_function.hh"
 #include "NOD_geometry_nodes_log.hh"
 
 #include "BLT_translation.hh"
@@ -80,17 +75,30 @@ static void add_mesh_debug_column_names(
     const bke::AttrDomain domain,
     FunctionRef<void(const SpreadsheetColumnID &, bool is_extra)> fn)
 {
+  const bke::AttributeAccessor attributes = mesh.attributes();
+  auto add_attribute = [&](const StringRefNull name) {
+    if (const std::optional<bke::AttributeMetaData> meta_data = attributes.lookup_meta_data(name))
+    {
+      if (meta_data->domain == domain) {
+        fn({(char *)name.c_str()}, false);
+      }
+    }
+  };
+
   switch (domain) {
     case bke::AttrDomain::Point:
       if (CustomData_has_layer(&mesh.vert_data, CD_ORIGINDEX)) {
         fn({(char *)"Original Index"}, false);
       }
+      add_attribute(".sculpt_mask");
+      add_attribute(".hide_vert");
       break;
     case bke::AttrDomain::Edge:
       if (CustomData_has_layer(&mesh.edge_data, CD_ORIGINDEX)) {
         fn({(char *)"Original Index"}, false);
       }
       fn({(char *)"Vertices"}, false);
+      add_attribute(".hide_edge");
       break;
     case bke::AttrDomain::Face:
       if (CustomData_has_layer(&mesh.face_data, CD_ORIGINDEX)) {
@@ -98,6 +106,8 @@ static void add_mesh_debug_column_names(
       }
       fn({(char *)"Corner Start"}, false);
       fn({(char *)"Corner Size"}, false);
+      add_attribute(".sculpt_face_set");
+      add_attribute(".hide_poly");
       break;
     case bke::AttrDomain::Corner:
       fn({(char *)"Vertex"}, false);
@@ -522,7 +532,7 @@ IndexMask GeometryDataSource::apply_selection_filter(IndexMaskMemory &memory) co
       BLI_assert(object_orig_->type == OB_POINTCLOUD);
       const bke::AttributeAccessor attributes = *component_->attributes();
       const VArray<bool> selection = *attributes.lookup_or_default(
-          ".selection", bke::AttrDomain::Point, false);
+          ".selection", bke::AttrDomain::Point, true);
       return IndexMask::from_bools(selection, memory);
     }
     default:
@@ -682,16 +692,7 @@ bke::GeometrySet spreadsheet_get_display_geometry_set(const SpaceSpreadsheet *ss
   }
   else {
     if (BLI_listbase_is_single(&sspreadsheet->viewer_path.path)) {
-      if (const bke::GeometrySet *geometry_eval = object_eval->runtime->geometry_set_eval) {
-        geometry_set = *geometry_eval;
-      }
-
-      if (object_eval->mode == OB_MODE_EDIT && object_eval->type == OB_MESH) {
-        if (Mesh *mesh = BKE_modifier_get_evaluated_mesh_from_evaluated_object(object_eval)) {
-          BKE_mesh_wrapper_ensure_mdata(mesh);
-          geometry_set.replace_mesh(mesh, bke::GeometryOwnershipType::ReadOnly);
-        }
-      }
+      geometry_set = bke::object_get_evaluated_geometry_set(*object_eval);
     }
     else {
       if (const ViewerNodeLog *viewer_log =

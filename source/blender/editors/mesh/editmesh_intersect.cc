@@ -6,8 +6,6 @@
  * \ingroup edmesh
  */
 
-#include "MEM_guardedalloc.h"
-
 #include "DNA_object_types.h"
 
 #include "BLI_buffer.h"
@@ -136,7 +134,7 @@ enum {
   ISECT_SOLVER_EXACT = 1,
 };
 
-static int edbm_intersect_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus edbm_intersect_exec(bContext *C, wmOperator *op)
 {
   const int mode = RNA_enum_get(op->ptr, "mode");
   int (*test_fn)(BMFace *, void *);
@@ -251,18 +249,18 @@ static void edbm_intersect_ui(bContext * /*C*/, wmOperator *op)
   uiLayoutSetPropSep(layout, true);
   uiLayoutSetPropDecorate(layout, false);
   row = uiLayoutRow(layout, false);
-  uiItemR(row, op->ptr, "mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(row, op->ptr, "mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
   uiItemS(layout);
   row = uiLayoutRow(layout, false);
-  uiItemR(row, op->ptr, "separate_mode", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(row, op->ptr, "separate_mode", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
   uiItemS(layout);
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, op->ptr, "solver", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(row, op->ptr, "solver", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
   uiItemS(layout);
 
   if (!use_exact) {
-    uiItemR(layout, op->ptr, "threshold", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, op->ptr, "threshold", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 }
 
@@ -331,7 +329,7 @@ void MESH_OT_intersect(wmOperatorType *ot)
  * however from a user perspective they are quite different, so expose as different tools.
  * \{ */
 
-static int edbm_intersect_boolean_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus edbm_intersect_boolean_exec(bContext *C, wmOperator *op)
 {
   const int boolean_operation = RNA_enum_get(op->ptr, "operation");
   bool use_swap = RNA_boolean_get(op->ptr, "use_swap");
@@ -404,17 +402,17 @@ static void edbm_intersect_boolean_ui(bContext * /*C*/, wmOperator *op)
   uiLayoutSetPropDecorate(layout, false);
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, op->ptr, "operation", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(row, op->ptr, "operation", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
   uiItemS(layout);
 
   row = uiLayoutRow(layout, false);
-  uiItemR(row, op->ptr, "solver", UI_ITEM_R_EXPAND, nullptr, ICON_NONE);
+  uiItemR(row, op->ptr, "solver", UI_ITEM_R_EXPAND, std::nullopt, ICON_NONE);
   uiItemS(layout);
 
-  uiItemR(layout, op->ptr, "use_swap", UI_ITEM_NONE, nullptr, ICON_NONE);
-  uiItemR(layout, op->ptr, "use_self", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, op->ptr, "use_swap", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+  uiItemR(layout, op->ptr, "use_self", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   if (!use_exact) {
-    uiItemR(layout, op->ptr, "threshold", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, op->ptr, "threshold", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 }
 
@@ -788,7 +786,7 @@ static BMEdge *bm_face_split_edge_find(BMEdge *e_a,
 
 #endif /* USE_NET_ISLAND_CONNECT */
 
-static int edbm_face_split_by_edges_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus edbm_face_split_by_edges_exec(bContext *C, wmOperator * /*op*/)
 {
   const char hflag = BM_ELEM_TAG;
 

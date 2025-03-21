@@ -61,6 +61,7 @@
 
 #define DNA_DEPRECATED_ALLOW
 
+#include <float.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,11 +70,12 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_endian_switch.h"
+#include "BLI_math_base.h"
 #include "BLI_math_rotation.h"
-#include "BLI_memarena.h"
 #include "BLI_utildefines.h"
 
 #include "IMB_imbuf_enums.h"
+#include "movie/MOV_enums.hh"
 
 #include "DNA_defaults.h"
 

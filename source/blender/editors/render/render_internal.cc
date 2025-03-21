@@ -6,7 +6,6 @@
  * \ingroup edrend
  */
 
-#include <cmath>
 #include <cstddef>
 #include <cstring>
 
@@ -16,7 +15,6 @@
 #include "BLI_rect.h"
 #include "BLI_string.h"
 #include "BLI_string_utils.hh"
-#include "BLI_threads.h"
 #include "BLI_time.h"
 #include "BLI_timecode.h"
 #include "BLI_utildefines.h"
@@ -71,15 +69,10 @@
 /* Render Callbacks */
 static bool render_break(void *rjv);
 
-struct RenderJob {
+struct RenderJob : public RenderJobBase {
   Main *main;
-  Scene *scene;
+  ViewLayer *view_layer;
   ViewLayer *single_layer;
-  Scene *current_scene;
-  /* TODO(sergey): Should not be needed once engine will have its own
-   * depsgraph and copy-on-write will be implemented.
-   */
-  Depsgraph *depsgraph;
   Render *re;
   Object *camera_override;
   bool v3d_override;
@@ -302,7 +295,7 @@ static void screen_render_single_layer_set(
 }
 
 /* executes blocking render */
-static int screen_render_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus screen_render_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   RenderEngineType *re_type = RE_engines_find(scene->r.engine);
@@ -345,7 +338,7 @@ static int screen_render_exec(bContext *C, wmOperator *op)
    * otherwise, invalidated cache entries can make their way into
    * the output rendering. We can't put that into RE_RenderFrame,
    * since sequence rendering can call that recursively... (peter) */
-  SEQ_cache_cleanup(scene);
+  blender::seq::cache_cleanup(scene);
 
   RE_SetReports(re, op->reports);
 
@@ -401,7 +394,7 @@ static void render_freejob(void *rjv)
   RenderJob *rj = static_cast<RenderJob *>(rjv);
 
   BKE_color_managed_view_settings_free(&rj->view_settings);
-  MEM_freeN(rj);
+  MEM_delete(rj);
 }
 
 static void make_renderinfo_string(const RenderStats *rs,
@@ -782,11 +775,19 @@ static void render_endjob(void *rjv)
     BKE_main_free(rj->main);
   }
 
-  /* else the frame will not update for the original value */
+  /* Update depsgraph for returning to the original frame before animation render job. */
   if (rj->anim && !(rj->scene->r.scemode & R_NO_FRAME_UPDATE)) {
-    /* possible this fails of loading new file while rendering */
+    /* Possible this fails when loading new file while rendering. */
     if (G_MAIN->wm.first) {
-      ED_update_for_newframe(G_MAIN, rj->depsgraph);
+      /* Check view layer was not deleted during render. Technically another view layer
+       * may get allocated with the same pointer, but worst case it will cause an
+       * unnecessary update. */
+      if (BLI_findindex(&rj->scene->view_layers, rj->view_layer) != -1) {
+        Depsgraph *depsgraph = BKE_scene_get_depsgraph(rj->scene, rj->view_layer);
+        if (depsgraph) {
+          ED_update_for_newframe(G_MAIN, depsgraph);
+        }
+      }
     }
   }
 
@@ -798,7 +799,7 @@ static void render_endjob(void *rjv)
 
   if (rj->single_layer) {
     BKE_ntree_update_tag_id_changed(rj->main, &rj->scene->id);
-    BKE_ntree_update_main(rj->main, nullptr);
+    BKE_ntree_update(*rj->main);
     WM_main_add_notifier(NC_NODE | NA_EDITED, rj->scene);
   }
 
@@ -889,7 +890,7 @@ static void render_drawlock(void *rjv, bool lock)
 }
 
 /** Catch escape key to cancel. */
-static int screen_render_modal(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus screen_render_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Scene *scene = (Scene *)op->customdata;
 
@@ -899,11 +900,7 @@ static int screen_render_modal(bContext *C, wmOperator *op, const wmEvent *event
   }
 
   /* running render */
-  switch (event->type) {
-    case EVT_ESCKEY:
-      return OPERATOR_RUNNING_MODAL;
-  }
-  return OPERATOR_PASS_THROUGH;
+  return (event->type == EVT_ESCKEY) ? OPERATOR_RUNNING_MODAL : OPERATOR_PASS_THROUGH;
 }
 
 static void screen_render_cancel(bContext *C, wmOperator *op)
@@ -961,7 +958,7 @@ static void clean_viewport_memory(Main *bmain, Scene *scene)
 }
 
 /* using context, starts job */
-static int screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   /* new render clears all callbacks */
   Main *bmain = CTX_data_main(C);
@@ -1006,7 +1003,9 @@ static int screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *even
 
   /* Reports are done inside check function, and it will return false if there are other strips to
    * render. */
-  if ((scene->r.scemode & R_DOSEQ) && SEQ_relations_check_scene_recursion(scene, op->reports)) {
+  if ((scene->r.scemode & R_DOSEQ) &&
+      blender::seq::relations_check_scene_recursion(scene, op->reports))
+  {
     return OPERATOR_CANCELLED;
   }
 
@@ -1025,7 +1024,7 @@ static int screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *even
   ED_editors_flush_edits_ex(bmain, true, false);
 
   /* Cleanup VSE cache, since it is not guaranteed that stored images are invalid. */
-  SEQ_cache_cleanup(scene);
+  blender::seq::cache_cleanup(scene);
 
   /* store spare
    * get view3d layer, local layer, make this nice api call to render
@@ -1035,16 +1034,12 @@ static int screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *even
   area = render_view_open(C, event->xy[0], event->xy[1], op->reports);
 
   /* job custom data */
-  rj = MEM_cnew<RenderJob>("render job");
+  rj = MEM_new<RenderJob>("render job");
   rj->main = bmain;
   rj->scene = scene;
   rj->current_scene = rj->scene;
+  rj->view_layer = CTX_data_view_layer(C);
   rj->single_layer = single_layer;
-  /* TODO(sergey): Render engine should be using its own depsgraph.
-   *
-   * NOTE: Currently is only used by ED_update_for_newframe() at the end of the render, so no
-   * need to ensure evaluation here. */
-  rj->depsgraph = CTX_data_depsgraph_pointer(C);
   rj->camera_override = camera_override;
   rj->anim = is_animation;
   rj->write_still = is_write_still && !is_animation;
@@ -1206,7 +1201,7 @@ void RENDER_OT_render(wmOperatorType *ot)
 Scene *ED_render_job_get_scene(const bContext *C)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
-  RenderJob *rj = (RenderJob *)WM_jobs_customdata_from_type(
+  RenderJobBase *rj = (RenderJobBase *)WM_jobs_customdata_from_type(
       wm, CTX_data_scene(C), WM_JOB_TYPE_RENDER);
 
   if (rj) {
@@ -1219,7 +1214,7 @@ Scene *ED_render_job_get_scene(const bContext *C)
 Scene *ED_render_job_get_current_scene(const bContext *C)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
-  RenderJob *rj = (RenderJob *)WM_jobs_customdata_from_type(
+  RenderJobBase *rj = (RenderJobBase *)WM_jobs_customdata_from_type(
       wm, CTX_data_scene(C), WM_JOB_TYPE_RENDER);
   if (rj) {
     return rj->current_scene;
@@ -1229,7 +1224,7 @@ Scene *ED_render_job_get_current_scene(const bContext *C)
 
 /* Motion blur curve preset */
 
-static int render_shutter_curve_preset_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus render_shutter_curve_preset_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   CurveMapping *mblur_shutter_curve = &scene->r.mblur_shutter_curve;

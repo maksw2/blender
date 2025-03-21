@@ -9,14 +9,14 @@
 
 #pragma once
 
-#include "BLI_cpp_type.hh"
+#include <optional>
+
 #include "BLI_implicit_sharing.h"
 #include "BLI_memory_counter_fwd.hh"
 #include "BLI_set.hh"
 #include "BLI_span.hh"
 #include "BLI_string_ref.hh"
 #include "BLI_sys_types.h"
-#include "BLI_utildefines.h"
 #include "BLI_vector.hh"
 
 #include "BKE_volume_enums.hh"
@@ -43,7 +43,7 @@ struct MeshPairRemap;
 #define UV_PINNED_NAME "pn"
 
 /**
- * UV map related customdata offsets into BMesh attribute blocks. See #BM_uv_map_get_offsets.
+ * UV map related customdata offsets into BMesh attribute blocks. See #BM_uv_map_offsets_get.
  * Defined in #BKE_customdata.hh to avoid including bmesh.hh in many unrelated areas.
  * An offset of -1 means that the corresponding layer does not exist.
  */
@@ -122,11 +122,6 @@ bool CustomData_has_interp(const CustomData *data);
  * A non bmesh version would have to check `layer->data`.
  */
 bool CustomData_bmesh_has_free(const CustomData *data);
-
-/**
- * Checks if any of the custom-data layers is referenced.
- */
-bool CustomData_has_referenced(const CustomData *data);
 
 /**
  * Copies the "value" (e.g. `mloopuv` UV or `mloopcol` colors) from one block to
@@ -239,12 +234,7 @@ void CustomData_reset(CustomData *data);
 /**
  * Frees data associated with a CustomData object (doesn't free the object itself, though).
  */
-void CustomData_free(CustomData *data, int totelem);
-
-/**
- * Same as #CustomData_free, but only frees layers which matches the given mask.
- */
-void CustomData_free_typemask(CustomData *data, int totelem, eCustomDataMask mask);
+void CustomData_free(CustomData *data);
 
 /**
  * Adds a layer of the given type to the #CustomData object. The new layer is initialized based on
@@ -288,8 +278,8 @@ const void *CustomData_add_layer_named_with_data(CustomData *data,
  *
  * In edit-mode, use #EDBM_data_layer_free instead of this function.
  */
-bool CustomData_free_layer(CustomData *data, eCustomDataType type, int totelem, int index);
-bool CustomData_free_layer_named(CustomData *data, blender::StringRef name, const int totelem);
+bool CustomData_free_layer(CustomData *data, eCustomDataType type, int index);
+bool CustomData_free_layer_named(CustomData *data, blender::StringRef name);
 
 /**
  * Frees the layer index with the give type.
@@ -297,12 +287,12 @@ bool CustomData_free_layer_named(CustomData *data, blender::StringRef name, cons
  *
  * In edit-mode, use #EDBM_data_layer_free instead of this function.
  */
-bool CustomData_free_layer_active(CustomData *data, eCustomDataType type, int totelem);
+bool CustomData_free_layer_active(CustomData *data, eCustomDataType type);
 
 /**
  * Same as #CustomData_free_layer_active, but free all layers with type.
  */
-void CustomData_free_layers(CustomData *data, eCustomDataType type, int totelem);
+void CustomData_free_layers(CustomData *data, eCustomDataType type);
 
 /**
  * Returns true if a layer with the specified type exists.
@@ -329,6 +319,13 @@ void CustomData_set_only_copy(const CustomData *data, eCustomDataMask mask);
  * Copies data from one CustomData object to another
  * objects need not be compatible, each source layer is copied to the
  * first dest layer of correct type (if there is none, the layer is skipped).
+ *
+ * NOTE: It's expected that the destination layers are mutable
+ * (#CustomData_ensure_layers_are_mutable). These copy-functions could ensure that internally, but
+ * that would cause additional overhead when copying few elements at a time. It would also be
+ * necessary to pass the total size of the destination layers as parameter if to make them mutable
+ * though. In most cases, these functions are used right after creating a new geometry, in which
+ * case there are no shared layers anyway.
  */
 void CustomData_copy_data(
     const CustomData *source, CustomData *dest, int source_index, int dest_index, int count);
@@ -578,13 +575,11 @@ void CustomData_set_layer_stencil(CustomData *data, eCustomDataType type, int n)
 void CustomData_set_layer_active_index(CustomData *data, eCustomDataType type, int n);
 void CustomData_set_layer_render_index(CustomData *data, eCustomDataType type, int n);
 void CustomData_set_layer_clone_index(CustomData *data, eCustomDataType type, int n);
-void CustomData_set_layer_stencil_index(CustomData *data, eCustomDataType type, int n);
 
 /**
  * Adds flag to the layer flags.
  */
 void CustomData_set_layer_flag(CustomData *data, eCustomDataType type, int flag);
-void CustomData_clear_layer_flag(CustomData *data, eCustomDataType type, int flag);
 
 void CustomData_bmesh_set_default(CustomData *data, void **block);
 void CustomData_bmesh_free_block(CustomData *data, void **block);
@@ -594,12 +589,6 @@ void CustomData_bmesh_alloc_block(CustomData *data, void **block);
  * Same as #CustomData_bmesh_free_block but zero the memory rather than freeing.
  */
 void CustomData_bmesh_free_block_data(CustomData *data, void *block);
-/**
- * A selective version of #CustomData_bmesh_free_block_data.
- */
-void CustomData_bmesh_free_block_data_exclude_by_type(CustomData *data,
-                                                      void *block,
-                                                      eCustomDataMask mask_exclude);
 
 /**
  * Query info over types.
@@ -679,33 +668,6 @@ using cd_datatransfer_interp = void (*)(const CustomDataTransferLayerMap *laymap
                                         const float *weights,
                                         int count,
                                         float mix_factor);
-
-/**
- * Fake CD_LAYERS (those are actually 'real' data stored directly into elements' structs,
- * or otherwise not (directly) accessible to usual CDLayer system). */
-enum {
-  CD_FAKE = 1 << 8,
-
-  /* Vertices. */
-  CD_FAKE_MDEFORMVERT = CD_FAKE | CD_MDEFORMVERT, /* *sigh* due to how vgroups are stored :(. */
-  CD_FAKE_SHAPEKEY = CD_FAKE |
-                     CD_SHAPEKEY, /* Not available as real CD layer in non-bmesh context. */
-
-  /* Edges. */
-  CD_FAKE_SEAM = CD_FAKE | 100, /* UV seam flag for edges. */
-
-  /* Multiple types of mesh elements... */
-  CD_FAKE_UV =
-      CD_FAKE |
-      CD_PROP_FLOAT2, /* UV flag, because we handle both loop's UVs and face's textures. */
-
-  CD_FAKE_LNOR = CD_FAKE | 500,
-
-  CD_FAKE_SHARP = CD_FAKE | 200, /* Sharp flag for edges, smooth flag for faces. */
-
-  CD_FAKE_BWEIGHT = CD_FAKE | 300,
-  CD_FAKE_CREASE = CD_FAKE | 400,
-};
 
 enum {
   ME_VERT = 1 << 0,

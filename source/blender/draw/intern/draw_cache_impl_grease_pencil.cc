@@ -10,11 +10,11 @@
 
 #include "BKE_attribute.hh"
 #include "BKE_curves.hh"
-#include "BKE_deform.hh"
 #include "BKE_grease_pencil.h"
 #include "BKE_grease_pencil.hh"
 
 #include "BLI_array_utils.hh"
+#include "BLI_listbase.h"
 #include "BLI_offset_indices.hh"
 #include "BLI_task.hh"
 
@@ -28,6 +28,7 @@
 
 #include "GPU_batch.hh"
 
+#include "draw_cache.hh"
 #include "draw_cache_impl.hh"
 
 #include "../engines/gpencil/gpencil_defines.h"
@@ -83,14 +84,15 @@ struct GreasePencilStrokeVert {
   float uv_fill[2], u_stroke, opacity;
 };
 
-static GPUVertFormat *grease_pencil_stroke_format()
+static const GPUVertFormat *grease_pencil_stroke_format()
 {
-  static GPUVertFormat format = {0};
-  if (format.attr_len == 0) {
+  static const GPUVertFormat format = []() {
+    GPUVertFormat format{};
     GPU_vertformat_attr_add(&format, "pos", GPU_COMP_F32, 4, GPU_FETCH_FLOAT);
     GPU_vertformat_attr_add(&format, "ma", GPU_COMP_I32, 4, GPU_FETCH_INT);
     GPU_vertformat_attr_add(&format, "uv", GPU_COMP_F32, 4, GPU_FETCH_FLOAT);
-  }
+    return format;
+  }();
   return &format;
 }
 
@@ -100,13 +102,14 @@ struct GreasePencilColorVert {
   float fcol[4]; /* Fill color */
 };
 
-static GPUVertFormat *grease_pencil_color_format()
+static const GPUVertFormat *grease_pencil_color_format()
 {
-  static GPUVertFormat format = {0};
-  if (format.attr_len == 0) {
+  static const GPUVertFormat format = []() {
+    GPUVertFormat format{};
     GPU_vertformat_attr_add(&format, "col", GPU_COMP_F32, 4, GPU_FETCH_FLOAT);
     GPU_vertformat_attr_add(&format, "fcol", GPU_COMP_F32, 4, GPU_FETCH_FLOAT);
-  }
+    return format;
+  }();
   return &format;
 }
 
@@ -264,15 +267,11 @@ static void grease_pencil_weight_batch_ensure(Object &object,
 
   const Span<const Layer *> layers = grease_pencil.layers();
 
-  static GPUVertFormat format_points_pos = {0};
-  if (format_points_pos.attr_len == 0) {
-    GPU_vertformat_attr_add(&format_points_pos, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
-  }
+  static const GPUVertFormat format_points_pos = GPU_vertformat_from_attribute(
+      "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
 
-  static GPUVertFormat format_points_weight = {0};
-  if (format_points_weight.attr_len == 0) {
-    GPU_vertformat_attr_add(&format_points_weight, "selection", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
-  }
+  static const GPUVertFormat format_points_weight = GPU_vertformat_from_attribute(
+      "selection", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
 
   GPUUsageType vbo_flag = GPU_USAGE_STATIC | GPU_USAGE_FLAG_BUFFER_TEXTURE_ONLY;
   cache->edit_points_pos = GPU_vertbuf_create_with_format_ex(format_points_pos, vbo_flag);
@@ -322,13 +321,13 @@ static void grease_pencil_weight_batch_ensure(Object &object,
 
     drawing_start_offset += curves.points_num();
 
+    const int drawing_visible_points_num = offset_indices::sum_group_sizes(points_by_curve,
+                                                                           visible_strokes);
+
     /* Add one id for the restart after every curve. */
     total_line_ids_num += visible_strokes.size();
-    Array<int> size_per_editable_stroke(visible_strokes.size());
-    offset_indices::gather_group_sizes(points_by_curve, visible_strokes, size_per_editable_stroke);
     /* Add one id for every non-cyclic segment. */
-    total_line_ids_num += std::accumulate(
-        size_per_editable_stroke.begin(), size_per_editable_stroke.end(), 0);
+    total_line_ids_num += drawing_visible_points_num;
     /* Add one id for the last segment of every cyclic curve. */
     total_line_ids_num += array_utils::count_booleans(curves.cyclic(), visible_strokes);
 
@@ -337,23 +336,18 @@ static void grease_pencil_weight_batch_ensure(Object &object,
       continue;
     }
 
-    visible_strokes.foreach_index([&](const int curve_i) {
-      const IndexRange points = points_by_curve[curve_i];
-      visible_points_num += points.size();
-    });
+    visible_points_num += drawing_visible_points_num;
   }
 
-  GPUIndexBufBuilder elb;
-  GPU_indexbuf_init_ex(&elb,
-                       GPU_PRIM_LINE_STRIP,
-                       total_line_ids_num,
-                       GPU_vertbuf_get_vertex_len(cache->edit_points_pos));
+  GPUIndexBufBuilder lines_builder;
+  GPU_indexbuf_init_ex(&lines_builder, GPU_PRIM_LINE_STRIP, total_line_ids_num, total_points_num);
+  MutableSpan<uint> lines_data = GPU_indexbuf_get_data(&lines_builder);
+  int lines_ibo_index = 0;
 
-  GPUIndexBufBuilder epb;
-  GPU_indexbuf_init_ex(&epb,
-                       GPU_PRIM_POINTS,
-                       visible_points_num,
-                       GPU_vertbuf_get_vertex_len(cache->edit_points_pos));
+  GPUIndexBufBuilder points_builder;
+  GPU_indexbuf_init(&points_builder, GPU_PRIM_POINTS, visible_points_num, total_points_num);
+  MutableSpan<uint> points_data = GPU_indexbuf_get_data(&points_builder);
+  int points_ibo_index = 0;
 
   /* Fill point index buffer with data. */
   drawing_start_offset = 0;
@@ -371,15 +365,15 @@ static void grease_pencil_weight_batch_ensure(Object &object,
       const IndexRange points = points_by_curve[curve_i];
       const bool is_cyclic = cyclic[curve_i];
 
-      for (const int point_i : points) {
-        GPU_indexbuf_add_generic_vert(&elb, point_i + drawing_start_offset);
+      for (const int point : points) {
+        lines_data[lines_ibo_index++] = point + drawing_start_offset;
       }
 
       if (is_cyclic) {
-        GPU_indexbuf_add_generic_vert(&elb, points.first() + drawing_start_offset);
+        lines_data[lines_ibo_index++] = points.first() + drawing_start_offset;
       }
 
-      GPU_indexbuf_add_primitive_restart(&elb);
+      lines_data[lines_ibo_index++] = gpu::RESTART_INDEX;
     });
 
     /* Fill point indices. */
@@ -387,7 +381,7 @@ static void grease_pencil_weight_batch_ensure(Object &object,
       visible_strokes.foreach_index([&](const int curve_i) {
         const IndexRange points = points_by_curve[curve_i];
         for (const int point : points) {
-          GPU_indexbuf_add_generic_vert(&epb, point + drawing_start_offset);
+          points_data[points_ibo_index++] = point + drawing_start_offset;
         }
       });
     }
@@ -395,8 +389,12 @@ static void grease_pencil_weight_batch_ensure(Object &object,
     drawing_start_offset += curves.points_num();
   }
 
-  cache->edit_line_indices = GPU_indexbuf_build(&elb);
-  cache->edit_points_indices = GPU_indexbuf_build(&epb);
+  cache->edit_line_indices = GPU_indexbuf_calloc();
+  GPU_indexbuf_build_in_place_ex(
+      &lines_builder, 0, total_points_num, true, cache->edit_line_indices);
+  cache->edit_points_indices = GPU_indexbuf_calloc();
+  GPU_indexbuf_build_in_place_ex(
+      &points_builder, 0, total_points_num, false, cache->edit_points_indices);
 
   /* Create the batches. */
   cache->edit_points = GPU_batch_create(
@@ -454,18 +452,15 @@ static IndexMask grease_pencil_get_visible_nurbs_curves(Object &object,
     return IndexMask(0);
   }
 
-  const VArray<int8_t> types = curves.curve_types();
-
   const IndexMask selected_editable_strokes =
       ed::greasepencil::retrieve_editable_and_selected_strokes(
           object, drawing, layer_index, memory);
 
-  const IndexMask nurbs_curves = IndexMask::from_predicate(
-      curves.curves_range(), GrainSize(4096), memory, [&](const int64_t curve_i) {
+  const VArray<int8_t> types = curves.curve_types();
+  return IndexMask::from_predicate(
+      selected_editable_strokes, GrainSize(4096), memory, [&](const int64_t curve_i) {
         return types[curve_i] == CURVE_TYPE_NURBS;
       });
-
-  return IndexMask::from_intersection(selected_editable_strokes, nurbs_curves, memory);
 }
 
 static IndexMask grease_pencil_get_visible_non_nurbs_curves(
@@ -474,14 +469,15 @@ static IndexMask grease_pencil_get_visible_non_nurbs_curves(
   const bke::CurvesGeometry &curves = drawing.strokes();
   const IndexMask visible_strokes = ed::greasepencil::retrieve_visible_strokes(
       object, drawing, memory);
+  if (!curves.has_curve_with_type(CURVE_TYPE_NURBS)) {
+    return visible_strokes;
+  }
 
   const VArray<int8_t> types = curves.curve_types();
-  const IndexMask non_nurbs_curves = IndexMask::from_predicate(
-      curves.curves_range(), GrainSize(4096), memory, [&](const int64_t curve_i) {
-        return types[curve_i] != CURVE_TYPE_NURBS;
+  return IndexMask::from_predicate(
+      visible_strokes, GrainSize(4096), memory, [&](const int64_t curve) {
+        return types[curve] != CURVE_TYPE_NURBS;
       });
-
-  return IndexMask::from_intersection(visible_strokes, non_nurbs_curves, memory);
 }
 
 static void grease_pencil_cache_add_nurbs(Object &object,
@@ -534,8 +530,9 @@ static void grease_pencil_cache_add_nurbs(Object &object,
 static void index_buf_add_line_points(Object &object,
                                       const bke::greasepencil::Drawing &drawing,
                                       int /*layer_index*/,
-                                      GPUIndexBufBuilder *elb,
                                       IndexMaskMemory &memory,
+                                      MutableSpan<uint> lines_data,
+                                      int *r_drawing_line_index,
                                       int *r_drawing_line_start_offset)
 {
   const bke::CurvesGeometry &curves = drawing.strokes();
@@ -545,30 +542,35 @@ static void index_buf_add_line_points(Object &object,
   const IndexMask visible_strokes_for_lines = grease_pencil_get_visible_non_nurbs_curves(
       object, drawing, memory);
 
+  const int offset = *r_drawing_line_start_offset;
+  int line_index = *r_drawing_line_index;
+
   /* Fill line indices. */
   visible_strokes_for_lines.foreach_index([&](const int curve_i) {
     const IndexRange points = points_by_curve_eval[curve_i];
     const bool is_cyclic = cyclic[curve_i];
 
-    for (const int point_i : points) {
-      GPU_indexbuf_add_generic_vert(elb, point_i + (*r_drawing_line_start_offset));
+    for (const int point : points) {
+      lines_data[line_index++] = point + offset;
     }
 
     if (is_cyclic) {
-      GPU_indexbuf_add_generic_vert(elb, points.first() + (*r_drawing_line_start_offset));
+      lines_data[line_index++] = points.first() + offset;
     }
 
-    GPU_indexbuf_add_primitive_restart(elb);
+    lines_data[line_index++] = gpu::RESTART_INDEX;
   });
 
+  *r_drawing_line_index = line_index;
   *r_drawing_line_start_offset += curves.evaluated_points_num();
 }
 
 static void index_buf_add_nurbs_lines(Object &object,
                                       const bke::greasepencil::Drawing &drawing,
                                       int layer_index,
-                                      GPUIndexBufBuilder *elb,
                                       IndexMaskMemory &memory,
+                                      MutableSpan<uint> lines_data,
+                                      int *r_drawing_line_index,
                                       int *r_drawing_line_start_offset)
 {
   const bke::CurvesGeometry &curves = drawing.strokes();
@@ -579,25 +581,30 @@ static void index_buf_add_nurbs_lines(Object &object,
     return;
   }
 
+  int line_index = *r_drawing_line_index;
+
   /* Add all NURBS points. */
   nurbs_curves.foreach_index([&](const int curve_i) {
     const IndexRange points = points_by_curve[curve_i];
 
-    for (const int point_i : points.index_range()) {
-      GPU_indexbuf_add_generic_vert(elb, point_i + (*r_drawing_line_start_offset));
+    for (const int point : points.index_range()) {
+      lines_data[line_index++] = point + *r_drawing_line_start_offset;
     }
 
-    GPU_indexbuf_add_primitive_restart(elb);
+    lines_data[line_index++] = gpu::RESTART_INDEX;
 
     *r_drawing_line_start_offset += points.size();
   });
+
+  *r_drawing_line_index = line_index;
 }
 
 static void index_buf_add_bezier_lines(Object &object,
                                        const bke::greasepencil::Drawing &drawing,
                                        int layer_index,
-                                       GPUIndexBufBuilder *elb,
                                        IndexMaskMemory &memory,
+                                       MutableSpan<uint> lines_data,
+                                       int *r_drawing_line_index,
                                        int *r_drawing_line_start_offset)
 {
   const IndexMask bezier_points = ed::greasepencil::retrieve_visible_bezier_handle_points(
@@ -606,26 +613,28 @@ static void index_buf_add_bezier_lines(Object &object,
     return;
   }
 
+  const int offset = *r_drawing_line_start_offset;
+  int line_index = *r_drawing_line_index;
+
   /* Add all bezier points. */
   for (const int point : bezier_points.index_range()) {
-    GPU_indexbuf_add_generic_vert(
-        elb, point + bezier_points.size() * 0 + (*r_drawing_line_start_offset));
-    GPU_indexbuf_add_generic_vert(
-        elb, point + bezier_points.size() * 1 + (*r_drawing_line_start_offset));
-    GPU_indexbuf_add_generic_vert(
-        elb, point + bezier_points.size() * 2 + (*r_drawing_line_start_offset));
+    lines_data[line_index++] = point + bezier_points.size() * 0 + offset;
+    lines_data[line_index++] = point + bezier_points.size() * 1 + offset;
+    lines_data[line_index++] = point + bezier_points.size() * 2 + offset;
 
-    GPU_indexbuf_add_primitive_restart(elb);
+    lines_data[line_index++] = gpu::RESTART_INDEX;
   }
 
+  *r_drawing_line_index = line_index;
   *r_drawing_line_start_offset += bezier_points.size() * 3;
 }
 
 static void index_buf_add_points(Object &object,
                                  const bke::greasepencil::Drawing &drawing,
                                  int layer_index,
-                                 GPUIndexBufBuilder *epb,
                                  IndexMaskMemory &memory,
+                                 MutableSpan<uint> points_data,
+                                 int *r_drawing_point_index,
                                  int *r_drawing_start_offset)
 {
   const bke::CurvesGeometry &curves = drawing.strokes();
@@ -636,35 +645,43 @@ static void index_buf_add_points(Object &object,
       ed::greasepencil::retrieve_editable_and_selected_strokes(
           object, drawing, layer_index, memory);
 
+  const int offset = *r_drawing_start_offset;
+  int ibo_index = *r_drawing_point_index;
+
   selected_editable_strokes.foreach_index([&](const int curve_i) {
     const IndexRange points = points_by_curve[curve_i];
     for (const int point : points) {
-      GPU_indexbuf_add_generic_vert(epb, point + (*r_drawing_start_offset));
+      points_data[ibo_index++] = point + offset;
     }
   });
 
+  *r_drawing_point_index = ibo_index;
   *r_drawing_start_offset += curves.points_num();
 }
 
 static void index_buf_add_bezier_line_points(Object &object,
                                              const bke::greasepencil::Drawing &drawing,
                                              int layer_index,
-                                             GPUIndexBufBuilder *epb,
                                              IndexMaskMemory &memory,
+                                             MutableSpan<uint> points_data,
+                                             int *r_drawing_point_index,
                                              int *r_drawing_start_offset)
 {
   const IndexMask bezier_points = ed::greasepencil::retrieve_visible_bezier_handle_points(
       object, drawing, layer_index, memory);
-
   if (bezier_points.is_empty()) {
     return;
   }
 
+  const int offset = *r_drawing_start_offset;
+  int ibo_index = *r_drawing_point_index;
+
   /* Add all bezier points. */
   for (const int point : IndexRange(bezier_points.size() * 2)) {
-    GPU_indexbuf_add_generic_vert(epb, point + (*r_drawing_start_offset));
+    points_data[ibo_index++] = point + offset;
   }
 
+  *r_drawing_point_index = ibo_index;
   *r_drawing_start_offset += bezier_points.size() * 2;
 }
 
@@ -698,32 +715,20 @@ static void grease_pencil_edit_batch_ensure(Object &object,
 
   const Span<const Layer *> layers = grease_pencil.layers();
 
-  static GPUVertFormat format_edit_points_pos = {0};
-  if (format_edit_points_pos.attr_len == 0) {
-    GPU_vertformat_attr_add(&format_edit_points_pos, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
-  }
+  static const GPUVertFormat format_edit_points_pos = GPU_vertformat_from_attribute(
+      "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
 
-  static GPUVertFormat format_edit_line_pos = {0};
-  if (format_edit_line_pos.attr_len == 0) {
-    GPU_vertformat_attr_add(&format_edit_line_pos, "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
-  }
+  static const GPUVertFormat format_edit_line_pos = GPU_vertformat_from_attribute(
+      "pos", GPU_COMP_F32, 3, GPU_FETCH_FLOAT);
 
-  static GPUVertFormat format_edit_points_selection = {0};
-  if (format_edit_points_selection.attr_len == 0) {
-    GPU_vertformat_attr_add(
-        &format_edit_points_selection, "selection", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
-  }
+  static const GPUVertFormat format_edit_points_selection = GPU_vertformat_from_attribute(
+      "selection", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
 
-  static GPUVertFormat format_edit_points_vflag = {0};
-  if (format_edit_points_vflag.attr_len == 0) {
-    GPU_vertformat_attr_add(&format_edit_points_vflag, "vflag", GPU_COMP_U32, 1, GPU_FETCH_INT);
-  }
+  static const GPUVertFormat format_edit_points_vflag = GPU_vertformat_from_attribute(
+      "vflag", GPU_COMP_U32, 1, GPU_FETCH_INT);
 
-  static GPUVertFormat format_edit_line_selection = {0};
-  if (format_edit_line_selection.attr_len == 0) {
-    GPU_vertformat_attr_add(
-        &format_edit_line_selection, "selection", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
-  }
+  static const GPUVertFormat format_edit_line_selection = GPU_vertformat_from_attribute(
+      "selection", GPU_COMP_F32, 1, GPU_FETCH_FLOAT);
 
   GPUUsageType vbo_flag = GPU_USAGE_STATIC | GPU_USAGE_FLAG_BUFFER_TEXTURE_ONLY;
   cache->edit_points_pos = GPU_vertbuf_create_with_format_ex(format_edit_points_pos, vbo_flag);
@@ -862,12 +867,9 @@ static void grease_pencil_edit_batch_ensure(Object &object,
 
     /* Add one id for the restart after every curve. */
     total_line_ids_num += visible_strokes_for_lines.size();
-    Array<int> size_per_editable_stroke(visible_strokes_for_lines.size());
-    offset_indices::gather_group_sizes(
-        points_by_curve_eval, visible_strokes_for_lines, size_per_editable_stroke);
     /* Add one id for every non-cyclic segment. */
-    total_line_ids_num += std::accumulate(
-        size_per_editable_stroke.begin(), size_per_editable_stroke.end(), 0);
+    total_line_ids_num += offset_indices::sum_group_sizes(points_by_curve_eval,
+                                                          visible_strokes_for_lines);
     /* Add one id for the last segment of every cyclic curve. */
     total_line_ids_num += array_utils::count_booleans(curves.cyclic(), visible_strokes_for_lines);
 
@@ -881,13 +883,9 @@ static void grease_pencil_edit_batch_ensure(Object &object,
         ed::greasepencil::retrieve_editable_and_selected_strokes(
             object, info.drawing, info.layer_index, memory);
 
-    Array<int> size_per_selected_editable_stroke(selected_editable_strokes.size());
-    offset_indices::gather_group_sizes(
-        points_by_curve, selected_editable_strokes, size_per_selected_editable_stroke);
-
     /* Add one id for every point in a selected curve. */
-    visible_points_num += std::accumulate(
-        size_per_selected_editable_stroke.begin(), size_per_selected_editable_stroke.end(), 0);
+    visible_points_num += offset_indices::sum_group_sizes(points_by_curve,
+                                                          selected_editable_strokes);
 
     const VArray<float> selected_point = *curves.attributes().lookup_or_default<float>(
         ".selection", bke::AttrDomain::Point, true);
@@ -985,17 +983,16 @@ static void grease_pencil_edit_batch_ensure(Object &object,
     total_line_ids_num += bezier_points.size();
   }
 
-  GPUIndexBufBuilder elb;
-  GPU_indexbuf_init_ex(&elb,
-                       GPU_PRIM_LINE_STRIP,
-                       total_line_ids_num,
-                       GPU_vertbuf_get_vertex_len(cache->edit_line_pos));
+  GPUIndexBufBuilder lines_builder;
+  GPU_indexbuf_init_ex(
+      &lines_builder, GPU_PRIM_LINE_STRIP, total_line_ids_num, total_line_points_num);
+  MutableSpan<uint> lines_data = GPU_indexbuf_get_data(&lines_builder);
+  int lines_ibo_index = 0;
 
-  GPUIndexBufBuilder epb;
-  GPU_indexbuf_init_ex(&epb,
-                       GPU_PRIM_POINTS,
-                       visible_points_num,
-                       GPU_vertbuf_get_vertex_len(cache->edit_points_pos));
+  GPUIndexBufBuilder points_builder;
+  GPU_indexbuf_init(&points_builder, GPU_PRIM_POINTS, visible_points_num, total_points_num);
+  MutableSpan<uint> points_data = GPU_indexbuf_get_data(&points_builder);
+  int points_ibo_index = 0;
 
   /* Fill line index and point index buffers with data. */
   drawing_start_offset = 0;
@@ -1004,23 +1001,52 @@ static void grease_pencil_edit_batch_ensure(Object &object,
     const Layer *layer = layers[info.layer_index];
     IndexMaskMemory memory;
 
-    index_buf_add_line_points(
-        object, info.drawing, info.layer_index, &elb, memory, &drawing_line_start_offset);
+    index_buf_add_line_points(object,
+                              info.drawing,
+                              info.layer_index,
+                              memory,
+                              lines_data,
+                              &lines_ibo_index,
+                              &drawing_line_start_offset);
 
     if (!layer->is_locked()) {
-      index_buf_add_nurbs_lines(
-          object, info.drawing, info.layer_index, &elb, memory, &drawing_line_start_offset);
-      index_buf_add_bezier_lines(
-          object, info.drawing, info.layer_index, &elb, memory, &drawing_line_start_offset);
-      index_buf_add_points(
-          object, info.drawing, info.layer_index, &epb, memory, &drawing_start_offset);
-      index_buf_add_bezier_line_points(
-          object, info.drawing, info.layer_index, &epb, memory, &drawing_start_offset);
+      index_buf_add_nurbs_lines(object,
+                                info.drawing,
+                                info.layer_index,
+                                memory,
+                                lines_data,
+                                &lines_ibo_index,
+                                &drawing_line_start_offset);
+      index_buf_add_bezier_lines(object,
+                                 info.drawing,
+                                 info.layer_index,
+                                 memory,
+                                 lines_data,
+                                 &lines_ibo_index,
+                                 &drawing_line_start_offset);
+      index_buf_add_points(object,
+                           info.drawing,
+                           info.layer_index,
+                           memory,
+                           points_data,
+                           &points_ibo_index,
+                           &drawing_start_offset);
+      index_buf_add_bezier_line_points(object,
+                                       info.drawing,
+                                       info.layer_index,
+                                       memory,
+                                       points_data,
+                                       &points_ibo_index,
+                                       &drawing_start_offset);
     }
   }
 
-  cache->edit_line_indices = GPU_indexbuf_build(&elb);
-  cache->edit_points_indices = GPU_indexbuf_build(&epb);
+  cache->edit_line_indices = GPU_indexbuf_calloc();
+  GPU_indexbuf_build_in_place_ex(
+      &lines_builder, 0, total_points_num, true, cache->edit_line_indices);
+  cache->edit_points_indices = GPU_indexbuf_calloc();
+  GPU_indexbuf_build_in_place_ex(
+      &points_builder, 0, total_points_num, false, cache->edit_points_indices);
 
   /* Create the batches */
   cache->edit_points = GPU_batch_create(
@@ -1137,8 +1163,8 @@ static void grease_pencil_geom_batch_ensure(Object &object,
 
   GPUUsageType vbo_flag = GPU_USAGE_STATIC | GPU_USAGE_FLAG_BUFFER_TEXTURE_ONLY;
   /* Create VBOs. */
-  GPUVertFormat *format = grease_pencil_stroke_format();
-  GPUVertFormat *format_col = grease_pencil_color_format();
+  const GPUVertFormat *format = grease_pencil_stroke_format();
+  const GPUVertFormat *format_col = grease_pencil_color_format();
   cache->vbo = GPU_vertbuf_create_with_format_ex(*format, vbo_flag);
   cache->vbo_col = GPU_vertbuf_create_with_format_ex(*format_col, vbo_flag);
   /* Add extra space at the end of the buffer because of quad load. */
@@ -1225,14 +1251,13 @@ static void grease_pencil_geom_batch_ensure(Object &object,
        * use negative values as a special 'flag' to get rounded caps. */
       s_vert.radius = math::max(radii[point_i], 0.0f) *
                       ((end_cap == GP_STROKE_CAP_TYPE_ROUND) ? 1.0f : -1.0f);
-      /* Convert to legacy "pixel" space. We divide here, because the shader expects the values to
-       * be in the `px` space rather than world space. Otherwise the values will get clamped. */
-      s_vert.radius /= bke::greasepencil::LEGACY_RADIUS_CONVERSION_FACTOR;
       s_vert.opacity = opacities[point_i] *
                        ((start_cap == GP_STROKE_CAP_TYPE_ROUND) ? 1.0f : -1.0f);
       s_vert.point_id = verts_range[idx];
       s_vert.stroke_id = verts_range.first();
-      s_vert.mat = materials[curve_i] % GPENCIL_MATERIAL_BUFFER_LEN;
+      /* The material index is allowed to be negative as it's stored as a generic attribute. To
+       * ensure the material used by the shader is valid this needs to be clamped to zero. */
+      s_vert.mat = std::max(materials[curve_i], 0) % GPENCIL_MATERIAL_BUFFER_LEN;
 
       s_vert.packed_asp_hard_rot = pack_rotation_aspect_hardness(
           rotations[point_i], stroke_point_aspect_ratios[curve_i], stroke_softness[curve_i]);
@@ -1459,7 +1484,7 @@ void DRW_grease_pencil_batch_cache_free(GreasePencil *grease_pencil)
 
 gpu::Batch *DRW_cache_grease_pencil_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_geom_batch_ensure(*ob, grease_pencil, *scene);
 
@@ -1468,7 +1493,7 @@ gpu::Batch *DRW_cache_grease_pencil_get(const Scene *scene, Object *ob)
 
 gpu::Batch *DRW_cache_grease_pencil_edit_points_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_edit_batch_ensure(*ob, grease_pencil, *scene);
 
@@ -1478,7 +1503,7 @@ gpu::Batch *DRW_cache_grease_pencil_edit_points_get(const Scene *scene, Object *
 
 gpu::Batch *DRW_cache_grease_pencil_edit_lines_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_edit_batch_ensure(*ob, grease_pencil, *scene);
 
@@ -1488,7 +1513,7 @@ gpu::Batch *DRW_cache_grease_pencil_edit_lines_get(const Scene *scene, Object *o
 
 gpu::VertBuf *DRW_cache_grease_pencil_position_buffer_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_geom_batch_ensure(*ob, grease_pencil, *scene);
 
@@ -1497,7 +1522,7 @@ gpu::VertBuf *DRW_cache_grease_pencil_position_buffer_get(const Scene *scene, Ob
 
 gpu::VertBuf *DRW_cache_grease_pencil_color_buffer_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_geom_batch_ensure(*ob, grease_pencil, *scene);
 
@@ -1506,7 +1531,7 @@ gpu::VertBuf *DRW_cache_grease_pencil_color_buffer_get(const Scene *scene, Objec
 
 gpu::Batch *DRW_cache_grease_pencil_weight_points_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_weight_batch_ensure(*ob, grease_pencil, *scene);
 
@@ -1516,7 +1541,7 @@ gpu::Batch *DRW_cache_grease_pencil_weight_points_get(const Scene *scene, Object
 
 gpu::Batch *DRW_cache_grease_pencil_weight_lines_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_weight_batch_ensure(*ob, grease_pencil, *scene);
 
@@ -1526,7 +1551,7 @@ gpu::Batch *DRW_cache_grease_pencil_weight_lines_get(const Scene *scene, Object 
 
 gpu::Batch *DRW_cache_grease_pencil_face_wireframe_get(const Scene *scene, Object *ob)
 {
-  GreasePencil &grease_pencil = *static_cast<GreasePencil *>(ob->data);
+  GreasePencil &grease_pencil = DRW_object_get_data_for_drawing<GreasePencil>(*ob);
   GreasePencilBatchCache *cache = grease_pencil_batch_cache_get(grease_pencil);
   grease_pencil_wire_batch_ensure(*ob, grease_pencil, *scene);
 

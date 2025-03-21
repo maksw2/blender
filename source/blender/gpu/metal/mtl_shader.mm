@@ -318,9 +318,7 @@ bool MTLShader::finalize(const shader::ShaderCreateInfo *info)
   else {
     /* Vertex/Fragment path. */
     BLI_assert([vertex_function_name_ length] > 0);
-    if (transform_feedback_type_ == GPU_SHADER_TFB_NONE) {
-      BLI_assert([fragment_function_name_ length] > 0);
-    }
+    BLI_assert([fragment_function_name_ length] > 0);
     BLI_assert([shd_builder_->msl_source_vert_ length] > 0);
   }
 
@@ -360,13 +358,6 @@ bool MTLShader::finalize(const shader::ShaderCreateInfo *info)
                               ((src_stage == ShaderStage::COMPUTE) ?
                                    shd_builder_->msl_source_compute_ :
                                    shd_builder_->msl_source_frag_);
-
-      /* Transform feedback, skip compilation. */
-      if (src_stage == ShaderStage::FRAGMENT && (transform_feedback_type_ != GPU_SHADER_TFB_NONE))
-      {
-        shader_library_frag_ = nil;
-        break;
-      }
 
       /* Concatenate common source. */
       NSString *str = [NSString stringWithUTF8String:datatoc_mtl_shader_common_msl];
@@ -471,33 +462,6 @@ bool MTLShader::finalize(const shader::ShaderCreateInfo *info)
   delete shd_builder_;
   shd_builder_ = nullptr;
   return true;
-}
-
-void MTLShader::transform_feedback_names_set(Span<const char *> name_list,
-                                             const eGPUShaderTFBType geom_type)
-{
-  tf_output_name_list_.clear();
-  for (int i = 0; i < name_list.size(); i++) {
-    tf_output_name_list_.append(std::string(name_list[i]));
-  }
-  transform_feedback_type_ = geom_type;
-}
-
-bool MTLShader::transform_feedback_enable(blender::gpu::VertBuf *buf)
-{
-  BLI_assert(transform_feedback_type_ != GPU_SHADER_TFB_NONE);
-  BLI_assert(buf);
-  transform_feedback_active_ = true;
-  transform_feedback_vertbuf_ = buf;
-  BLI_assert(static_cast<MTLVertBuf *>(transform_feedback_vertbuf_)->get_usage_type() ==
-             GPU_USAGE_DEVICE_ONLY);
-  return true;
-}
-
-void MTLShader::transform_feedback_disable()
-{
-  transform_feedback_active_ = false;
-  transform_feedback_vertbuf_ = nullptr;
 }
 
 /** \} */
@@ -988,17 +952,7 @@ MTLRenderPipelineStateInstance *MTLShader::bake_pipeline_state(
     int null_buffer_index = pipeline_descriptor.vertex_descriptor.num_vert_buffers;
     bool using_null_buffer = false;
 
-    if (this->get_uses_ssbo_vertex_fetch()) {
-      /* If using SSBO Vertex fetch mode, no vertex descriptor is required
-       * as we wont be using stage-in. */
-      desc.vertexDescriptor = nil;
-      desc.inputPrimitiveTopology = MTLPrimitiveTopologyClassUnspecified;
-
-      /* We want to offset the uniform buffer base to allow for sufficient VBO binding slots - We
-       * also require +1 slot for the Index buffer. */
-      MTL_uniform_buffer_base_index = MTL_SSBO_VERTEX_FETCH_IBO_INDEX + 1;
-    }
-    else {
+    {
       for (const uint i :
            IndexRange(pipeline_descriptor.vertex_descriptor.max_attribute_value + 1))
       {
@@ -1148,25 +1102,6 @@ MTLRenderPipelineStateInstance *MTLShader::bake_pipeline_state(
                         type:MTLDataTypeInt
                     withName:@"MTL_storage_buffer_base_index"];
 
-    /* Transform feedback constant.
-     * Ensure buffer is placed after existing buffers, including default buffers. */
-    int MTL_transform_feedback_buffer_index = -1;
-    if (this->transform_feedback_type_ != GPU_SHADER_TFB_NONE) {
-      /* If using argument buffers, insert index after argument buffer index. Otherwise, insert
-       * after uniform buffer bindings. */
-      MTL_transform_feedback_buffer_index =
-          MTL_uniform_buffer_base_index +
-          ((mtl_interface->uses_argument_buffer_for_samplers()) ?
-               (mtl_interface->get_argument_buffer_bind_index(ShaderStage::VERTEX) + 1) :
-               (mtl_interface->get_max_buffer_index() + 2));
-    }
-
-    if (this->transform_feedback_type_ != GPU_SHADER_TFB_NONE) {
-      [values setConstantValue:&MTL_transform_feedback_buffer_index
-                          type:MTLDataTypeInt
-                      withName:@"MTL_transform_feedback_buffer_index"];
-    }
-
     /* Clipping planes. */
     int MTL_clip_distances_enabled = (pipeline_descriptor.clipping_plane_enable_mask > 0) ? 1 : 0;
 
@@ -1236,31 +1171,24 @@ MTLRenderPipelineStateInstance *MTLShader::bake_pipeline_state(
       }
     }
 
-    /* If transform feedback is used, Vertex-only stage */
-    if (transform_feedback_type_ == GPU_SHADER_TFB_NONE) {
-      desc.fragmentFunction = [shader_library_frag_ newFunctionWithName:fragment_function_name_
-                                                         constantValues:values
-                                                                  error:&error];
-      if (error) {
-        bool has_error = (
-            [[error localizedDescription] rangeOfString:@"Compilation succeeded"].location ==
-            NSNotFound);
+    desc.fragmentFunction = [shader_library_frag_ newFunctionWithName:fragment_function_name_
+                                                       constantValues:values
+                                                                error:&error];
+    if (error) {
+      bool has_error = (
+          [[error localizedDescription] rangeOfString:@"Compilation succeeded"].location ==
+          NSNotFound);
 
-        const char *errors_c_str = [[error localizedDescription] UTF8String];
-        const StringRefNull source = shd_builder_->glsl_fragment_source_;
+      const char *errors_c_str = [[error localizedDescription] UTF8String];
+      const StringRefNull source = shd_builder_->glsl_fragment_source_;
 
-        MTLLogParser parser;
-        print_log({source}, errors_c_str, "FragShader", has_error, &parser);
+      MTLLogParser parser;
+      print_log({source}, errors_c_str, "FragShader", has_error, &parser);
 
-        /* Only exit out if genuine error and not warning */
-        if (has_error) {
-          return nullptr;
-        }
+      /* Only exit out if genuine error and not warning */
+      if (has_error) {
+        return nullptr;
       }
-    }
-    else {
-      desc.fragmentFunction = nil;
-      desc.rasterizationEnabled = false;
     }
 
     /* Setup pixel format state */
@@ -1310,12 +1238,6 @@ MTLRenderPipelineStateInstance *MTLShader::bake_pipeline_state(
                        MTL_MAX_BUFFER_BINDINGS,
                    "UBO and SSBO bindings exceed the fragment bind table limit.");
 
-    /* Transform feedback buffer. */
-    if (transform_feedback_type_ != GPU_SHADER_TFB_NONE) {
-      BLI_assert_msg(MTL_transform_feedback_buffer_index < MTL_MAX_BUFFER_BINDINGS,
-                     "Transform feedback buffer binding exceeds the fragment bind table limit.");
-    }
-
     /* Argument buffer. */
     if (mtl_interface->uses_argument_buffer_for_samplers()) {
       BLI_assert_msg(mtl_interface->get_argument_buffer_bind_index() < MTL_MAX_BUFFER_BINDINGS,
@@ -1354,7 +1276,6 @@ MTLRenderPipelineStateInstance *MTLShader::bake_pipeline_state(
     pso_inst->base_uniform_buffer_index = MTL_uniform_buffer_base_index;
     pso_inst->base_storage_buffer_index = MTL_storage_buffer_base_index;
     pso_inst->null_attribute_buffer_index = (using_null_buffer) ? null_buffer_index : -1;
-    pso_inst->transform_feedback_buffer_index = MTL_transform_feedback_buffer_index;
     pso_inst->prim_type = prim_type;
 
     pso_inst->reflection_data_available = (reflection_data != nil);
@@ -1620,186 +1541,6 @@ MTLComputePipelineStateInstance *MTLShader::bake_compute_pipeline_state(
     return compute_pso_instance;
   }
 }
-/** \} */
-
-/* -------------------------------------------------------------------- */
-/** \name SSBO-vertex-fetch-mode attribute control.
- * \{ */
-
-int MTLShader::ssbo_vertex_type_to_attr_type(MTLVertexFormat attribute_type)
-{
-  switch (attribute_type) {
-    case MTLVertexFormatFloat:
-      return GPU_SHADER_ATTR_TYPE_FLOAT;
-    case MTLVertexFormatInt:
-      return GPU_SHADER_ATTR_TYPE_INT;
-    case MTLVertexFormatUInt:
-      return GPU_SHADER_ATTR_TYPE_UINT;
-    case MTLVertexFormatShort:
-      return GPU_SHADER_ATTR_TYPE_SHORT;
-    case MTLVertexFormatUChar:
-      return GPU_SHADER_ATTR_TYPE_CHAR;
-    case MTLVertexFormatUChar2:
-      return GPU_SHADER_ATTR_TYPE_CHAR2;
-    case MTLVertexFormatUChar3:
-      return GPU_SHADER_ATTR_TYPE_CHAR3;
-    case MTLVertexFormatUChar4:
-      return GPU_SHADER_ATTR_TYPE_CHAR4;
-    case MTLVertexFormatFloat2:
-      return GPU_SHADER_ATTR_TYPE_VEC2;
-    case MTLVertexFormatFloat3:
-      return GPU_SHADER_ATTR_TYPE_VEC3;
-    case MTLVertexFormatFloat4:
-      return GPU_SHADER_ATTR_TYPE_VEC4;
-    case MTLVertexFormatUInt2:
-      return GPU_SHADER_ATTR_TYPE_UVEC2;
-    case MTLVertexFormatUInt3:
-      return GPU_SHADER_ATTR_TYPE_UVEC3;
-    case MTLVertexFormatUInt4:
-      return GPU_SHADER_ATTR_TYPE_UVEC4;
-    case MTLVertexFormatInt2:
-      return GPU_SHADER_ATTR_TYPE_IVEC2;
-    case MTLVertexFormatInt3:
-      return GPU_SHADER_ATTR_TYPE_IVEC3;
-    case MTLVertexFormatInt4:
-      return GPU_SHADER_ATTR_TYPE_IVEC4;
-    case MTLVertexFormatUCharNormalized:
-      return GPU_SHADER_ATTR_TYPE_UCHAR_NORM;
-    case MTLVertexFormatUChar2Normalized:
-      return GPU_SHADER_ATTR_TYPE_UCHAR2_NORM;
-    case MTLVertexFormatUChar3Normalized:
-      return GPU_SHADER_ATTR_TYPE_UCHAR3_NORM;
-    case MTLVertexFormatUChar4Normalized:
-      return GPU_SHADER_ATTR_TYPE_UCHAR4_NORM;
-    case MTLVertexFormatInt1010102Normalized:
-      return GPU_SHADER_ATTR_TYPE_INT1010102_NORM;
-    case MTLVertexFormatShort3Normalized:
-      return GPU_SHADER_ATTR_TYPE_SHORT3_NORM;
-    default:
-      BLI_assert_msg(false,
-                     "Not yet supported attribute type for SSBO vertex fetch -- Add entry "
-                     "GPU_SHADER_ATTR_TYPE_** to shader defines, and in this table");
-      return -1;
-  }
-  return -1;
-}
-
-void MTLShader::ssbo_vertex_fetch_bind_attributes_begin()
-{
-  MTLShaderInterface *mtl_interface = this->get_interface();
-  ssbo_vertex_attribute_bind_active_ = true;
-  ssbo_vertex_attribute_bind_mask_ = (1 << mtl_interface->get_total_attributes()) - 1;
-
-  /* Reset tracking of actively used VBO bind slots for SSBO vertex fetch mode. */
-  for (int i = 0; i < MTL_SSBO_VERTEX_FETCH_MAX_VBOS; i++) {
-    ssbo_vbo_slot_used_[i] = false;
-  }
-}
-
-void MTLShader::ssbo_vertex_fetch_bind_attribute(const MTLSSBOAttribute &ssbo_attr)
-{
-  /* Fetch attribute. */
-  MTLShaderInterface *mtl_interface = this->get_interface();
-  BLI_assert(ssbo_attr.mtl_attribute_index >= 0 &&
-             ssbo_attr.mtl_attribute_index < mtl_interface->get_total_attributes());
-  UNUSED_VARS_NDEBUG(mtl_interface);
-
-  /* Update bind-mask to verify this attribute has been used. */
-  BLI_assert((ssbo_vertex_attribute_bind_mask_ & (1 << ssbo_attr.mtl_attribute_index)) ==
-                 (1 << ssbo_attr.mtl_attribute_index) &&
-             "Attribute has already been bound");
-  ssbo_vertex_attribute_bind_mask_ &= ~(1 << ssbo_attr.mtl_attribute_index);
-
-  /* Fetch attribute uniform addresses from cache. */
-  ShaderSSBOAttributeBinding &cached_ssbo_attribute =
-      cached_ssbo_attribute_bindings_[ssbo_attr.mtl_attribute_index];
-  BLI_assert(cached_ssbo_attribute.attribute_index >= 0);
-
-  /* Write attribute descriptor properties to shader uniforms. */
-  this->uniform_int(cached_ssbo_attribute.uniform_offset, 1, 1, &ssbo_attr.attribute_offset);
-  this->uniform_int(cached_ssbo_attribute.uniform_stride, 1, 1, &ssbo_attr.per_vertex_stride);
-  int inst_val = (ssbo_attr.is_instance ? 1 : 0);
-  this->uniform_int(cached_ssbo_attribute.uniform_fetchmode, 1, 1, &inst_val);
-  this->uniform_int(cached_ssbo_attribute.uniform_vbo_id, 1, 1, &ssbo_attr.vbo_id);
-  BLI_assert(ssbo_attr.attribute_format >= 0);
-  this->uniform_int(cached_ssbo_attribute.uniform_attr_type, 1, 1, &ssbo_attr.attribute_format);
-  ssbo_vbo_slot_used_[ssbo_attr.vbo_id] = true;
-}
-
-void MTLShader::ssbo_vertex_fetch_bind_attributes_end(
-    id<MTLRenderCommandEncoder> /*active_encoder*/)
-{
-  ssbo_vertex_attribute_bind_active_ = false;
-
-  /* If our mask is non-zero, we have unassigned attributes. */
-  if (ssbo_vertex_attribute_bind_mask_ != 0) {
-    MTLShaderInterface *mtl_interface = this->get_interface();
-
-    /* Determine if there is a free slot we can bind the null buffer to -- We should have at
-     * least ONE free slot in this instance. */
-    int null_attr_buffer_slot = -1;
-    for (int i = 0; i < MTL_SSBO_VERTEX_FETCH_MAX_VBOS; i++) {
-      if (!ssbo_vbo_slot_used_[i]) {
-        null_attr_buffer_slot = i;
-        break;
-      }
-    }
-    BLI_assert_msg(null_attr_buffer_slot >= 0,
-                   "No suitable bind location for a NULL buffer was found");
-
-    for (int i = 0; i < mtl_interface->get_total_attributes(); i++) {
-      if (ssbo_vertex_attribute_bind_mask_ & (1 << i)) {
-        const MTLShaderInputAttribute *mtl_shader_attribute = &mtl_interface->get_attribute(i);
-#if MTL_DEBUG_SHADER_ATTRIBUTES == 1
-        MTL_LOG_WARNING(
-            "SSBO Vertex Fetch missing attribute with index: %d. Shader: %s, Attr "
-            "Name: "
-            "%s - Null buffer bound",
-            i,
-            this->name_get(),
-            mtl_shader_attribute->name);
-#endif
-        /* Bind Attribute with NULL buffer index and stride zero (for constant access). */
-        MTLSSBOAttribute ssbo_attr(
-            i, null_attr_buffer_slot, 0, 0, GPU_SHADER_ATTR_TYPE_FLOAT, false);
-        ssbo_vertex_fetch_bind_attribute(ssbo_attr);
-        MTL_LOG_WARNING(
-            "Unassigned Shader attribute: %s, Attr Name: %s -- Binding NULL BUFFER to "
-            "slot %d",
-            this->name_get().c_str(),
-            mtl_interface->get_name_at_offset(mtl_shader_attribute->name_offset),
-            null_attr_buffer_slot);
-      }
-    }
-
-    /* Bind NULL buffer to given VBO slot. */
-    MTLContext *ctx = MTLContext::get();
-    id<MTLBuffer> null_buf = ctx->get_null_attribute_buffer();
-    BLI_assert(null_buf);
-
-    MTLRenderPassState &rps = ctx->main_command_buffer.get_render_pass_state();
-    rps.bind_vertex_buffer(null_buf, 0, null_attr_buffer_slot);
-  }
-}
-
-blender::gpu::VertBuf *MTLShader::get_transform_feedback_active_buffer()
-{
-  if (transform_feedback_type_ == GPU_SHADER_TFB_NONE || !transform_feedback_active_) {
-    return nullptr;
-  }
-  return transform_feedback_vertbuf_;
-}
-
-bool MTLShader::has_transform_feedback_varying(std::string str)
-{
-  if (this->transform_feedback_type_ == GPU_SHADER_TFB_NONE) {
-    return false;
-  }
-
-  return (std::find(tf_output_name_list_.begin(), tf_output_name_list_.end(), str) !=
-          tf_output_name_list_.end());
-}
-
 /** \} */
 
 /* Since this is going to be compiling shaders in a multi-threaded fashion we

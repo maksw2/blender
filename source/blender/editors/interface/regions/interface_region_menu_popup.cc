@@ -44,6 +44,7 @@
 #include "interface_regions_intern.hh"
 
 using blender::StringRef;
+using blender::StringRefNull;
 
 /* -------------------------------------------------------------------- */
 /** \name Utility Functions
@@ -126,7 +127,7 @@ static uiBut *ui_popup_menu_memory__internal(uiBlock *block, uiBut *but)
   }
 
   /* get */
-  LISTBASE_FOREACH (uiBut *, but_iter, &block->buttons) {
+  for (const std::unique_ptr<uiBut> &but_iter : block->buttons) {
     /* Prevent labels (typically headings), from being returned in the case the text
      * happens to matches one of the menu items.
      * Skip separators too as checking them is redundant. */
@@ -135,7 +136,7 @@ static uiBut *ui_popup_menu_memory__internal(uiBlock *block, uiBut *but)
     }
     if (mem[hash_mod] == ui_popup_string_hash(but_iter->str, but_iter->flag & UI_BUT_HAS_SEP_CHAR))
     {
-      return but_iter;
+      return but_iter.get();
     }
   }
 
@@ -317,16 +318,16 @@ static uiBlock *ui_block_func_POPUP(bContext *C, uiPopupBlockHandle *handle, voi
         /* position mouse at 0.8*width of the button and below the tile
          * on the first item */
         offset[0] = 0;
-        LISTBASE_FOREACH (uiBut *, but_iter, &block->buttons) {
+        for (const std::unique_ptr<uiBut> &but_iter : block->buttons) {
           offset[0] = min_ii(offset[0],
                              -(but_iter->rect.xmin + 0.8f * BLI_rctf_size_x(&but_iter->rect)));
         }
 
         offset[1] = 2.1 * UI_UNIT_Y;
 
-        LISTBASE_FOREACH (uiBut *, but_iter, &block->buttons) {
-          if (ui_but_is_editable(but_iter)) {
-            but_activate = but_iter;
+        for (const std::unique_ptr<uiBut> &but_iter : block->buttons) {
+          if (ui_but_is_editable(but_iter.get())) {
+            but_activate = but_iter.get();
             break;
           }
         }
@@ -477,7 +478,7 @@ uiPopupMenu *UI_popup_menu_begin_ex(bContext *C,
   ui_popup_menu_create_block(C, pup, title, block_name);
 
   /* create in advance so we can let buttons point to retval already */
-  pup->block->handle = MEM_cnew<uiPopupBlockHandle>(__func__);
+  pup->block->handle = MEM_new<uiPopupBlockHandle>(__func__);
 
   if (title[0]) {
     create_title_button(pup->layout, title, icon);
@@ -529,7 +530,7 @@ bool UI_popup_menu_end_or_cancel(bContext *C, uiPopupMenu *pup)
     return true;
   }
   UI_block_layout_resolve(pup->block, nullptr, nullptr);
-  MEM_freeN(pup->block->handle);
+  MEM_delete(pup->block->handle);
   UI_block_free(C, pup->block);
   MEM_delete(pup);
   return false;
@@ -628,7 +629,7 @@ static void ui_popup_menu_create_from_menutype(bContext *C,
   }
 }
 
-int UI_popup_menu_invoke(bContext *C, const char *idname, ReportList *reports)
+wmOperatorStatus UI_popup_menu_invoke(bContext *C, const char *idname, ReportList *reports)
 {
   MenuType *mt = WM_menutype_find(idname, true);
 
@@ -785,24 +786,20 @@ void UI_popup_block_template_confirm(uiBlock *block,
 
 void UI_popup_block_template_confirm_op(uiLayout *layout,
                                         wmOperatorType *ot,
-                                        const char *confirm_text,
-                                        const char *cancel_text,
+                                        const std::optional<StringRef> confirm_text_opt,
+                                        const std::optional<StringRef> cancel_text_opt,
                                         const int icon,
                                         bool cancel_default,
                                         PointerRNA *r_ptr)
 {
   uiBlock *block = uiLayoutGetBlock(layout);
 
-  if (confirm_text == nullptr) {
-    confirm_text = IFACE_("OK");
-  }
-  if (cancel_text == nullptr) {
-    cancel_text = IFACE_("Cancel");
-  }
+  const StringRef confirm_text = confirm_text_opt.value_or(IFACE_("OK"));
+  const StringRef cancel_text = cancel_text_opt.value_or(IFACE_("Cancel"));
 
   /* Use a split so both buttons are the same size. */
-  const bool show_confirm = confirm_text[0] != '\0';
-  const bool show_cancel = cancel_text[0] != '\0';
+  const bool show_confirm = !confirm_text.is_empty();
+  const bool show_cancel = !cancel_text.is_empty();
   uiLayout *row = (show_confirm && show_cancel) ? uiLayoutSplit(layout, 0.5f, false) : layout;
 
   /* When only one button is shown, make it default. */
@@ -815,7 +812,7 @@ void UI_popup_block_template_confirm_op(uiLayout *layout,
       return nullptr;
     }
     uiBlock *block = uiLayoutGetBlock(row);
-    const uiBut *but_ref = (uiBut *)block->buttons.last;
+    const uiBut *but_ref = block->last_but();
     uiItemFullO_ptr(row,
                     ot,
                     confirm_text,
@@ -825,10 +822,10 @@ void UI_popup_block_template_confirm_op(uiLayout *layout,
                     UI_ITEM_NONE,
                     r_ptr);
 
-    if (but_ref == block->buttons.last) {
+    if (block->buttons.is_empty() || but_ref == block->buttons.last().get()) {
       return nullptr;
     }
-    return static_cast<uiBut *>(block->buttons.last);
+    return block->buttons.last().get();
   };
 
   auto cancel_fn = [&row, &cancel_text, &show_cancel]() -> uiBut * {

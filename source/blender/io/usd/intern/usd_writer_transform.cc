@@ -42,7 +42,9 @@ pxr::UsdGeomXformable USDTransformWriter::create_xformable() const
 
 bool USDTransformWriter::should_apply_root_xform(const HierarchyContext &context) const
 {
-  if (!usd_export_context_.export_params.convert_orientation) {
+  if (!(usd_export_context_.export_params.convert_orientation ||
+        usd_export_context_.export_params.convert_scene_units))
+  {
     return false;
   }
 
@@ -92,6 +94,14 @@ void USDTransformWriter::do_write(HierarchyContext &context)
       mul_m4_m4m4(matrix_world, mat, context.matrix_world);
     }
 
+    if (usd_export_context_.export_params.convert_scene_units !=
+        eUSDSceneUnits::USD_SCENE_UNITS_METERS)
+    {
+      float scale_mat[4][4];
+      scale_m4_fl(scale_mat, float(1.0 / get_meters_per_unit(usd_export_context_.export_params)));
+      mul_m4_m4m4(matrix_world, scale_mat, matrix_world);
+    }
+
     mul_m4_m4m4(parent_relative_matrix, context.parent_matrix_inv_world, matrix_world);
   }
   else {
@@ -101,6 +111,10 @@ void USDTransformWriter::do_write(HierarchyContext &context)
   /* USD Xforms are by default the identity transform; only write if necessary when static. */
   if (is_animated_ || !compare_m4m4(parent_relative_matrix, UNIT_M4, 0.000000001f)) {
     set_xform_ops(parent_relative_matrix, xform);
+  }
+
+  if (usd_export_context_.export_params.use_instancing && context.is_instance()) {
+    mark_as_instance(context, xform.GetPrim());
   }
 
   if (context.object) {
@@ -123,7 +137,8 @@ bool USDTransformWriter::check_is_animated(const HierarchyContext &context) cons
   return BKE_object_moves_in_time(context.object, context.animation_check_include_parent);
 }
 
-void USDTransformWriter::set_xform_ops(float xf_matrix[4][4], const pxr::UsdGeomXformable &xf)
+void USDTransformWriter::set_xform_ops(float parent_relative_matrix[4][4],
+                                       const pxr::UsdGeomXformable &xf)
 {
   if (!xf) {
     return;
@@ -161,7 +176,7 @@ void USDTransformWriter::set_xform_ops(float xf_matrix[4][4], const pxr::UsdGeom
   pxr::UsdTimeCode time_code = get_export_time_code();
 
   if (xformOps_.size() == 1) {
-    pxr::GfMatrix4d mat_val(xf_matrix);
+    pxr::GfMatrix4d mat_val(parent_relative_matrix);
     usd_value_writer_.SetAttribute(xformOps_[0].GetAttr(), mat_val, time_code);
   }
   else if (xformOps_.size() == 3) {
@@ -170,7 +185,7 @@ void USDTransformWriter::set_xform_ops(float xf_matrix[4][4], const pxr::UsdGeom
     float quat[4];
     float scale[3];
 
-    mat4_decompose(loc, quat, scale, xf_matrix);
+    mat4_decompose(loc, quat, scale, parent_relative_matrix);
 
     if (xfOpMode == USD_XFORM_OP_TRS) {
       float rot[3];

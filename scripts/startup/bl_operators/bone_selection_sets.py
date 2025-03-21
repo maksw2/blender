@@ -37,7 +37,8 @@ class SelectionSet(PropertyGroup):
     is_selected: BoolProperty(
         name="Include this selection set when copying to the clipboard. "
         "If none are specified, all sets will be copied.",
-        override={'LIBRARY_OVERRIDABLE'})
+        override={'LIBRARY_OVERRIDABLE'},
+    )
 
 
 # Operators ##############################################################
@@ -46,9 +47,11 @@ class _PoseModeOnlyMixin:
     """Operator only available for objects of type armature in pose mode."""
     @classmethod
     def poll(cls, context):
-        return (context.object and
-                context.object.type == 'ARMATURE' and
-                context.mode == 'POSE')
+        return (
+            context.object and
+            context.object.type == 'ARMATURE' and
+            context.mode == 'POSE'
+        )
 
 
 class _NeedSelSetMixin(_PoseModeOnlyMixin):
@@ -174,12 +177,11 @@ class POSE_OT_selection_set_assign(_PoseModeOnlyMixin, Operator):
     bl_description = "Add selected bones to Selection Set"
     bl_options = {'UNDO', 'REGISTER'}
 
-    def invoke(self, context, event):
+    def invoke(self, context, _event):
         arm = context.object
 
         if not (arm.active_selection_set < len(arm.selection_sets)):
-            bpy.ops.wm.call_menu("INVOKE_DEFAULT",
-                                 name="POSE_MT_selection_set_create")
+            bpy.ops.wm.call_menu("INVOKE_DEFAULT", name="POSE_MT_selection_set_create")
         else:
             bpy.ops.pose.selection_set_assign('EXEC_DEFAULT')
 

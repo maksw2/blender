@@ -16,7 +16,8 @@
 #include "DNA_screen_types.h"
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
@@ -57,7 +58,7 @@ static SpaceLink *action_create(const ScrArea *area, const Scene *scene)
   SpaceAction *saction;
   ARegion *region;
 
-  saction = MEM_cnew<SpaceAction>("initaction");
+  saction = MEM_callocN<SpaceAction>("initaction");
   saction->spacetype = SPACE_ACTION;
 
   saction->mode = SACTCONT_DOPESHEET;
@@ -83,7 +84,7 @@ static SpaceLink *action_create(const ScrArea *area, const Scene *scene)
   region->regiontype = RGN_TYPE_CHANNELS;
   region->alignment = RGN_ALIGN_LEFT;
 
-  /* only need to set scroll settings, as this will use 'listview' v2d configuration */
+  /* Only need to set scroll settings, as this will use `listview` v2d configuration. */
   region->v2d.scroll = V2D_SCROLL_BOTTOM;
   region->v2d.flag = V2D_VIEWSYNC_AREA_VERTICAL;
 
@@ -116,7 +117,7 @@ static SpaceLink *action_create(const ScrArea *area, const Scene *scene)
   region->v2d.minzoom = 0.01f;
   region->v2d.maxzoom = 50;
   region->v2d.scroll = (V2D_SCROLL_BOTTOM | V2D_SCROLL_HORIZONTAL_HANDLES);
-  region->v2d.scroll |= V2D_SCROLL_RIGHT;
+  region->v2d.scroll |= V2D_SCROLL_RIGHT | V2D_SCROLL_VERTICAL_HIDE;
   region->v2d.keepzoom = V2D_LOCKZOOM_Y;
   region->v2d.keepofs = V2D_KEEPOFS_Y;
   region->v2d.align = V2D_ALIGN_NO_POS_Y;
@@ -281,7 +282,8 @@ static void action_main_region_draw_overlay(const bContext *C, ARegion *region)
   ED_time_scrub_draw_current_frame(region, scene, saction->flag & SACTION_DRAWTIME);
 
   /* scrollers */
-  UI_view2d_scrollers_draw(v2d, nullptr);
+  const rcti scroller_mask = ED_time_scrub_clamp_scroller_mask(v2d->mask);
+  UI_view2d_scrollers_draw(v2d, &scroller_mask);
 }
 
 /* add handlers, stuff you only do once or on area/region changes */
@@ -416,14 +418,13 @@ static void saction_channel_region_message_subscribe(const wmRegionMessageSubscr
   msg_sub_value_region_tag_redraw.user_data = region;
   msg_sub_value_region_tag_redraw.notify = ED_region_do_msg_notify_tag_redraw;
 
-  /* All dopesheet filter settings, etc. affect the drawing of this editor,
+  /* All dope-sheet filter settings, etc. affect the drawing of this editor,
    * also same applies for all animation-related data-types that may appear here,
-   * so just whitelist the entire structs for updates
-   */
+   * so just whitelist the entire structs for updates. */
   {
     wmMsgParams_RNA msg_key_params = {{}};
     StructRNA *type_array[] = {
-        &RNA_DopeSheet, /* dopesheet filters */
+        &RNA_DopeSheet, /* Dope-sheet filters. */
 
         &RNA_ActionGroup, /* channel groups */
 
@@ -947,7 +948,7 @@ void ED_spacetype_action()
   st->blend_write = action_space_blend_write;
 
   /* regions: main window */
-  art = MEM_cnew<ARegionType>("spacetype action region");
+  art = MEM_callocN<ARegionType>("spacetype action region");
   art->regionid = RGN_TYPE_WINDOW;
   art->init = action_main_region_init;
   art->draw = action_main_region_draw;
@@ -959,7 +960,7 @@ void ED_spacetype_action()
   BLI_addhead(&st->regiontypes, art);
 
   /* regions: header */
-  art = MEM_cnew<ARegionType>("spacetype action region");
+  art = MEM_callocN<ARegionType>("spacetype action region");
   art->regionid = RGN_TYPE_HEADER;
   art->prefsizey = HEADERY;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_VIEW2D | ED_KEYMAP_FRAMES | ED_KEYMAP_HEADER;
@@ -971,7 +972,7 @@ void ED_spacetype_action()
   BLI_addhead(&st->regiontypes, art);
 
   /* regions: channels */
-  art = MEM_cnew<ARegionType>("spacetype action region");
+  art = MEM_callocN<ARegionType>("spacetype action region");
   art->regionid = RGN_TYPE_CHANNELS;
   art->prefsizex = 200;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_VIEW2D | ED_KEYMAP_FRAMES;
@@ -984,7 +985,7 @@ void ED_spacetype_action()
   BLI_addhead(&st->regiontypes, art);
 
   /* regions: UI buttons */
-  art = MEM_cnew<ARegionType>("spacetype action region");
+  art = MEM_callocN<ARegionType>("spacetype action region");
   art->regionid = RGN_TYPE_UI;
   art->prefsizex = UI_SIDEBAR_PANEL_WIDTH;
   art->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_FRAMES;

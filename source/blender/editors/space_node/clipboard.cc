@@ -4,12 +4,16 @@
 
 #include "DNA_space_types.h"
 
+#include "BLI_listbase.h"
+
 #include "BKE_context.hh"
 #include "BKE_global.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
+#include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_main_idmap.hh"
+#include "BKE_main_invariants.hh"
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_report.hh"
@@ -29,7 +33,7 @@ namespace blender::ed::space_node {
 
 struct NodeClipboardItemIDInfo {
   /** Name of the referenced ID. */
-  std::string id_name = "";
+  std::string id_name;
   /**
    * Library filepath of the referenced ID, together with its name it forms a unique identifier.
    *
@@ -37,7 +41,7 @@ struct NodeClipboardItemIDInfo {
    * data, persistent over new blend-files opening, this should guarantee that identical IDs from
    * identical libraries can be matched accordingly, even across several blend-files.
    */
-  std::string library_path = "";
+  std::string library_path;
 
   /** The validated ID pointer (may be the same as the original one, or a new one). */
   std::optional<ID *> new_id = {};
@@ -82,11 +86,11 @@ struct NodeClipboard {
   void clear()
   {
     for (NodeClipboardItem &item : this->nodes) {
-      bke::node_free_node(nullptr, item.node);
+      bke::node_free_node(nullptr, *item.node);
     }
     this->nodes.clear_and_shrink();
     this->links.clear_and_shrink();
-    this->old_ids_to_idinfo.clear_and_shrink();
+    this->old_ids_to_idinfo.clear();
   }
 
   /**
@@ -112,9 +116,7 @@ struct NodeClipboard {
       if (!id_info.library_path.empty() && !libraries_path_to_id.contains(id_info.library_path)) {
         libraries_path_to_id.add(
             id_info.library_path,
-            static_cast<Library *>(BLI_findstring(&bmain.libraries,
-                                                  id_info.library_path.c_str(),
-                                                  offsetof(Library, runtime.filepath_abs))));
+            blender::bke::library::search_filepath_abs(&bmain.libraries, id_info.library_path));
       }
     }
 
@@ -242,7 +244,7 @@ struct NodeClipboard {
       if (old_id) {
         id_info.id_name = old_id->name;
         if (ID_IS_LINKED(old_id)) {
-          id_info.library_path = old_id->lib->runtime.filepath_abs;
+          id_info.library_path = old_id->lib->runtime->filepath_abs;
         }
       }
       this->old_ids_to_idinfo.add(old_id, std::move(id_info));
@@ -260,7 +262,7 @@ struct NodeClipboard {
         IDWALK_READONLY);
 
     NodeClipboardItem item;
-    item.draw_rect = node.runtime->totr;
+    item.draw_rect = node.runtime->draw_bounds;
     item.node = new_node;
     this->nodes.append(std::move(item));
   }
@@ -276,7 +278,7 @@ static NodeClipboard &get_node_clipboard()
 /** \name Copy
  * \{ */
 
-static int node_clipboard_copy_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus node_clipboard_copy_exec(bContext *C, wmOperator * /*op*/)
 {
   SpaceNode &snode = *CTX_wm_space_node(C);
   bNodeTree &tree = *snode.edittree;
@@ -302,7 +304,7 @@ static int node_clipboard_copy_exec(bContext *C, wmOperator * /*op*/)
         new_node->parent = node_map.lookup(new_node->parent);
       }
       else {
-        bke::node_detach_node(&tree, new_node);
+        bke::node_detach_node(tree, *new_node);
       }
     }
   }
@@ -344,7 +346,7 @@ void NODE_OT_clipboard_copy(wmOperatorType *ot)
 /** \name Paste
  * \{ */
 
-static int node_clipboard_paste_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus node_clipboard_paste_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   SpaceNode &snode = *CTX_wm_space_node(C);
@@ -410,7 +412,7 @@ static int node_clipboard_paste_exec(bContext *C, wmOperator *op)
   }
 
   for (bNode *new_node : node_map.values()) {
-    bke::node_set_selected(new_node, true);
+    bke::node_set_selected(*new_node, true);
 
     new_node->flag &= ~NODE_ACTIVE;
 
@@ -439,8 +441,8 @@ static int node_clipboard_paste_exec(bContext *C, wmOperator *op)
     for (bNode *new_node : node_map.values()) {
       /* Skip the offset for parented nodes since the location is in parent space. */
       if (new_node->parent == nullptr) {
-        new_node->locx += offset.x;
-        new_node->locy += offset.y;
+        new_node->location[0] += offset.x;
+        new_node->location[1] += offset.y;
       }
     }
   }
@@ -448,7 +450,7 @@ static int node_clipboard_paste_exec(bContext *C, wmOperator *op)
   remap_node_pairing(tree, node_map);
 
   for (bNode *new_node : node_map.values()) {
-    bke::node_declaration_ensure(&tree, new_node);
+    bke::node_declaration_ensure(tree, *new_node);
   }
 
   /* Add links between existing nodes. */
@@ -458,13 +460,13 @@ static int node_clipboard_paste_exec(bContext *C, wmOperator *op)
     if (!from_node || !to_node) {
       continue;
     }
-    bNodeSocket *from = bke::node_find_socket(from_node, SOCK_OUT, link.from_socket.c_str());
-    bNodeSocket *to = bke::node_find_socket(to_node, SOCK_IN, link.to_socket.c_str());
+    bNodeSocket *from = bke::node_find_socket(*from_node, SOCK_OUT, link.from_socket.c_str());
+    bNodeSocket *to = bke::node_find_socket(*to_node, SOCK_IN, link.to_socket.c_str());
     if (!from || !to) {
       continue;
     }
-    bNodeLink *new_link = bke::node_add_link(&tree, from_node, from, to_node, to);
-    new_link->multi_input_sort_id = link.multi_input_sort_id;
+    bNodeLink &new_link = bke::node_add_link(tree, *from_node, *from, *to_node, *to);
+    new_link.multi_input_sort_id = link.multi_input_sort_id;
   }
 
   tree.ensure_topology_cache();
@@ -473,14 +475,16 @@ static int node_clipboard_paste_exec(bContext *C, wmOperator *op)
     update_multi_input_indices_for_removed_links(*new_node);
   }
 
-  ED_node_tree_propagate_change(C, bmain, &tree);
+  BKE_main_ensure_invariants(*bmain);
   /* Pasting nodes can create arbitrary new relations because nodes can reference IDs. */
   DEG_relations_tag_update(bmain);
 
   return OPERATOR_FINISHED;
 }
 
-static int node_clipboard_paste_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+static wmOperatorStatus node_clipboard_paste_invoke(bContext *C,
+                                                    wmOperator *op,
+                                                    const wmEvent *event)
 {
   const ARegion *region = CTX_wm_region(C);
   float2 cursor;

@@ -4,21 +4,13 @@
 
 #include "testing/testing.h"
 
-#include "BKE_context.hh"
-#include "BKE_idtype.hh"
-#include "BKE_main.hh"
-#include "BKE_node.hh"
-#include "BKE_object.hh"
-
-#include "BLI_vector.hh"
-
-#include "RNA_define.hh"
-
 #include "GPU_batch.hh"
+#include "GPU_context.hh"
 #include "draw_shader.hh"
 #include "draw_testing.hh"
-#include "engines/eevee_next/eevee_instance.hh"
-#include "engines/eevee_next/eevee_precompute.hh"
+#include "engines/eevee/eevee_lut.hh"
+#include "engines/eevee/eevee_precompute.hh"
+#include "engines/eevee/eevee_shadow.hh"
 
 namespace blender::draw {
 
@@ -343,7 +335,7 @@ static void test_eevee_shadow_tag_update()
   const uint lod5_len = SHADOW_TILEMAP_LOD5_LEN;
 
   auto stringify_result = [&](uint start, uint len) -> std::string {
-    std::string result = "";
+    std::string result;
     for (auto i : IndexRange(start, len)) {
       result += (shadow_tile_unpack(tiles_data[i]).do_update) ? "x" : "-";
     }
@@ -590,7 +582,7 @@ class TestDefrag {
     pages_cached_data.read();
     pages_infos_data.read();
 
-    std::string result = "";
+    std::string result;
     int expect_cached_len = 0;
     for (auto i : IndexRange(descriptor_offset, descriptor.size())) {
       if (pages_cached_data[i % SHADOW_MAX_PAGE].y != -1) {
@@ -917,7 +909,7 @@ static void test_eevee_shadow_finalize()
   {
     uint *pixels = tilemap_tx.read<uint32_t>(GPU_DATA_UINT);
 
-    std::string result = "";
+    std::string result;
     for (auto y : IndexRange(SHADOW_TILEMAP_RES)) {
       for (auto x : IndexRange(SHADOW_TILEMAP_RES)) {
         ShadowTileData tile = shadow_tile_unpack(pixels[y * SHADOW_TILEMAP_RES + x]);
@@ -967,7 +959,7 @@ static void test_eevee_shadow_finalize()
 
   {
     auto stringify_view = [](Span<uint> data) -> std::string {
-      std::string result = "";
+      std::string result;
       for (auto x : data) {
         result += (x == 0u) ? '-' : ((x == 0xFFFFFFFFu) ? 'x' : '0' + (x % 10));
       }
@@ -1296,7 +1288,7 @@ static void test_eevee_shadow_tilemap_amend()
     uint *pixels = tilemap_tx.read<uint32_t>(GPU_DATA_UINT);
 
     auto stringify_tilemap = [&](int tilemap_index) -> std::string {
-      std::string result = "";
+      std::string result;
       for (auto y : IndexRange(SHADOW_TILEMAP_RES)) {
         for (auto x : IndexRange(SHADOW_TILEMAP_RES)) {
           /* NOTE: assumes that tilemap_index is < SHADOW_TILEMAP_PER_ROW. */
@@ -1317,7 +1309,7 @@ static void test_eevee_shadow_tilemap_amend()
     };
 
     auto stringify_lod = [&](int tilemap_index) -> std::string {
-      std::string result = "";
+      std::string result;
       for (auto y : IndexRange(SHADOW_TILEMAP_RES)) {
         for (auto x : IndexRange(SHADOW_TILEMAP_RES)) {
           /* NOTE: assumes that tilemap_index is < SHADOW_TILEMAP_PER_ROW. */
@@ -1338,7 +1330,7 @@ static void test_eevee_shadow_tilemap_amend()
     };
 
     auto stringify_offset = [&](int tilemap_index) -> std::string {
-      std::string result = "";
+      std::string result;
       for (auto y : IndexRange(SHADOW_TILEMAP_RES)) {
         for (auto x : IndexRange(SHADOW_TILEMAP_RES)) {
           /* NOTE: assumes that tilemap_index is < SHADOW_TILEMAP_PER_ROW. */
@@ -1747,7 +1739,7 @@ static void test_eevee_shadow_page_mask_ex(int max_view_per_tilemap)
   StringRefNull expected_lod5 = "-";
 
   auto stringify_result = [&](uint start, uint len) -> std::string {
-    std::string result = "";
+    std::string result;
     for (auto i : IndexRange(start, len)) {
       result += (shadow_tile_unpack(tiles_data[i]).is_used) ? "x" : "-";
     }
@@ -1755,7 +1747,7 @@ static void test_eevee_shadow_page_mask_ex(int max_view_per_tilemap)
   };
 
   auto empty_result = [&](uint len) -> std::string {
-    std::string result = "";
+    std::string result;
     for ([[maybe_unused]] const int i : IndexRange(len)) {
       result += "-";
     }
@@ -1895,7 +1887,7 @@ static void test_eevee_surfel_list()
   Vector<int> expect_link_prev = {+3, -1, +1, +2, -1, -1};
 
   Vector<int> link_next, link_prev;
-  for (auto &surfel : Span<Surfel>(surfel_buf.data(), surfel_buf.size())) {
+  for (const auto &surfel : Span<Surfel>(surfel_buf.data(), surfel_buf.size())) {
     link_next.append(surfel.next);
     link_prev.append(surfel.prev);
   }

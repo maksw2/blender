@@ -11,6 +11,8 @@
 #include "BLI_math_matrix_types.hh"
 #include "BLI_span.hh"
 
+#include "BKE_lib_query.hh" /* For LibraryForeachIDCallbackFlag. */
+
 #include "DNA_modifier_types.h" /* Needed for all enum type definitions. */
 
 #include "DNA_customdata_types.h"
@@ -128,7 +130,10 @@ enum ModifierTypeFlag {
 };
 ENUM_OPERATORS(ModifierTypeFlag, eModifierTypeFlag_AcceptsGreasePencil)
 
-using IDWalkFunc = void (*)(void *user_data, Object *ob, ID **idpoin, int cb_flag);
+using IDWalkFunc = void (*)(void *user_data,
+                            Object *ob,
+                            ID **idpoin,
+                            LibraryForeachIDCallbackFlag cb_flag);
 using TexWalkFunc = void (*)(void *user_data,
                              Object *ob,
                              ModifierData *md,
@@ -577,7 +582,10 @@ ModifierData *BKE_modifier_get_evaluated(Depsgraph *depsgraph, Object *object, M
 
 Mesh *BKE_modifier_modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, Mesh *mesh);
 
-void BKE_modifier_deform_verts(ModifierData *md,
+/**
+ * \return False if the modifier did not support deforming the positions.
+ */
+bool BKE_modifier_deform_verts(ModifierData *md,
                                const ModifierEvalContext *ctx,
                                Mesh *mesh,
                                blender::MutableSpan<blender::float3> positions);

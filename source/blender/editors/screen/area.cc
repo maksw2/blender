@@ -6,6 +6,7 @@
  * \ingroup edscr
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -13,9 +14,10 @@
 
 #include "DNA_userdef_types.h"
 
-#include "BLI_blenlib.h"
-#include "BLI_linklist_stack.h"
+#include "BLI_linklist.h"
+#include "BLI_listbase.h"
 #include "BLI_rand.hh"
+#include "BLI_string.h"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
 
@@ -311,7 +313,7 @@ static void region_draw_azones(ScrArea *area, ARegion *region)
     rcti azrct;
     BLI_rcti_init(&azrct, az->x1, az->x2, az->y1, az->y2);
 
-    if (BLI_rcti_isect(&region->drawrct, &azrct, nullptr)) {
+    if (BLI_rcti_isect(&region->runtime->drawrct, &azrct, nullptr)) {
       if (az->type == AZONE_AREA) {
         area_draw_azone(az->x1, az->y1, az->x2, az->y2);
       }
@@ -510,8 +512,8 @@ void ED_region_do_draw(bContext *C, ARegion *region)
 
   region->runtime->do_draw |= RGN_DRAWING;
 
-  /* Set viewport, scissor, ortho and region->drawrct. */
-  wmPartialViewport(&region->drawrct, &region->winrct, &region->drawrct);
+  /* Set viewport, scissor, ortho and region->runtime->drawrct. */
+  wmPartialViewport(&region->runtime->drawrct, &region->winrct, &region->runtime->drawrct);
 
   wmOrtho2_region_pixelspace(region);
 
@@ -550,15 +552,15 @@ void ED_region_do_draw(bContext *C, ARegion *region)
     RandomNumberGenerator rng = RandomNumberGenerator::from_random_seed();
     immUniformColor4f(rng.get_float(), rng.get_float(), rng.get_float(), 0.1f);
     immRectf(pos,
-             region->drawrct.xmin - region->winrct.xmin,
-             region->drawrct.ymin - region->winrct.ymin,
-             region->drawrct.xmax - region->winrct.xmin,
-             region->drawrct.ymax - region->winrct.ymin);
+             region->runtime->drawrct.xmin - region->winrct.xmin,
+             region->runtime->drawrct.ymin - region->winrct.ymin,
+             region->runtime->drawrct.xmax - region->winrct.xmin,
+             region->runtime->drawrct.ymax - region->winrct.ymin);
     immUnbindProgram();
     GPU_blend(GPU_BLEND_NONE);
   }
 
-  memset(&region->drawrct, 0, sizeof(region->drawrct));
+  memset(&region->runtime->drawrct, 0, sizeof(region->runtime->drawrct));
 
   UI_blocklist_free_inactive(C, region);
 
@@ -606,7 +608,7 @@ void ED_region_do_draw(bContext *C, ARegion *region)
     {
       SpaceLink *sl = static_cast<SpaceLink *>(area->spacedata.first);
 
-      PointerRNA ptr = RNA_pointer_create(&screen->id, &RNA_Space, sl);
+      PointerRNA ptr = RNA_pointer_create_discrete(&screen->id, &RNA_Space, sl);
 
       /* All properties for this space type. */
       wmMsgSubscribeValue msg_sub_value_region_tag_redraw{};
@@ -642,14 +644,14 @@ void ED_region_tag_redraw(ARegion *region)
     region->runtime->do_draw &= ~(RGN_DRAW_PARTIAL | RGN_DRAW_NO_REBUILD |
                                   RGN_DRAW_EDITOR_OVERLAYS);
     region->runtime->do_draw |= RGN_DRAW;
-    memset(&region->drawrct, 0, sizeof(region->drawrct));
+    memset(&region->runtime->drawrct, 0, sizeof(region->runtime->drawrct));
   }
 }
 
 void ED_region_tag_redraw_cursor(ARegion *region)
 {
   if (region) {
-    region->do_draw_paintcursor = RGN_DRAW;
+    region->runtime->do_draw_paintcursor = RGN_DRAW;
   }
 }
 
@@ -658,7 +660,7 @@ void ED_region_tag_redraw_no_rebuild(ARegion *region)
   if (region && !(region->runtime->do_draw & (RGN_DRAWING | RGN_DRAW))) {
     region->runtime->do_draw &= ~(RGN_DRAW_PARTIAL | RGN_DRAW_EDITOR_OVERLAYS);
     region->runtime->do_draw |= RGN_DRAW_NO_REBUILD;
-    memset(&region->drawrct, 0, sizeof(region->drawrct));
+    memset(&region->runtime->drawrct, 0, sizeof(region->runtime->drawrct));
   }
 }
 
@@ -686,7 +688,7 @@ void ED_region_tag_redraw_partial(ARegion *region, const rcti *rct, bool rebuild
   if (region && !(region->runtime->do_draw & RGN_DRAWING)) {
     if (region->runtime->do_draw & RGN_DRAW_PARTIAL) {
       /* Partial redraw already set, expand region. */
-      BLI_rcti_union(&region->drawrct, rct);
+      BLI_rcti_union(&region->runtime->drawrct, rct);
       if (rebuild) {
         region->runtime->do_draw &= ~RGN_DRAW_NO_REBUILD;
       }
@@ -699,7 +701,7 @@ void ED_region_tag_redraw_partial(ARegion *region, const rcti *rct, bool rebuild
     }
     else {
       /* No redraw set yet, set partial region. */
-      region->drawrct = *rct;
+      region->runtime->drawrct = *rct;
       region->runtime->do_draw |= RGN_DRAW_PARTIAL;
       if (!rebuild) {
         region->runtime->do_draw |= RGN_DRAW_NO_REBUILD;
@@ -878,12 +880,14 @@ WorkspaceStatus::WorkspaceStatus(bContext *C)
 /** \name Private helper functions to help ensure consistent spacing
  * \{ */
 
-static constexpr float STATUS_AFTER_TEXT = 0.7f;
-static constexpr float STATUS_MOUSE_ICON_PAD = -0.5f;
+static constexpr float STATUS_BEFORE_TEXT = 0.17f;
+static constexpr float STATUS_AFTER_TEXT = 0.90f;
+static constexpr float STATUS_MOUSE_ICON_PAD = -0.68f;
 
 static void ed_workspace_status_text_item(WorkSpace *workspace, std::string text)
 {
   if (!text.empty()) {
+    ed_workspace_status_space(workspace, STATUS_BEFORE_TEXT);
     ed_workspace_status_item(workspace, std::move(text), ICON_NONE);
     ed_workspace_status_space(workspace, STATUS_AFTER_TEXT);
   }
@@ -976,7 +980,7 @@ void ED_workspace_status_text(bContext *C, const char *str)
 
 /* ************************************************************ */
 
-static void area_azone_init(wmWindow *win, const bScreen *screen, ScrArea *area)
+static void area_azone_init(const wmWindow *win, const bScreen *screen, ScrArea *area)
 {
   /* reinitialize entirely, regions and full-screen add azones too */
   BLI_freelistN(&area->actionzones);
@@ -997,25 +1001,30 @@ static void area_azone_init(wmWindow *win, const bScreen *screen, ScrArea *area)
     return;
   }
 
+  /* Use a taller zone on the left side, the height of
+   * the header, to make them easier to hit. The others
+   * on the right are shorter to not interfere with
+   * scroll bars. */
+
   const float coords[4][4] = {
       /* Bottom-left. */
       {area->totrct.xmin - U.pixelsize,
        area->totrct.ymin - U.pixelsize,
-       area->totrct.xmin + AZONESPOTW,
-       area->totrct.ymin + AZONESPOTH},
+       area->totrct.xmin + UI_AZONESPOTW,
+       float(area->totrct.ymin + ED_area_headersize())},
       /* Bottom-right. */
-      {area->totrct.xmax - AZONESPOTW,
+      {area->totrct.xmax - UI_AZONESPOTW,
        area->totrct.ymin - U.pixelsize,
        area->totrct.xmax + U.pixelsize,
-       area->totrct.ymin + AZONESPOTH},
+       area->totrct.ymin + UI_AZONESPOTH},
       /* Top-left. */
       {area->totrct.xmin - U.pixelsize,
-       area->totrct.ymax - AZONESPOTH,
-       area->totrct.xmin + AZONESPOTW,
+       float(area->totrct.ymax - ED_area_headersize()),
+       area->totrct.xmin + UI_AZONESPOTW,
        area->totrct.ymax + U.pixelsize},
       /* Top-right. */
-      {area->totrct.xmax - AZONESPOTW,
-       area->totrct.ymax - AZONESPOTH,
+      {area->totrct.xmax - UI_AZONESPOTW,
+       area->totrct.ymax - UI_AZONESPOTH,
        area->totrct.xmax + U.pixelsize,
        area->totrct.ymax + U.pixelsize},
   };
@@ -1260,12 +1269,10 @@ static void region_azones_scrollbars_init(ScrArea *area, ARegion *region)
 {
   const View2D *v2d = &region->v2d;
 
-  if ((v2d->scroll & V2D_SCROLL_VERTICAL) && ((v2d->scroll & V2D_SCROLL_VERTICAL_HANDLES) == 0)) {
+  if (v2d->scroll & V2D_SCROLL_VERTICAL) {
     region_azone_scrollbar_init(area, region, AZ_SCROLL_VERT);
   }
-  if ((v2d->scroll & V2D_SCROLL_HORIZONTAL) &&
-      ((v2d->scroll & V2D_SCROLL_HORIZONTAL_HANDLES) == 0))
-  {
+  if (v2d->scroll & V2D_SCROLL_HORIZONTAL) {
     region_azone_scrollbar_init(area, region, AZ_SCROLL_HOR);
   }
 }
@@ -2046,8 +2053,9 @@ void ED_area_and_region_types_init(ScrArea *area)
   }
 }
 
-void ED_area_init(wmWindowManager *wm, wmWindow *win, ScrArea *area)
+void ED_area_init(bContext *C, const wmWindow *win, ScrArea *area)
 {
+  wmWindowManager *wm = CTX_wm_manager(C);
   WorkSpace *workspace = WM_window_get_active_workspace(win);
   const bScreen *screen = BKE_workspace_active_screen_get(win->workspace_hook);
   const Scene *scene = WM_window_get_active_scene(win);
@@ -2064,6 +2072,8 @@ void ED_area_init(wmWindowManager *wm, wmWindow *win, ScrArea *area)
 
   /* area sizes */
   area_calc_totrct(area, &window_rect);
+
+  area_regions_poll(C, screen, area);
 
   /* region rect sizes */
   rcti rect = area->totrct;
@@ -2249,7 +2259,7 @@ void ED_region_visibility_change_update_ex(
   }
 
   if (do_init) {
-    ED_area_init(CTX_wm_manager(C), CTX_wm_window(C), area);
+    ED_area_init(C, CTX_wm_window(C), area);
     ED_area_tag_redraw(area);
   }
 }
@@ -2577,8 +2587,8 @@ void ED_area_swapspace(bContext *C, ScrArea *sa1, ScrArea *sa2)
   ED_area_data_copy(tmp, sa1, false);
   ED_area_data_copy(sa1, sa2, true);
   ED_area_data_copy(sa2, tmp, true);
-  ED_area_init(CTX_wm_manager(C), win, sa1);
-  ED_area_init(CTX_wm_manager(C), win, sa2);
+  ED_area_init(C, win, sa1);
+  ED_area_init(C, win, sa2);
 
   BKE_screen_area_free(tmp);
   MEM_delete(tmp);
@@ -2694,7 +2704,7 @@ void ED_area_newspace(bContext *C, ScrArea *area, int type, const bool skip_regi
       region_align_info_to_area(area, region_align_info);
     }
 
-    ED_area_init(CTX_wm_manager(C), win, area);
+    ED_area_init(C, win, area);
 
     /* tell WM to refresh, cursor types etc */
     WM_event_add_mousemove(win);
@@ -2706,14 +2716,31 @@ void ED_area_newspace(bContext *C, ScrArea *area, int type, const bool skip_regi
   }
 
   /* Set area space subtype if applicable. */
-  if (st->space_subtype_item_extend != nullptr) {
+  if (st && st->space_subtype_item_extend != nullptr) {
+    if (area->butspacetype_subtype == -1) {
+      /* Indication (probably from space_type_set_or_cycle) to ignore the
+       * area's current subtype and use last-used, as saved in the space. */
+      area->butspacetype_subtype = st->space_subtype_get(area);
+    }
     st->space_subtype_set(area, area->butspacetype_subtype);
   }
+
+  /* Whether setting a subtype or not we need to clear this value. Not just unneeded
+   * but can interfere with the next change. Operations can change the type without
+   * specifying a subtype (assumed zero) and we don't want to use the old subtype. */
   area->butspacetype_subtype = 0;
 
   if (BLI_listbase_is_single(&CTX_wm_screen(C)->areabase)) {
     /* If there is only one area update the window title. */
     WM_window_title(CTX_wm_manager(C), CTX_wm_window(C));
+  }
+
+  /* See #WM_capabilities_flag code-comments for details on the background check. */
+  if (!G.background) {
+    /* If window decoration styles are supported, send a notification to re-apply them. */
+    if (WM_capabilities_flag() & WM_CAPABILITY_WINDOW_DECORATION_STYLES) {
+      WM_event_add_notifier(C, NC_WINDOW, nullptr);
+    }
   }
 
   /* also redraw when re-used */
@@ -2772,7 +2799,7 @@ int ED_area_header_switchbutton(const bContext *C, uiBlock *block, int yco)
   bScreen *screen = CTX_wm_screen(C);
   int xco = 0.4 * U.widget_unit;
 
-  PointerRNA areaptr = RNA_pointer_create(&(screen->id), &RNA_Area, area);
+  PointerRNA areaptr = RNA_pointer_create_discrete(&(screen->id), &RNA_Area, area);
 
   uiDefButR(block,
             UI_BTYPE_MENU,
@@ -3570,17 +3597,13 @@ void ED_region_header_layout(const bContext *C, ARegion *region)
 
       /* for view2d */
       xco = uiLayoutGetWidth(layout);
-      if (xco > maxco) {
-        maxco = xco;
-      }
+      maxco = std::max(xco, maxco);
     }
 
     UI_block_layout_resolve(block, &xco, &yco);
 
     /* for view2d */
-    if (xco > maxco) {
-      maxco = xco;
-    }
+    maxco = std::max(xco, maxco);
 
     int new_sizex = (maxco + UI_HEADER_OFFSET) / UI_SCALE_FAC;
 
@@ -4040,26 +4063,37 @@ void ED_region_cache_draw_background(ARegion *region)
 
 void ED_region_cache_draw_curfra_label(const int framenr, const float x, const float y)
 {
+  using namespace blender;
   const uiStyle *style = UI_style_get();
   int fontid = style->widget.uifont_id;
-  char numstr[32];
-  float font_dims[2] = {0.0f, 0.0f};
 
-  /* frame number */
+  /* Format frame number. */
+  char numstr[32];
   BLF_size(fontid, 11.0f * UI_SCALE_FAC);
   SNPRINTF(numstr, "%d", framenr);
 
-  BLF_width_and_height(fontid, numstr, sizeof(numstr), &font_dims[0], &font_dims[1]);
+  float2 text_dims = {0.0f, 0.0f};
+  BLF_width_and_height(fontid, numstr, sizeof(numstr), &text_dims.x, &text_dims.y);
+  float padding = 3.0f * UI_SCALE_FAC;
 
-  uint pos = GPU_vertformat_attr_add(
-      immVertexFormat(), "pos", GPU_COMP_I32, 2, GPU_FETCH_INT_TO_FLOAT);
-  immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
-  immUniformThemeColor(TH_CFRAME);
-  immRecti(pos, x, y, x + font_dims[0] + 6.0f, y + font_dims[1] + 4.0f);
-  immUnbindProgram();
+  /* Rounded corner background box. */
+  float4 bg_color;
+  UI_GetThemeColorShade4fv(TH_CFRAME, -5, bg_color);
+  float4 outline_color;
+  UI_GetThemeColorShade4fv(TH_CFRAME, 5, outline_color);
 
-  UI_FontThemeColor(fontid, TH_TEXT);
-  BLF_position(fontid, x + 2.0f, y + 2.0f, 0.0f);
+  rctf rect{};
+  rect.xmin = x - text_dims.x / 2 - padding;
+  rect.xmax = x + text_dims.x / 2 + padding;
+  rect.ymin = y;
+  rect.ymax = y + text_dims.y + padding * 2;
+  UI_draw_roundbox_corner_set(UI_CNR_ALL);
+  UI_draw_roundbox_4fv_ex(
+      &rect, bg_color, nullptr, 1.0f, outline_color, U.pixelsize, 3 * UI_SCALE_FAC);
+
+  /* Text label. */
+  UI_FontThemeColor(fontid, TH_HEADER_TEXT_HI);
+  BLF_position(fontid, x - text_dims.x * 0.5f, y + padding, 0.0f);
   BLF_draw(fontid, numstr, sizeof(numstr));
 }
 

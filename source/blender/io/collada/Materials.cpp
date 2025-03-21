@@ -4,8 +4,11 @@
 
 #include "Materials.h"
 
-#include "BKE_node.hh"
+#include "BLI_listbase.h"
+#include "BLI_string.h"
 
+#include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
 
@@ -100,18 +103,18 @@ bNodeTree *MaterialNode::prepare_material_nodetree()
 
 void MaterialNode::update_material_nodetree()
 {
-  BKE_ntree_update_main_tree(CTX_data_main(mContext), ntree, nullptr);
+  BKE_ntree_update_after_single_tree_change(*CTX_data_main(mContext), *ntree);
 }
 
 bNode *MaterialNode::add_node(int node_type, int locx, int locy, std::string label)
 {
-  bNode *node = blender::bke::node_add_static_node(mContext, ntree, node_type);
+  bNode *node = blender::bke::node_add_static_node(mContext, *ntree, node_type);
   if (node) {
     if (label.length() > 0) {
       STRNCPY(node->label, label.c_str());
     }
-    node->locx = locx;
-    node->locy = locy;
+    node->location[0] = locx;
+    node->location[1] = locy;
     node->flag |= NODE_SELECT;
   }
   node_map[label] = node;
@@ -123,7 +126,7 @@ void MaterialNode::add_link(bNode *from_node, int from_index, bNode *to_node, in
   bNodeSocket *from_socket = (bNodeSocket *)BLI_findlink(&from_node->outputs, from_index);
   bNodeSocket *to_socket = (bNodeSocket *)BLI_findlink(&to_node->inputs, to_index);
 
-  blender::bke::node_add_link(ntree, from_node, from_socket, to_node, to_socket);
+  blender::bke::node_add_link(*ntree, *from_node, *from_socket, *to_node, *to_socket);
 }
 
 void MaterialNode::add_link(bNode *from_node,
@@ -131,11 +134,11 @@ void MaterialNode::add_link(bNode *from_node,
                             bNode *to_node,
                             const char *to_label)
 {
-  bNodeSocket *from_socket = blender::bke::node_find_socket(from_node, SOCK_OUT, from_label);
-  bNodeSocket *to_socket = blender::bke::node_find_socket(to_node, SOCK_IN, to_label);
+  bNodeSocket *from_socket = blender::bke::node_find_socket(*from_node, SOCK_OUT, from_label);
+  bNodeSocket *to_socket = blender::bke::node_find_socket(*to_node, SOCK_IN, to_label);
 
   if (from_socket && to_socket) {
-    blender::bke::node_add_link(ntree, from_node, from_socket, to_node, to_socket);
+    blender::bke::node_add_link(*ntree, *from_node, *from_socket, *to_node, *to_socket);
   }
 }
 
@@ -143,7 +146,7 @@ void MaterialNode::set_reflectivity(COLLADAFW::FloatOrParam &val)
 {
   float reflectivity = val.getFloatValue();
   if (reflectivity >= 0) {
-    bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "Metallic");
+    bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "Metallic");
     ((bNodeSocketValueFloat *)socket->default_value)->value = reflectivity;
     material->metallic = reflectivity;
   }
@@ -155,7 +158,7 @@ void MaterialNode::set_shininess(COLLADAFW::FloatOrParam &val)
 {
   float roughness = val.getFloatValue();
   if (roughness >= 0) {
-    bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "Roughness");
+    bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "Roughness");
     ((bNodeSocketValueFloat *)socket->default_value)->value = roughness;
   }
 }
@@ -171,7 +174,7 @@ void MaterialNode::set_ior(COLLADAFW::FloatOrParam &val)
     return;
   }
 
-  bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "IOR");
+  bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "IOR");
   ((bNodeSocketValueFloat *)socket->default_value)->value = ior;
 }
 
@@ -210,7 +213,7 @@ void MaterialNode::set_alpha(COLLADAFW::EffectCommon::OpaqueMode mode,
       alpha = 1 - alpha;
     }
 
-    bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "Alpha");
+    bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "Alpha");
     ((bNodeSocketValueFloat *)socket->default_value)->value = alpha;
     material->a = alpha;
   }
@@ -231,7 +234,7 @@ void MaterialNode::set_diffuse(COLLADAFW::ColorOrTexture &cot)
     }
   }
   else {
-    bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "Base Color");
+    bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "Base Color");
     float *fcol = (float *)socket->default_value;
 
     if (cot.isColor()) {
@@ -260,7 +263,7 @@ Image *MaterialNode::get_diffuse_image()
   }
   const bNode *shader = nodes.first();
 
-  const bNodeSocket *in_socket = blender::bke::node_find_socket(shader, SOCK_IN, "Base Color");
+  const bNodeSocket *in_socket = blender::bke::node_find_socket(*shader, SOCK_IN, "Base Color");
   if (in_socket == nullptr) {
     return nullptr;
   }
@@ -275,7 +278,7 @@ Image *MaterialNode::get_diffuse_image()
     return nullptr;
   }
 
-  if (texture->type != SH_NODE_TEX_IMAGE) {
+  if (texture->type_legacy != SH_NODE_TEX_IMAGE) {
     return nullptr;
   }
 
@@ -331,7 +334,7 @@ void MaterialNode::set_emission(COLLADAFW::ColorOrTexture &cot)
   int locy = -300 * (node_map.size() - 2);
   if (cot.isColor()) {
     COLLADAFW::Color col = cot.getColor();
-    bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "Emission Color");
+    bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "Emission Color");
     float *fcol = (float *)socket->default_value;
 
     fcol[0] = col.getRed();
@@ -347,7 +350,7 @@ void MaterialNode::set_emission(COLLADAFW::ColorOrTexture &cot)
     }
   }
 
-  bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "Emission Strength");
+  bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "Emission Strength");
   if (socket) {
     *(float *)socket->default_value = 1.0f;
   }
@@ -368,7 +371,7 @@ void MaterialNode::set_opacity(COLLADAFW::ColorOrTexture &cot)
       alpha *= col.getAlpha(); /* Assuming A_ONE opaque mode */
     }
 
-    bNodeSocket *socket = blender::bke::node_find_socket(shader_node, SOCK_IN, "Alpha");
+    bNodeSocket *socket = blender::bke::node_find_socket(*shader_node, SOCK_IN, "Alpha");
     ((bNodeSocketValueFloat *)socket->default_value)->value = alpha;
   }
   /* texture */
@@ -409,7 +412,7 @@ void MaterialNode::set_specular(COLLADAFW::ColorOrTexture &cot)
      * way to handle specularity in general. Also note that currently we
      * do not export specularity values, see EffectExporter::operator() */
     bNodeSocket *socket = blender::bke::node_find_socket(
-        shader_node, SOCK_IN, "Specular IOR Level");
+        *shader_node, SOCK_IN, "Specular IOR Level");
     ((bNodeSocketValueFloat *)socket->default_value)->value = 0.0f;
   }
 }

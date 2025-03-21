@@ -13,6 +13,7 @@
 #include "BLI_math_rotation.h"
 #include "DEG_depsgraph_query.hh"
 #include "DNA_camera_types.h"
+#include "DRW_render.hh"
 #include "ED_view3d.hh"
 
 #include "draw_manager_text.hh"
@@ -26,7 +27,7 @@ struct CameraInstanceData : public ExtraInstanceData {
   float &volume_end = color_[3];
   float &depth = color_[3];
   float &focus = color_[3];
-  float4x4 &matrix = object_to_world_;
+  float4x4 &matrix = object_to_world;
   float &dist_color_id = matrix[0][3];
   float &corner_x = matrix[0][3];
   float &corner_y = matrix[1][3];
@@ -38,7 +39,7 @@ struct CameraInstanceData : public ExtraInstanceData {
   float &mist_end = matrix[3][3];
 
   CameraInstanceData(const CameraInstanceData &data)
-      : CameraInstanceData(data.object_to_world_, data.color_)
+      : CameraInstanceData(data.object_to_world, data.color_)
   {
   }
 
@@ -88,7 +89,7 @@ class Cameras : Overlay {
   bool extras_enabled_ = false;
   bool motion_tracking_enabled_ = false;
 
-  State::ViewOffsetData offset_data_;
+  View::OffsetData offset_data_;
   float4x4 depth_bias_winmat_;
 
  public:
@@ -99,7 +100,7 @@ class Cameras : Overlay {
     enabled_ = state.is_space_v3d();
     extras_enabled_ = enabled_ && state.show_extras();
     motion_tracking_enabled_ = enabled_ && state.v3d->flag2 & V3D_SHOW_RECONSTRUCTION;
-    images_enabled_ = enabled_ && !res.is_selection();
+    images_enabled_ = enabled_ && !res.is_selection() && !state.is_depth_only_drawing;
     enabled_ = extras_enabled_ || images_enabled_ || motion_tracking_enabled_;
 
     offset_data_ = state.offset_data_get();
@@ -122,8 +123,9 @@ class Cameras : Overlay {
       auto init_pass = [&](PassMain &pass, DRWState draw_state) {
         pass.init();
         pass.state_set(draw_state, state.clipping_plane_count);
-        pass.shader_set(res.shaders.image_plane_depth_bias.get());
+        pass.shader_set(res.shaders->image_plane_depth_bias.get());
         pass.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+        pass.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
         pass.push_constant("depth_bias_winmat", &depth_bias_winmat_);
         res.select_bind(pass);
       };
@@ -167,6 +169,7 @@ class Cameras : Overlay {
 
     ps_.init();
     ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
+    ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
     res.select_bind(ps_);
 
     {
@@ -174,7 +177,7 @@ class Cameras : Overlay {
       sub_pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA |
                              DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_CULL_BACK,
                          state.clipping_plane_count);
-      sub_pass.shader_set(res.shaders.extra_shape.get());
+      sub_pass.shader_set(res.shaders->extra_shape.get());
       call_buffers_.volume_buf.end_sync(sub_pass, res.shapes.camera_volume.get());
     }
     {
@@ -182,7 +185,7 @@ class Cameras : Overlay {
       sub_pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA |
                              DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_CULL_BACK,
                          state.clipping_plane_count);
-      sub_pass.shader_set(res.shaders.extra_shape.get());
+      sub_pass.shader_set(res.shaders->extra_shape.get());
       call_buffers_.volume_wire_buf.end_sync(sub_pass, res.shapes.camera_volume_wire.get());
     }
 
@@ -191,7 +194,7 @@ class Cameras : Overlay {
       sub_pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
                              DRW_STATE_DEPTH_LESS_EQUAL,
                          state.clipping_plane_count);
-      sub_pass.shader_set(res.shaders.extra_shape.get());
+      sub_pass.shader_set(res.shaders->extra_shape.get());
       call_buffers_.distances_buf.end_sync(sub_pass, res.shapes.camera_distances.get());
       call_buffers_.frame_buf.end_sync(sub_pass, res.shapes.camera_frame.get());
       call_buffers_.tria_buf.end_sync(sub_pass, res.shapes.camera_tria.get());
@@ -204,7 +207,7 @@ class Cameras : Overlay {
       sub_pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
                              DRW_STATE_DEPTH_LESS_EQUAL,
                          state.clipping_plane_count);
-      sub_pass.shader_set(res.shaders.extra_wire.get());
+      sub_pass.shader_set(res.shaders->extra_wire.get());
       call_buffers_.stereo_connect_lines.end_sync(sub_pass);
       call_buffers_.tracking_path.end_sync(sub_pass);
     }
@@ -224,8 +227,7 @@ class Cameras : Overlay {
     manager.generate_commands(background_ps_, view);
     manager.generate_commands(foreground_ps_, view);
 
-    float view_dist = State::view_dist_get(offset_data_, view.winmat());
-    depth_bias_winmat_ = winmat_polygon_offset(view.winmat(), view_dist, -1.0f);
+    depth_bias_winmat_ = offset_data_.winmat_polygon_offset(view.winmat(), -1.0f);
   }
 
   void draw_line(Framebuffer &framebuffer, Manager &manager, View &view) final
@@ -280,13 +282,16 @@ class Cameras : Overlay {
     }
 
     Object *ob = ob_ref.object;
-    CameraInstanceData data(ob->object_to_world(), res.object_wire_color(ob_ref, state));
+    float4x4 mat = ob->object_to_world();
+    /* Normalize matrix scale. */
+    mat.view<3, 3>() = math::normalize(mat.view<3, 3>());
+    CameraInstanceData data(mat, res.object_wire_color(ob_ref, state));
 
     const View3D *v3d = state.v3d;
     const Scene *scene = state.scene;
     const RegionView3D *rv3d = state.rv3d;
 
-    const Camera *cam = static_cast<Camera *>(ob->data);
+    const Camera &cam = DRW_object_get_data_for_drawing<Camera>(*ob);
     const Object *camera_object = DEG_get_evaluated_object(state.depsgraph, v3d->camera);
     const bool is_select = res.is_selection();
     const bool is_active = (ob == camera_object);
@@ -299,7 +304,7 @@ class Cameras : Overlay {
     const bool is_selection_camera_stereo = is_select && is_camera_view && is_multiview &&
                                             is_stereo3d_view;
 
-    float3 scale = math::to_scale(data.matrix);
+    float3 scale = math::to_scale(ob->object_to_world());
     /* BKE_camera_multiview_model_matrix already accounts for scale, don't do it here. */
     if (is_selection_camera_stereo) {
       scale = float3(1.0f);
@@ -314,8 +319,8 @@ class Cameras : Overlay {
     float2 shift;
     float drawsize;
     BKE_camera_view_frame_ex(scene,
-                             cam,
-                             cam->drawsize,
+                             &cam,
+                             cam.drawsize,
                              is_camera_view,
                              1.0f / scale,
                              aspect_ratio,
@@ -379,19 +384,19 @@ class Cameras : Overlay {
       (is_active ? call_buffers_.tria_buf : call_buffers_.tria_wire_buf).append(data, select_id);
     }
 
-    if (cam->flag & CAM_SHOWLIMITS) {
+    if (cam.flag & CAM_SHOWLIMITS) {
       /* Scale focus point. */
-      data.matrix.x_axis() *= cam->drawsize;
-      data.matrix.y_axis() *= cam->drawsize;
+      data.matrix.x_axis() *= cam.drawsize;
+      data.matrix.y_axis() *= cam.drawsize;
 
       data.dist_color_id = (is_active) ? 3 : 2;
       data.focus = -BKE_camera_object_dof_distance(ob);
-      data.clip_start = cam->clip_start;
-      data.clip_end = cam->clip_end;
+      data.clip_start = cam.clip_start;
+      data.clip_end = cam.clip_end;
       call_buffers_.distances_buf.append(data, select_id);
     }
 
-    if (cam->flag & CAM_SHOWMIST) {
+    if (cam.flag & CAM_SHOWMIST) {
       World *world = scene->world;
       if (world) {
         data.dist_color_id = (is_active) ? 1 : 0;
@@ -429,8 +434,8 @@ class Cameras : Overlay {
     int track_index = 1;
 
     float4 bundle_color_custom;
-    float *bundle_color_solid = G_draw.block.color_bundle_solid;
-    float *bundle_color_unselected = G_draw.block.color_wire;
+    float *bundle_color_solid = res.theme_settings.color_bundle_solid;
+    float *bundle_color_unselected = res.theme_settings.color_wire;
     uchar4 text_color_selected, text_color_unselected;
     /* Color Management: Exception here as texts are drawn in sRGB space directly. */
     UI_GetThemeColor4ubv(TH_SELECT, text_color_selected);
@@ -514,9 +519,7 @@ class Cameras : Overlay {
         }
 
         if ((v3d->flag2 & V3D_SHOW_BUNDLENAME) && !is_selection) {
-          DRWTextStore *dt = DRW_text_cache_ensure();
-
-          DRW_text_cache_add(dt,
+          DRW_text_cache_add(state.dt,
                              bundle_mat[3],
                              track->name,
                              strlen(track->name),
@@ -556,13 +559,13 @@ class Cameras : Overlay {
                           Resources &res)
   {
     Object *ob = ob_ref.object;
-    const Camera *cam = static_cast<Camera *>(ob_ref.object->data);
+    const Camera &cam = DRW_object_get_data_for_drawing<Camera>(*ob_ref.object);
     const Object *camera_object = DEG_get_evaluated_object(state.depsgraph, state.v3d->camera);
 
     const bool is_active = ob_ref.object == camera_object;
     const bool is_camera_view = (is_active && (state.rv3d->persp == RV3D_CAMOB));
-    const bool show_image = (cam->flag & CAM_SHOW_BG_IMAGE) &&
-                            !BLI_listbase_is_empty(&cam->bg_images);
+    const bool show_image = (cam.flag & CAM_SHOW_BG_IMAGE) &&
+                            !BLI_listbase_is_empty(&cam.bg_images);
     const bool show_frame = BKE_object_empty_image_frame_is_visible_in_view3d(ob, state.rv3d);
 
     if (!images_enabled_ || !is_camera_view || !show_image || !show_frame) {
@@ -574,7 +577,7 @@ class Cameras : Overlay {
     float4x4 modelmat;
     BKE_camera_multiview_model_matrix(&state.scene->r, ob, viewname, modelmat.ptr());
 
-    for (const CameraBGImage *bgpic : ConstListBaseWrapper<CameraBGImage>(&cam->bg_images)) {
+    for (const CameraBGImage *bgpic : ConstListBaseWrapper<CameraBGImage>(&cam.bg_images)) {
       if (bgpic->flag & CAM_BGIMG_FLAG_DISABLED) {
         continue;
       }
@@ -589,7 +592,7 @@ class Cameras : Overlay {
           bgpic, state, res, aspect, use_alpha_premult, use_view_transform);
 
       if (tex) {
-        image_camera_background_matrix_get(cam, bgpic, state, aspect, mat);
+        image_camera_background_matrix_get(&cam, bgpic, state, aspect, mat);
 
         const bool is_foreground = (bgpic->flag & CAM_BGIMG_FLAG_FOREGROUND) != 0;
         /* Alpha is clamped just below 1.0 to fix background images to interfere with foreground
@@ -778,7 +781,7 @@ class Cameras : Overlay {
   {
     CameraInstanceData stereodata = instdata;
 
-    const Camera *cam = static_cast<const Camera *>(ob->data);
+    const Camera &cam = DRW_object_get_data_for_drawing<const Camera>(*ob);
     const char *viewnames[2] = {STEREO_LEFT_NAME, STEREO_RIGHT_NAME};
 
     const bool is_stereo3d_cameras = (v3d->stereo3d_flag & V3D_S3D_DISPCAMERAS) != 0;
@@ -808,7 +811,7 @@ class Cameras : Overlay {
 
         /* Connecting line between cameras. */
         call_buffers_.stereo_connect_lines.append(stereodata.matrix.location(),
-                                                  instdata.object_to_world_.location(),
+                                                  instdata.object_to_world.location(),
                                                   res.theme_settings.color_wire,
                                                   cam_select_id);
       }
@@ -816,8 +819,8 @@ class Cameras : Overlay {
       if (is_stereo3d_volume && !is_selection) {
         float r = (eye == 1) ? 2.0f : 1.0f;
 
-        stereodata.volume_start = -cam->clip_start;
-        stereodata.volume_end = -cam->clip_end;
+        stereodata.volume_start = -cam.clip_start;
+        stereodata.volume_end = -cam.clip_end;
         /* Encode eye + intensity and alpha (see shader) */
         stereodata.color_.x = r + 0.15f;
         stereodata.color_.y = 1.0f;
@@ -837,7 +840,7 @@ class Cameras : Overlay {
     }
 
     if (is_stereo3d_plane && !is_selection) {
-      if (cam->stereo.convergence_mode == CAM_S3D_TOE) {
+      if (cam.stereo.convergence_mode == CAM_S3D_TOE) {
         /* There is no real convergence plane but we highlight the center
          * point where the views are pointing at. */
         // stereodata.matrix.x_axis() = float3(0.0f); /* We reconstruct from Z and Y */
@@ -855,7 +858,7 @@ class Cameras : Overlay {
         stereodata.matrix.x_axis() = math::cross(stereodata.matrix.y_axis(),
                                                  stereodata.matrix.z_axis());
       }
-      else if (cam->stereo.convergence_mode == CAM_S3D_PARALLEL) {
+      else if (cam.stereo.convergence_mode == CAM_S3D_PARALLEL) {
         /* Show plane at the given distance between the views even if it makes no sense. */
         stereodata.matrix.location() = float3(0.0f);
         for (int i : IndexRange(2)) {
@@ -864,11 +867,11 @@ class Cameras : Overlay {
           stereodata.matrix.location() += mat.location() * 0.5f;
         }
       }
-      else if (cam->stereo.convergence_mode == CAM_S3D_OFFAXIS) {
+      else if (cam.stereo.convergence_mode == CAM_S3D_OFFAXIS) {
         /* Nothing to do. Everything is already setup. */
       }
-      stereodata.volume_start = -cam->stereo.convergence_distance;
-      stereodata.volume_end = -cam->stereo.convergence_distance;
+      stereodata.volume_start = -cam.stereo.convergence_distance;
+      stereodata.volume_end = -cam.stereo.convergence_distance;
       /* Encode eye + intensity and alpha (see shader) */
       stereodata.color_.x = 0.1f;
       stereodata.color_.y = 1.0f;
@@ -888,11 +891,11 @@ class Cameras : Overlay {
                                          float corner_x,
                                          bool right_eye)
   {
-    const Camera *cam = static_cast<const Camera *>(ob->data);
-    if (cam->stereo.convergence_mode == CAM_S3D_OFFAXIS) {
+    const Camera &cam = DRW_object_get_data_for_drawing<const Camera>(*ob);
+    if (cam.stereo.convergence_mode == CAM_S3D_OFFAXIS) {
       const char *viewnames[2] = {STEREO_LEFT_NAME, STEREO_RIGHT_NAME};
       const float shiftx = BKE_camera_multiview_shift_x(&scene->r, ob, viewnames[right_eye]);
-      const float delta_shiftx = shiftx - cam->shiftx;
+      const float delta_shiftx = shiftx - cam.shiftx;
       const float width = corner_x * 2.0f;
       return delta_shiftx * width;
     }

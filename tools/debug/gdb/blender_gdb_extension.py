@@ -21,8 +21,13 @@ To validate that things are registered correctly:
 3. Run `info frame-filter` and check for `blender-frame-filters`.
 '''
 
+__all__ = (
+    # Not used externally but functions as a `main`.
+    "register",
+)
+
 import gdb
-import functools
+import gdb.printing
 from contextlib import contextmanager
 from gdb.FrameDecorator import FrameDecorator
 
@@ -675,4 +680,5 @@ def register():
     gdb.frame_filters[frame_filter.name] = frame_filter
 
 
-register()
+if __name__ == "__main__":
+    register()

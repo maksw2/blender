@@ -10,10 +10,6 @@
 
 #include "BLI_sys_types.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 struct Camera;
 struct ImBuf;
 struct ListBase;
@@ -525,12 +521,17 @@ struct ImBuf *BKE_tracking_distort_frame(struct MovieTracking *tracking,
                                          int calibration_height,
                                          float overscan);
 
-void BKE_tracking_max_distortion_delta_across_bound(struct MovieTracking *tracking,
-                                                    int image_width,
-                                                    int image_height,
-                                                    const struct rcti *rect,
-                                                    bool undistort,
-                                                    float r_delta[2]);
+/* Given the size of an image that will be distorted/undistorted by the given tracking, compute the
+ * number of pixels that the image will grow/shrink by in each of the four bounds of the image as a
+ * result of the distortion/undistortion. The deltas for the bounds are positive for expansion and
+ * negative for shrinking. */
+void BKE_tracking_distortion_bounds_deltas(MovieTracking *tracking,
+                                           const int size[2],
+                                           const bool undistort,
+                                           int *r_right,
+                                           int *r_left,
+                                           int *r_bottom,
+                                           int *r_top);
 
 /* --------------------------------------------------------------------
  * Image sampling.
@@ -823,7 +824,3 @@ void BKE_tracking_get_rna_path_prefix_for_plane_track(
 
 #define PLANE_TRACK_VIEW_SELECTED(plane_track) \
   ((((plane_track)->flag & PLANE_TRACK_HIDDEN) == 0) && ((plane_track)->flag & SELECT))
-
-#ifdef __cplusplus
-}
-#endif

@@ -7,7 +7,6 @@
  */
 
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -35,7 +34,7 @@
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
-#include "BKE_material.h"
+#include "BKE_material.hh"
 #include "BKE_particle.h"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
@@ -371,7 +370,7 @@ static bool objects_selectable_poll(bContext *C)
 /** \name Select by Type
  * \{ */
 
-static int object_select_by_type_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_select_by_type_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -600,7 +599,7 @@ void select_linked_by_id(bContext *C, ID *id)
   }
 }
 
-static int object_select_linked_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_select_linked_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -1002,7 +1001,7 @@ static bool select_grouped_keyingset(bContext *C, Object * /*ob*/, ReportList *r
   return changed;
 }
 
-static int object_select_grouped_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_select_grouped_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -1106,7 +1105,7 @@ void OBJECT_OT_select_grouped(wmOperatorType *ot)
 /** \name (De)select All
  * \{ */
 
-static int object_select_all_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_select_all_exec(bContext *C, wmOperator *op)
 {
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
@@ -1156,7 +1155,7 @@ void OBJECT_OT_select_all(wmOperatorType *ot)
 /** \name Select In The Same Collection
  * \{ */
 
-static int object_select_same_collection_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_select_same_collection_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   Collection *collection;
@@ -1222,7 +1221,7 @@ void OBJECT_OT_select_same_collection(wmOperatorType *ot)
 /** \name Select Mirror
  * \{ */
 
-static int object_select_mirror_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_select_mirror_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
@@ -1343,7 +1342,7 @@ static bool object_select_more_less(bContext *C, const bool select)
   return changed;
 }
 
-static int object_select_more_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus object_select_more_exec(bContext *C, wmOperator * /*op*/)
 {
   bool changed = object_select_more_less(C, true);
 
@@ -1374,7 +1373,7 @@ void OBJECT_OT_select_more(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-static int object_select_less_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus object_select_less_exec(bContext *C, wmOperator * /*op*/)
 {
   bool changed = object_select_more_less(C, false);
 
@@ -1411,7 +1410,7 @@ void OBJECT_OT_select_less(wmOperatorType *ot)
 /** \name Select Random
  * \{ */
 
-static int object_select_random_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus object_select_random_exec(bContext *C, wmOperator *op)
 {
   const bool select = (RNA_enum_get(op->ptr, "action") == SEL_SELECT);
   const float randfac = RNA_float_get(op->ptr, "ratio");

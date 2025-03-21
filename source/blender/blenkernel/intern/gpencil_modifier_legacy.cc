@@ -7,29 +7,24 @@
  */
 
 #include "BLI_assert.h"
+#include "BLI_listbase.h"
 #include "MEM_guardedalloc.h"
 
-#include "DNA_gpencil_legacy_types.h"
 #include "DNA_gpencil_modifier_types.h"
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
+#include "DNA_texture_types.h"
 
 #include "BKE_colortools.hh"
 #include "BKE_deform.hh"
-#include "BKE_gpencil_geom_legacy.h"
 #include "BKE_gpencil_legacy.h"
 #include "BKE_gpencil_modifier_legacy.h"
 #include "BKE_lattice.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
-#include "BKE_material.h"
 #include "BKE_modifier.hh"
-#include "BKE_object.hh"
 #include "BKE_screen.hh"
 #include "BKE_shrinkwrap.hh"
-
-#include "DEG_depsgraph.hh"
-#include "DEG_depsgraph_query.hh"
 
 #include "BLO_read_write.hh"
 
@@ -356,7 +351,7 @@ static void gpencil_modifier_foreach_ID_link(GpencilModifierData *md,
 static void modifier_free_data_id_us_cb(void * /*user_data*/,
                                         Object * /*ob*/,
                                         ID **idpoin,
-                                        int cb_flag)
+                                        const LibraryForeachIDCallbackFlag cb_flag)
 {
   ID *id = *idpoin;
   if (id != nullptr && (cb_flag & IDWALK_CB_USER) != 0) {

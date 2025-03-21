@@ -12,6 +12,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BKE_context.hh"
+#include "BKE_library.hh"
 #include "BKE_modifier.hh"
 #include "BKE_screen.hh"
 
@@ -33,6 +34,8 @@
 #include "WM_types.hh"
 
 #include "MOD_ui_common.hh" /* Self include */
+
+using blender::StringRefNull;
 
 /**
  * Poll function so these modifier panels don't show for other object types with modifiers (only
@@ -108,7 +111,7 @@ PointerRNA *modifier_panel_get_property_pointers(Panel *panel, PointerRNA *r_ob_
   BLI_assert(RNA_struct_is_a(ptr->type, &RNA_Modifier));
 
   if (r_ob_ptr != nullptr) {
-    *r_ob_ptr = RNA_pointer_create(ptr->owner_id, &RNA_Object, ptr->owner_id);
+    *r_ob_ptr = RNA_pointer_create_discrete(ptr->owner_id, &RNA_Object, ptr->owner_id);
   }
 
   uiBlock *block = uiLayoutGetBlock(panel->layout);
@@ -122,19 +125,19 @@ PointerRNA *modifier_panel_get_property_pointers(Panel *panel, PointerRNA *r_ob_
 void modifier_vgroup_ui(uiLayout *layout,
                         PointerRNA *ptr,
                         PointerRNA *ob_ptr,
-                        const char *vgroup_prop,
-                        const char *invert_vgroup_prop,
-                        const char *text)
+                        const StringRefNull vgroup_prop,
+                        const std::optional<StringRefNull> invert_vgroup_prop,
+                        const std::optional<StringRefNull> text)
 {
-  bool has_vertex_group = RNA_string_length(ptr, vgroup_prop) != 0;
+  bool has_vertex_group = RNA_string_length(ptr, vgroup_prop.c_str()) != 0;
 
   uiLayout *row = uiLayoutRow(layout, true);
   uiItemPointerR(row, ptr, vgroup_prop, ob_ptr, "vertex_groups", text, ICON_GROUP_VERTEX);
-  if (invert_vgroup_prop != nullptr) {
+  if (invert_vgroup_prop) {
     uiLayout *sub = uiLayoutRow(row, true);
     uiLayoutSetActive(sub, has_vertex_group);
     uiLayoutSetPropDecorate(sub, false);
-    uiItemR(sub, ptr, invert_vgroup_prop, UI_ITEM_NONE, "", ICON_ARROW_LEFTRIGHT);
+    uiItemR(sub, ptr, *invert_vgroup_prop, UI_ITEM_NONE, "", ICON_ARROW_LEFTRIGHT);
   }
 }
 
@@ -144,7 +147,7 @@ void modifier_grease_pencil_curve_header_draw(const bContext * /*C*/, Panel *pan
 
   PointerRNA *ptr = modifier_panel_get_property_pointers(panel, nullptr);
 
-  uiItemR(layout, ptr, "use_custom_curve", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, ptr, "use_custom_curve", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 }
 
 void modifier_grease_pencil_curve_panel_draw(const bContext * /*C*/, Panel *panel)
@@ -211,7 +214,7 @@ static void modifier_ops_extra_draw(bContext *C, uiLayout *layout, void *md_v)
   ModifierData *md = (ModifierData *)md_v;
 
   Object *ob = blender::ed::object::context_active_object(C);
-  PointerRNA ptr = RNA_pointer_create(&ob->id, &RNA_Modifier, md);
+  PointerRNA ptr = RNA_pointer_create_discrete(&ob->id, &RNA_Modifier, md);
   uiLayoutSetContextPointer(layout, "modifier", &ptr);
   uiLayoutSetOperatorContext(layout, WM_OP_INVOKE_DEFAULT);
 
@@ -304,19 +307,19 @@ static void modifier_ops_extra_draw(bContext *C, uiLayout *layout, void *md_v)
 
   uiItemS(layout);
 
-  uiItemR(layout, &ptr, "use_pin_to_last", UI_ITEM_NONE, nullptr, ICON_NONE);
+  uiItemR(layout, &ptr, "use_pin_to_last", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   if (md->type == eModifierType_Nodes) {
     uiItemS(layout);
     uiItemFullO(layout,
                 "OBJECT_OT_geometry_nodes_move_to_nodes",
-                nullptr,
+                std::nullopt,
                 ICON_NONE,
                 nullptr,
                 WM_OP_INVOKE_DEFAULT,
                 UI_ITEM_NONE,
                 &op_ptr);
-    uiItemR(layout, &ptr, "show_group_selector", UI_ITEM_NONE, nullptr, ICON_NONE);
+    uiItemR(layout, &ptr, "show_group_selector", UI_ITEM_NONE, std::nullopt, ICON_NONE);
   }
 }
 
@@ -479,7 +482,7 @@ static void modifier_panel_header(const bContext *C, Panel *panel)
 
 PanelType *modifier_panel_register(ARegionType *region_type, ModifierType type, PanelDrawFn draw)
 {
-  PanelType *panel_type = MEM_cnew<PanelType>(__func__);
+  PanelType *panel_type = MEM_callocN<PanelType>(__func__);
 
   BKE_modifier_type_panel_id(type, panel_type->idname);
   STRNCPY(panel_type->label, "");
@@ -511,7 +514,7 @@ PanelType *modifier_subpanel_register(ARegionType *region_type,
                                       PanelDrawFn draw,
                                       PanelType *parent)
 {
-  PanelType *panel_type = MEM_cnew<PanelType>(__func__);
+  PanelType *panel_type = MEM_callocN<PanelType>(__func__);
 
   BLI_assert(parent != nullptr);
   SNPRINTF(panel_type->idname, "%s_%s", parent->idname, name);

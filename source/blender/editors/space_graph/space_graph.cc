@@ -15,8 +15,10 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
 #include "BLI_math_color.h"
+#include "BLI_math_vector.h"
+#include "BLI_string.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
@@ -139,7 +141,7 @@ static void graph_init(wmWindowManager *wm, ScrArea *area)
 {
   SpaceGraph *sipo = (SpaceGraph *)area->spacedata.first;
 
-  /* init dopesheet data if non-existent (i.e. for old files) */
+  /* Init dope-sheet if non-existent (i.e. for old files). */
   if (sipo->ads == nullptr) {
     wmWindow *win = WM_window_find_by_area(wm, area);
     sipo->ads = static_cast<bDopeSheet *>(MEM_callocN(sizeof(bDopeSheet), "GraphEdit DopeSheet"));
@@ -538,14 +540,14 @@ static void graph_region_message_subscribe(const wmRegionMessageSubscribeParams 
     }
   }
 
-  /* All dopesheet filter settings, etc. affect the drawing of this editor,
+  /* All dope-sheet filter settings, etc. affect the drawing of this editor,
    * also same applies for all animation-related data-types that may appear here,
    * so just whitelist the entire structs for updates
    */
   {
     wmMsgParams_RNA msg_key_params = {{}};
     StructRNA *type_array[] = {
-        &RNA_DopeSheet, /* dopesheet filters */
+        &RNA_DopeSheet, /* dope-sheet filters */
 
         &RNA_ActionGroup, /* channel groups */
         &RNA_FCurve,      /* F-Curve */
@@ -832,7 +834,7 @@ static void graph_id_remap(ScrArea * /*area*/,
   }
 
   mappings.apply(reinterpret_cast<ID **>(&sgraph->ads->filter_grp), ID_REMAP_APPLY_DEFAULT);
-  mappings.apply(reinterpret_cast<ID **>(&sgraph->ads->source), ID_REMAP_APPLY_DEFAULT);
+  mappings.apply((&sgraph->ads->source), ID_REMAP_APPLY_DEFAULT);
 }
 
 static void graph_foreach_id(SpaceLink *space_link, LibraryForeachIDData *data)

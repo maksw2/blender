@@ -10,7 +10,6 @@
 
 #include "BLI_math_vector.h"
 #include "BLI_task.h"
-#include "BLI_utildefines.h"
 
 #include "BKE_customdata.hh"
 #include "BKE_mesh.hh"
@@ -32,7 +31,7 @@ namespace blender::bke::subdiv {
 
 #ifdef WITH_OPENSUBDIV
 
-static eOpenSubdivEvaluator opensubdiv_evalutor_from_subdiv_evaluator_type(
+static eOpenSubdivEvaluator opensubdiv_evaluator_from_subdiv_evaluator_type(
     eSubdivEvaluatorType evaluator_type)
 {
   switch (evaluator_type) {
@@ -67,7 +66,7 @@ bool eval_begin(Subdiv *subdiv,
   }
   if (subdiv->evaluator == nullptr) {
     eOpenSubdivEvaluator opensubdiv_evaluator_type =
-        opensubdiv_evalutor_from_subdiv_evaluator_type(evaluator_type);
+        opensubdiv_evaluator_from_subdiv_evaluator_type(evaluator_type);
     stats_begin(&subdiv->stats, SUBDIV_STATS_EVALUATOR_CREATE);
     subdiv->evaluator = openSubdiv_createEvaluatorFromTopologyRefiner(
         subdiv->topology_refiner, opensubdiv_evaluator_type, evaluator_cache);
@@ -155,8 +154,7 @@ static void set_face_varying_data_from_uv(Subdiv *subdiv,
 
   const int num_fvar_values = topology_refiner->base_level().GetNumFVarValues(layer_index);
   /* Use a temporary buffer so we do not upload UVs one at a time to the GPU. */
-  float(*buffer)[2] = static_cast<float(*)[2]>(
-      MEM_mallocN(sizeof(float[2]) * num_fvar_values, __func__));
+  float(*buffer)[2] = MEM_malloc_arrayN<float[2]>(size_t(num_fvar_values), __func__);
 
   FaceVaryingDataFromUVContext ctx;
   ctx.topology_refiner = topology_refiner;

@@ -2,6 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BKE_anonymous_attribute_id.hh"
 #include "BKE_bake_items.hh"
 #include "BKE_bake_items_serialize.hh"
 #include "BKE_curves.hh"
@@ -15,11 +16,12 @@
 
 #include "BLI_endian_defines.h"
 #include "BLI_endian_switch.h"
+#include "BLI_listbase.h"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_path_utils.hh"
+#include "BLI_string.h"
 
-#include "DNA_material_types.h"
-#include "DNA_modifier_types.h"
+#include "DNA_object_types.h"
 #include "DNA_volume_types.h"
 
 #include "RNA_access.hh"
@@ -606,7 +608,7 @@ static PointCloud *try_load_pointcloud(const DictionaryValue &io_geometry,
     return nullptr;
   }
   PointCloud *pointcloud = BKE_pointcloud_new_nomain(0);
-  CustomData_free_layer_named(&pointcloud->pdata, "position", 0);
+  CustomData_free_layer_named(&pointcloud->pdata, "position");
   pointcloud->totpoint = io_pointcloud->lookup_int("num_points").value_or(0);
 
   auto cancel = [&]() {
@@ -637,7 +639,7 @@ static std::optional<CurvesGeometry> try_load_curves_geometry(const DictionaryVa
   }
 
   CurvesGeometry curves;
-  CustomData_free_layer_named(&curves.point_data, "position", 0);
+  CustomData_free_layer_named(&curves.point_data, "position");
   curves.point_num = io_curves.lookup_int("num_points").value_or(0);
   curves.curve_num = io_curves.lookup_int("num_curves").value_or(0);
 
@@ -826,10 +828,10 @@ static Mesh *try_load_mesh(const DictionaryValue &io_geometry,
   }
 
   Mesh *mesh = BKE_mesh_new_nomain(0, 0, 0, 0);
-  CustomData_free_layer_named(&mesh->vert_data, "position", 0);
-  CustomData_free_layer_named(&mesh->edge_data, ".edge_verts", 0);
-  CustomData_free_layer_named(&mesh->corner_data, ".corner_vert", 0);
-  CustomData_free_layer_named(&mesh->corner_data, ".corner_edge", 0);
+  CustomData_free_layer_named(&mesh->vert_data, "position");
+  CustomData_free_layer_named(&mesh->edge_data, ".edge_verts");
+  CustomData_free_layer_named(&mesh->corner_data, ".corner_vert");
+  CustomData_free_layer_named(&mesh->corner_data, ".corner_edge");
   mesh->verts_num = io_mesh->lookup_int("num_vertices").value_or(0);
   mesh->edges_num = io_mesh->lookup_int("num_edges").value_or(0);
   mesh->faces_num = io_mesh->lookup_int("num_polygons").value_or(0);
@@ -853,6 +855,19 @@ static Mesh *try_load_mesh(const DictionaryValue &io_geometry,
                                       &mesh->runtime->face_offsets_sharing_info))
     {
       return cancel();
+    }
+  }
+
+  /* Create the vertex group name list, then later on when processing generic attributes, these
+   * names will be stored as vertex groups. */
+  if (const auto *io_attributes = io_mesh->lookup_array("vertex_group_names")) {
+    for (const std::shared_ptr<Value> &value : io_attributes->elements()) {
+      if (value->type() != io::serialize::eValueType::String) {
+        return cancel();
+      }
+      bDeformGroup *defgroup = MEM_callocN<bDeformGroup>(__func__);
+      STRNCPY(defgroup->name, value->as_string_value()->value().c_str());
+      BLI_addtail(&mesh->vertex_group_names, defgroup);
     }
   }
 
@@ -1107,6 +1122,13 @@ static std::shared_ptr<DictionaryValue> serialize_geometry_set(const GeometrySet
     auto io_materials = serialize_materials(mesh.runtime->bake_materials);
     io_mesh->append("materials", io_materials);
 
+    if (!BLI_listbase_is_empty(&mesh.vertex_group_names)) {
+      auto io_vertex_group_names = io_mesh->append_array("vertex_group_names");
+      LISTBASE_FOREACH (bDeformGroup *, defgroup, &mesh.vertex_group_names) {
+        io_vertex_group_names->append_str(defgroup->name);
+      }
+    }
+
     auto io_attributes = serialize_attributes(mesh.attributes(), blob_writer, blob_sharing, {});
     io_mesh->append("attributes", io_attributes);
   }
@@ -1294,7 +1316,7 @@ static std::shared_ptr<io::serialize::Value> serialize_primitive_value(
     }
     case CD_PROP_FLOAT4X4: {
       const float4x4 value = *static_cast<const float4x4 *>(value_ptr);
-      return serialize_float_array({value.base_ptr(), value.col_len * value.row_len});
+      return serialize_float_array({value.base_ptr(), float4x4::col_len * float4x4::row_len});
     }
     default:
       break;

@@ -12,9 +12,7 @@
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
 
-#include "GPU_batch.hh"
 #include "GPU_capabilities.hh"
-#include "GPU_shader.hh"
 #include "GPU_texture.hh"
 
 #include "gpu_backend.hh"
@@ -98,6 +96,8 @@ void FrameBuffer::attachment_set(GPUAttachmentType type, const GPUAttachment &ne
 
   GPUAttachment &attachment = attachments_[type];
 
+  set_color_attachment_bit(type, new_attachment.tex != nullptr);
+
   if (attachment.tex == new_attachment.tex && attachment.layer == new_attachment.layer &&
       attachment.mip == new_attachment.mip)
   {
@@ -125,6 +125,7 @@ void FrameBuffer::attachment_remove(GPUAttachmentType type)
 {
   attachments_[type] = GPU_ATTACHMENT_NONE;
   dirty_attachments_ = true;
+  set_color_attachment_bit(type, false);
 }
 
 void FrameBuffer::subpass_transition(const GPUAttachmentState depth_attachment_state,
@@ -145,6 +146,7 @@ void FrameBuffer::subpass_transition(const GPUAttachmentState depth_attachment_s
     GPUAttachmentType type = GPU_FB_COLOR_ATTACHMENT0 + i;
     if (this->attachments_[type].tex) {
       BLI_assert(i < color_attachment_states.size());
+      set_color_attachment_bit(type, color_attachment_states[i] == GPU_ATTACHMENT_WRITE);
     }
     else {
       BLI_assert(i >= color_attachment_states.size() ||
@@ -730,7 +732,7 @@ GPUOffScreen *GPU_offscreen_create(int width,
                                    eGPUTextureUsage usage,
                                    char err_out[256])
 {
-  GPUOffScreen *ofs = MEM_cnew<GPUOffScreen>(__func__);
+  GPUOffScreen *ofs = MEM_callocN<GPUOffScreen>(__func__);
 
   /* Sometimes areas can have 0 height or width and this will
    * create a 1D texture which we don't want. */

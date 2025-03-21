@@ -8,13 +8,13 @@
 
 #include "BKE_attribute.hh"
 #include "BKE_context.hh"
-#include "BKE_curves_utils.hh"
 #include "BKE_grease_pencil.hh"
 
 #include "DNA_scene_types.h"
 
 #include "DEG_depsgraph.hh"
 
+#include "ED_curves.hh"
 #include "ED_grease_pencil.hh"
 #include "RNA_access.hh"
 
@@ -311,9 +311,10 @@ void copy_curve_attributes(Span<PointsRange> ranges_selected, bke::CurvesGeometr
    */
 
   auto src_range = [&]() -> const PointsRange & {
-    auto it = std::find_if(ranges_selected.begin(),
-                           ranges_selected.end(),
-                           [](const PointsRange &range) { return range.belongs_to_active_layer; });
+    const auto *it = std::find_if(
+        ranges_selected.begin(), ranges_selected.end(), [](const PointsRange &range) {
+          return range.belongs_to_active_layer;
+        });
 
     return it != ranges_selected.end() ? *it : ranges_selected.first();
   }();
@@ -340,21 +341,15 @@ void copy_curve_attributes(Span<PointsRange> ranges_selected, bke::CurvesGeometr
  * Removes the selection state of all the affected CurvesGeometry, except the one
  * of the active layer. Points in the active layer do not get unselected
  */
-void clear_selection_attribute(Span<PointsRange> ranges_selected,
-                               const bke::AttrDomain selection_domain)
+void clear_selection_attribute(Span<PointsRange> ranges_selected)
 {
   for (const PointsRange &range : ranges_selected) {
     bke::CurvesGeometry &curves = *range.owning_curves;
     bke::MutableAttributeAccessor attributes = curves.attributes_for_write();
-    bke::SpanAttributeWriter<bool> selection = attributes.lookup_or_add_for_write_span<bool>(
-        ".selection", selection_domain);
-
-    const IndexMask mask = selection_domain == bke::AttrDomain::Point ?
-                               IndexMask{curves.points_num()} :
-                               IndexMask{curves.curves_num()};
-
-    masked_fill(selection.span, false, mask);
-    selection.finish();
+    if (bke::GSpanAttributeWriter selection = attributes.lookup_for_write_span(".selection")) {
+      ed::curves::fill_selection_false(selection.span);
+      selection.finish();
+    }
   }
 }
 
@@ -373,7 +368,7 @@ void remove_selected_points_in_active_layer(Span<PointsRange> ranges_selected,
     mask_content.extend(range_content);
   }
 
-  /* remove_points requires the the indices in the mask to be sorted */
+  /* remove_points requires the indices in the mask to be sorted */
   std::sort(mask_content.begin(), mask_content.end());
   IndexMask mask = IndexMask::from_indices(mask_content.as_span(), memory);
 
@@ -428,7 +423,7 @@ void append_strokes_from(bke::CurvesGeometry &&other, bke::CurvesGeometry &dst)
  * This operator builds a new stroke from the points/curves selected. It makes a copy of all the
  * selected points and joins them in a single stroke, which is added to the active layer.
  */
-int grease_pencil_join_selection_exec(bContext *C, wmOperator *op)
+wmOperatorStatus grease_pencil_join_selection_exec(bContext *C, wmOperator *op)
 {
   using namespace bke::greasepencil;
 
@@ -473,10 +468,10 @@ int grease_pencil_join_selection_exec(bContext *C, wmOperator *op)
   const PointsRange working_range = copy_point_attributes(ranges_selected, tmp_curves);
   copy_curve_attributes(ranges_selected, tmp_curves);
 
-  clear_selection_attribute(ranges_selected, selection_domain);
+  clear_selection_attribute(ranges_selected);
 
   Array<PointsRange> working_range_collection = {working_range};
-  clear_selection_attribute(working_range_collection, selection_domain);
+  clear_selection_attribute(working_range_collection);
 
   bke::CurvesGeometry &dst_curves = dst_drawing->strokes_for_write();
   if (active_layer_behavior == ActiveLayerBehavior::JoinSelection) {
@@ -484,6 +479,17 @@ int grease_pencil_join_selection_exec(bContext *C, wmOperator *op)
   }
 
   append_strokes_from(std::move(tmp_curves), dst_curves);
+
+  bke::GSpanAttributeWriter selection = ed::curves::ensure_selection_attribute(
+      dst_curves, selection_domain, CD_PROP_BOOL);
+
+  if (selection_domain == bke::AttrDomain::Curve) {
+    ed::curves::fill_selection_true(selection.span.take_back(tmp_curves.curves_num()));
+  }
+  else {
+    ed::curves::fill_selection_true(selection.span.take_back(tmp_curves.points_num()));
+  }
+  selection.finish();
 
   dst_curves.update_curve_types();
   dst_curves.tag_topology_changed();
